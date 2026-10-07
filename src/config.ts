@@ -18,8 +18,8 @@ const envSchema = z.object({
   MEDUSA_PRODUCT_DIR: optionalString,
   TWENTY_PRODUCT_DIR: optionalString,
 
-  CAL_BASE_URL: z.string().trim().url().default("http://localhost:3000"),
-  CAL_API_BASE_URL: z.string().trim().url().default("http://localhost:5555"),
+  CAL_BASE_URL: z.string().trim().url().default("http://127.0.0.1:3000"),
+  CAL_API_BASE_URL: z.string().trim().url().default("http://127.0.0.1:5555"),
   CAL_DB_URL: z.string().trim().min(1).default("postgresql://postgres:@localhost:5450/calendso"),
   CAL_WEBHOOK_SECRET: optionalString,
   CAL_API_KEY: optionalString,
