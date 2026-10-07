@@ -49,8 +49,11 @@ async function getOnce(url: string, headers?: Record<string, string>): Promise<H
 export async function pollHealth(url: string, options: PollHealthOptions = {}): Promise<HealthStatus> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const deadline = Date.now() + timeoutMs;
   let last = await getOnce(url, options.headers);
+  if (timeoutMs <= 0) {
+    return last;
+  }
+  const deadline = Date.now() + timeoutMs;
 
   while (!last.ok && Date.now() < deadline) {
     const remaining = deadline - Date.now();

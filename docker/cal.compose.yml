@@ -1,0 +1,15 @@
+# Harness overlay for Cal.diy Postgres.
+# Base file: <cal>/packages/prisma/docker-compose.yml
+# Host port 5450 is the fork's documented local port (avoids default 5432).
+#
+#   docker compose -p qa-harness-cal \
+#     -f <cal>/packages/prisma/docker-compose.yml \
+#     -f docker/cal.compose.yml \
+#     --project-directory <cal>/packages/prisma \
+#     up -d
+name: qa-harness-cal
+
+services:
+  postgres:
+    ports:
+      - "5450:5432"
