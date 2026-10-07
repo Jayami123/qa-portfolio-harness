@@ -115,26 +115,25 @@ Later consumer pin (do not tag until live smoke passes):
 
 ## How to start Cal and run smoke
 
-Cal `up()` only starts **Postgres** (the web + API v2 processes are too heavy to spawn from this adapter).
+Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). On Windows that is `next dev --webpack` (Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`). Elsewhere it is `yarn dev`. `npm run smoke -- cal` calls `up()` first. Override with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
 
 ```powershell
 cd D:\Jayami\Portfolio\qa-portfolio-harness
 copy .env.example .env
 npm i
 npm run build
-
-node scripts/up.mjs cal
+npm run smoke -- cal
 ```
 
-Then, in **another** terminal, from the Cal fork:
+First-time Cal fork setup (once):
 
 ```powershell
 cd D:\Jayami\Portfolio\products\cal
 yarn
 # copy .env.example → .env; set NEXTAUTH_SECRET and CALENDSO_ENCRYPTION_KEY
-yarn dx          # migrate + seed (or yarn db-seed if Postgres is already up)
-yarn dev         # http://localhost:3000
 ```
+
+Docker Desktop must be running. Set `CAL_SKIP_WEB_START=1` to keep `up()` Postgres-only.
 
 Optional API v2:
 
@@ -152,7 +151,7 @@ cd D:\Jayami\Portfolio\qa-portfolio-harness
 npm run smoke -- cal
 ```
 
-Live smoke: `waitHealthy` → `seed` → `authenticate` (requires `CAL_API_KEY`) → **Bearer probe** (`GET /api/v2/me`, not public `/health`) → `SELECT 1`.
+Live smoke: `waitHealthy` → `seed` → `authenticate` (requires `CAL_API_KEY` or the key printed by `yarn db-seed`) → **auth probe** (`GET` API v2 `/me` if that process is up; otherwise the hashed key must exist in `"ApiKey"`) → `SELECT 1`.
 
 If the app is not running, smoke exits 1 with those same start steps. Config-only check:
 
@@ -179,10 +178,10 @@ Live smoke: `waitHealthy` → `seed` → `authenticate` (token truncated in logs
 Honest gaps:
 
 - **Do not tag `v0.1.0` until live `npm run smoke -- cal` is green on a running app, and this work is merged to `main`.**
-- **Cal** `up()` starts Postgres only. You must run `yarn dx` / `yarn dev` (and API v2 for the Bearer probe) yourself.
+- **Cal** `up()` starts Postgres and will spawn the web process unless the app is already healthy or `CAL_SKIP_WEB_START=1`. Windows defaults to webpack (`CAL_WEB_BUNDLER`).
 - **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
 - **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
-- **Cal** `proveAuth()` calls `GET $CAL_API_BASE_URL/api/v2/me` (then `/me`). **TODO(verify)** the exact `/me` path on this fork; override with `CAL_AUTH_PROBE_URL`.
+- **Cal** `proveAuth()` tries `GET $CAL_API_BASE_URL/api/v2/me` (API v2 on 5555 is optional). If that process is down, it proves the hashed `CAL_API_KEY` exists in `"ApiKey"`. Override the HTTP path with `CAL_AUTH_PROBE_URL`.
 - **Documenso** web must be started with `PORT=3001`. First API token cannot be minted without a logged-in session (`tRPC api-token-router`). Set `DOCUMENSO_API_TOKEN` after creating one in Settings → API tokens. **TODO(verify)** if a later seed script creates a token.
 - **Medusa** `up()` starts validation Postgres/Redis/MinIO only. MinIO host ports are remapped to **9011/9012** so they do not collide with Documenso. **TODO(verify)** which store starter Jayami runs (`medusa develop` at :9000). `seed()` still throws — P1/P2 need that starter decision before Medusa journeys.
 - **Medusa** admin JWT: `POST /auth/user/emailpass`. Store APIs also need `x-publishable-api-key`.
