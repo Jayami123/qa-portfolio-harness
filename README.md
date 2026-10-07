@@ -89,7 +89,21 @@ const pool = createPgClient(adapter.dbUrl); // read-only intent; no migrations
 
 `ProductId` is `'cal' | 'documenso' | 'medusa' | 'twenty'`.
 
-## Usage from P1 (git dependency)
+## Usage from P1
+
+**Until a GitHub tag exists** (after live Cal smoke is green and this branch is on `main`), use the local package:
+
+```json
+{
+  "dependencies": {
+    "qa-portfolio-harness": "file:../qa-portfolio-harness"
+  }
+}
+```
+
+Build this repo first (`npm i && npm run build`) so `dist/` exists. TypeScript lives in `devDependencies`; `prepare` compiles when you install **in this repo**.
+
+Later consumer pin (do not tag until live smoke passes):
 
 ```json
 {
@@ -98,8 +112,6 @@ const pool = createPgClient(adapter.dbUrl); // read-only intent; no migrations
   }
 }
 ```
-
-Install compiles `dist/` via the package `prepare` script (`tsc`).
 
 ## How to start Cal and run smoke
 
@@ -131,12 +143,16 @@ cd D:\Jayami\Portfolio\products\cal\apps\api\v2
 yarn dev         # http://localhost:5555/health → OK
 ```
 
+Copy the `Created seeded API Key: cal_…` line from `yarn db-seed` into harness `.env` as `CAL_API_KEY`. Do not rely on a hardcoded key.
+
 Then:
 
 ```powershell
 cd D:\Jayami\Portfolio\qa-portfolio-harness
 npm run smoke -- cal
 ```
+
+Live smoke: `waitHealthy` → `seed` → `authenticate` (requires `CAL_API_KEY`) → **Bearer probe** (`GET /api/v2/me`, not public `/health`) → `SELECT 1`.
 
 If the app is not running, smoke exits 1 with those same start steps. Config-only check:
 
@@ -156,17 +172,19 @@ npm run smoke -- cal --dry-run
 node scripts/down.mjs cal
 ```
 
-Live smoke: `waitHealthy` → `seed` → `authenticate` (token truncated in logs) → `SELECT 1` via the read-only pg helper.
+Live smoke: `waitHealthy` → `seed` → `authenticate` (token truncated in logs) → `proveAuth` → `SELECT 1` via the read-only pg helper.
 
 ## Limitations / TODOs
 
-Honest gaps for Week 1:
+Honest gaps:
 
-- **Cal** `up()` starts Postgres only. You must run `yarn dx` / `yarn dev` (and API v2 if needed) yourself.
-- **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health`.
-- **Cal** `authenticate()` uses the API key created by the fork’s `scripts/seed.ts` unless `CAL_API_KEY` is set.
+- **Do not tag `v0.1.0` until live `npm run smoke -- cal` is green on a running app, and this work is merged to `main`.**
+- **Cal** `up()` starts Postgres only. You must run `yarn dx` / `yarn dev` (and API v2 for the Bearer probe) yourself.
+- **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
+- **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
+- **Cal** `proveAuth()` calls `GET $CAL_API_BASE_URL/api/v2/me` (then `/me`). **TODO(verify)** the exact `/me` path on this fork; override with `CAL_AUTH_PROBE_URL`.
 - **Documenso** web must be started with `PORT=3001`. First API token cannot be minted without a logged-in session (`tRPC api-token-router`). Set `DOCUMENSO_API_TOKEN` after creating one in Settings → API tokens. **TODO(verify)** if a later seed script creates a token.
-- **Medusa** `up()` starts validation Postgres/Redis/MinIO only. MinIO host ports are remapped to **9011/9012** so they do not collide with Documenso. **TODO(verify)** which store starter Jayami runs (`medusa develop` at :9000). `seed()` throws until that is known.
+- **Medusa** `up()` starts validation Postgres/Redis/MinIO only. MinIO host ports are remapped to **9011/9012** so they do not collide with Documenso. **TODO(verify)** which store starter Jayami runs (`medusa develop` at :9000). `seed()` still throws — P1/P2 need that starter decision before Medusa journeys.
 - **Medusa** admin JWT: `POST /auth/user/emailpass`. Store APIs also need `x-publishable-api-key`.
 - **Twenty** uses image `twentycrm/twenty:2.44.0` (fork validation pin). App is published on **3002**. `ENCRYPTION_KEY` must already exist in `products/twenty-CRM/packages/twenty-docker/.env` — this package will not invent secrets. Prefer the fork’s `scripts/validation/anchor-b-up.ps1` if that env is not set.
 - **Twenty** sign-in posts to `/metadata` (`getLoginTokenFromCredentials`). **TODO(verify)** whether `origin` must be a workspace subdomain (e.g. apple.localhost) in some configs.
@@ -175,4 +193,4 @@ Honest gaps for Week 1:
 
 ## License
 
-Private portfolio package. Not published to npm; GitHub tag `v0.1.0` is the install target.
+Private portfolio package. Not published to npm. Tag `v0.1.0` from `main` only after live Cal smoke is green.

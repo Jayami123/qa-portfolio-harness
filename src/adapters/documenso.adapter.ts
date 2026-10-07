@@ -111,4 +111,18 @@ Then create an API token in Settings → API tokens and set DOCUMENSO_API_TOKEN 
       raw: { source: "DOCUMENSO_API_TOKEN" },
     };
   }
+
+  async proveAuth(session: AuthSession): Promise<void> {
+    const url = `${this.cfg.baseUrl}/api/v1/documents`;
+    const response = await fetch(url, {
+      headers: { Authorization: session.authorizationHeader, Accept: "application/json" },
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`Documenso auth probe ${url} returned HTTP ${response.status}. Check DOCUMENSO_API_TOKEN.`);
+    }
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Documenso auth probe ${url} returned HTTP ${response.status}.`);
+    }
+    console.log(`Documenso auth probe: ${url} HTTP ${response.status}`);
+  }
 }

@@ -74,6 +74,9 @@ try {
     storageStatePath: session.storageStatePath,
   });
 
+  console.log("→ proveAuth (Bearer against an authenticated route, not public /health)");
+  await adapter.proveAuth(session);
+
   console.log("→ postgres SELECT 1");
   const pool = createPgClient(adapter.dbUrl);
   try {

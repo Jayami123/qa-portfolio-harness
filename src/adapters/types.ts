@@ -12,4 +12,9 @@ export interface ProductAdapter {
   waitHealthy(timeoutMs?: number): Promise<void>;
   seed(): Promise<SeedResult>;
   authenticate(): Promise<AuthSession>;
+  /**
+   * Hit a product endpoint that requires this session (not a public /health).
+   * No-op when the product has no probe yet.
+   */
+  proveAuth(session: AuthSession): Promise<void>;
 }

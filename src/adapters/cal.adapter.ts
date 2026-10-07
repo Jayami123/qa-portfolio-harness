@@ -9,14 +9,6 @@ import { BaseAdapter } from "./base.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 
-/**
- * Key material created by the fork's `packages/prisma` seed (`scripts/seed.ts`
- * `ensureAcmeOwnerHasApiKeySeeded`). Not invented here — only replayed after
- * `yarn db-seed`. Override with CAL_API_KEY if you mint a different key.
- */
-const CAL_SEEDED_API_KEY_BODY = "0123456789abcdef0123456789abcdef";
-const CAL_SEEDED_API_KEY_PREFIX = "cal_";
-
 export class CalAdapter extends BaseAdapter<CalConfig> {
   readonly id = "cal" as const;
 
@@ -116,29 +108,79 @@ Then run: npm run smoke -- cal
         { email: "admin@example.com", role: "admin" },
         { email: "onboarding@example.com", role: "onboarding" },
       ],
-      notes: "Invoked the fork's `yarn db-seed` (packages/prisma seed-basic → scripts/seed.ts).",
+      notes:
+        "Invoked the fork's `yarn db-seed`. Copy the printed `Created seeded API Key: cal_…` line into harness CAL_API_KEY. Re-seed will skip if the key already exists, so the env value is the source of truth.",
     };
   }
 
   async authenticate(): Promise<AuthSession> {
-    const prefix = process.env.API_KEY_PREFIX ?? CAL_SEEDED_API_KEY_PREFIX;
-    const key = this.cfg.apiKey ?? `${prefix}${CAL_SEEDED_API_KEY_BODY}`;
-
-    if (!this.cfg.apiKey) {
-      console.log(
-        "Cal authenticate(): using the API key created by the fork seed (scripts/seed.ts). Set CAL_API_KEY to override.",
+    const key = this.cfg.apiKey;
+    if (!key) {
+      throw new Error(
+        "Cal authenticate() requires CAL_API_KEY in the harness .env. " +
+          "Run `yarn db-seed` in the Cal fork, copy the printed `cal_…` key, and paste it here. " +
+          "This adapter does not hardcode the seed key (it changes if seed.ts changes).",
       );
     }
 
     return {
       product: this.id,
       baseUrl: this.cfg.apiBaseUrl,
-      authorizationHeader: `Bearer ${key}`,
+      authorizationHeader: key.startsWith("Bearer ") ? key : `Bearer ${key}`,
       raw: {
         webBaseUrl: this.cfg.baseUrl,
         apiBaseUrl: this.cfg.apiBaseUrl,
-        source: this.cfg.apiKey ? "CAL_API_KEY" : "fork-seed-scripts/seed.ts",
+        source: "CAL_API_KEY",
       },
     };
+  }
+
+  /**
+   * Prove the Bearer token against an authenticated API v2 route.
+   * Public GET /health is not used — it does not require a key.
+   */
+  async proveAuth(session: AuthSession): Promise<void> {
+    const probes = [
+      process.env.CAL_AUTH_PROBE_URL,
+      `${this.cfg.apiBaseUrl}/api/v2/me`,
+      `${this.cfg.apiBaseUrl}/me`,
+    ].filter((url): url is string => Boolean(url));
+
+    let lastError = "no probe attempted";
+    for (const url of probes) {
+      try {
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: session.authorizationHeader,
+          },
+        });
+        if (response.status === 401 || response.status === 403) {
+          throw new Error(
+            `Cal auth probe ${url} returned HTTP ${response.status}. CAL_API_KEY is missing, expired, or not a valid API v2 key.`,
+          );
+        }
+        if (response.status === 404) {
+          lastError = `HTTP 404 at ${url}`;
+          continue;
+        }
+        if (response.status >= 500) {
+          lastError = `HTTP ${response.status} at ${url}`;
+          continue;
+        }
+        console.log(`Cal auth probe ok: ${url} HTTP ${response.status}`);
+        return;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("CAL_API_KEY")) {
+          throw error;
+        }
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    throw new Error(
+      `Cal auth probe failed (${lastError}). Start API v2 (\`cd apps/api/v2 && yarn dev\`) and set CAL_AUTH_PROBE_URL if /api/v2/me is not the route. TODO(verify): confirm /me path on this fork.`,
+    );
   }
 }

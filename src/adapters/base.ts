@@ -35,6 +35,10 @@ export abstract class BaseAdapter<C extends ProductConfig> implements ProductAda
 
   abstract seed(): Promise<SeedResult>;
   abstract authenticate(): Promise<AuthSession>;
+
+  async proveAuth(_session: AuthSession): Promise<void> {
+    // Optional per product. Cal overrides this.
+  }
 }
 
 export class UnimplementedAdapter<C extends ProductConfig> extends BaseAdapter<C> {
