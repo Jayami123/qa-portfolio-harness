@@ -30,13 +30,11 @@
   },
   "dependencies": {
     "@faker-js/faker": "^9.6.0",
-    "dotenv": "^16.4.7",
-    "pg": "^8.14.1",
-    "zod": "^3.24.2"
-  },
-  "devDependencies": {
     "@types/node": "^22.13.10",
     "@types/pg": "^8.11.11",
-    "typescript": "^5.8.2"
+    "dotenv": "^16.4.7",
+    "pg": "^8.14.1",
+    "typescript": "^5.8.2",
+    "zod": "^3.24.2"
   }
 }
