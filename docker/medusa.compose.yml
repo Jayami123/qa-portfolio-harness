@@ -1,0 +1,9 @@
+# Overlay for medusa/scripts/portfolio-validation/docker-compose.yml
+# Remap MinIO host ports so they do not collide with Documenso (9001/9002).
+name: qa-harness-medusa
+
+services:
+  minio:
+    ports: !override
+      - "9011:9000"
+      - "9012:9001"
