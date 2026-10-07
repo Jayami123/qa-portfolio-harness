@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+*.log
+npm-debug.log*
+playwright-report
+test-results
+blob-report
+.auth/
+**/storageState*.json
+**/*.auth.json
+*.har
+.DS_Store
+Thumbs.db

@@ -1,0 +1,4 @@
+# Overlay for Documenso docker/development/compose.yml
+# Postgres stays on 54320 (already unique). Web app is NOT in this compose —
+# start it with PORT=3001 so it does not collide with Cal on 3000.
+name: qa-harness-documenso
