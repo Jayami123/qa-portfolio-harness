@@ -24,6 +24,8 @@
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
+    "up": "node scripts/up.mjs",
+    "down": "node scripts/down.mjs",
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
