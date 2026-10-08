@@ -15,6 +15,23 @@ import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
+const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
+const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_NEXT_BUILD_TIMEOUT_MS = 45 * 60_000;
+const MIN_NEXT_BUILD_TIMEOUT_MS = 120_000;
+const HARNESS_BUILD_MARKER = "harness-build.json";
+const TRPC_APP_ROUTER_RELATIVE = path.join(
+  "packages",
+  "trpc",
+  "types",
+  "server",
+  "routers",
+  "_app.d.ts",
+);
+
+interface HarnessBuildRecord {
+  readonly gitSha: string;
+}
 
 export class CalAdapter extends BaseAdapter<CalConfig> {
   readonly id = "cal" as const;
@@ -75,27 +92,147 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     };
   }
 
+  private nextDir(): string {
+    return path.join(this.productRoot, "apps", "web", ".next");
+  }
+
+  private prodMarkerPath(): string {
+    return path.join(this.nextDir(), "required-server-files.json");
+  }
+
+  private harnessBuildMarkerPath(): string {
+    return path.join(this.nextDir(), HARNESS_BUILD_MARKER);
+  }
+
+  private trpcAppRouterDts(): string {
+    return path.join(this.productRoot, TRPC_APP_ROUTER_RELATIVE);
+  }
+
+  private nextBuildTimeoutMs(): number {
+    const requested = process.env.CAL_WEB_BUILD_MS ? Number(process.env.CAL_WEB_BUILD_MS) : DEFAULT_NEXT_BUILD_TIMEOUT_MS;
+    return Number.isFinite(requested) && requested >= MIN_NEXT_BUILD_TIMEOUT_MS
+      ? requested
+      : DEFAULT_NEXT_BUILD_TIMEOUT_MS;
+  }
+
+  private currentProductGitSha(): string | undefined {
+    try {
+      const sha = execSync("git rev-parse HEAD", {
+        cwd: this.productRoot,
+        encoding: "utf8",
+      }).trim();
+      return sha.length > 0 ? sha : undefined;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.log(`Cal product git HEAD could not be read (${detail}); rebuilding.`);
+      return undefined;
+    }
+  }
+
+  private readHarnessBuildGitSha(): string | undefined {
+    const file = this.harnessBuildMarkerPath();
+    if (!fs.existsSync(file)) {
+      return undefined;
+    }
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "gitSha" in parsed &&
+        typeof parsed.gitSha === "string" &&
+        parsed.gitSha.trim().length > 0
+      ) {
+        return parsed.gitSha.trim();
+      }
+      console.log("Cal harness-build.json is missing a gitSha; rebuilding.");
+      return undefined;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.log(`Cal harness-build.json is unreadable (${detail}); rebuilding.`);
+      return undefined;
+    }
+  }
+
+  private writeHarnessBuildMarker(gitSha: string): void {
+    const dir = this.nextDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const record: HarnessBuildRecord = { gitSha };
+    fs.writeFileSync(this.harnessBuildMarkerPath(), `${JSON.stringify(record)}\n`, "utf8");
+  }
+
+  private shouldSkipProdBuild(): boolean {
+    if (process.env.CAL_WEB_REBUILD === "1") {
+      console.log("CAL_WEB_REBUILD=1; rebuilding Cal web.");
+      return false;
+    }
+    if (!fs.existsSync(this.prodMarkerPath())) {
+      console.log("Cal production .next marker missing; running next build.");
+      return false;
+    }
+    const recorded = this.readHarnessBuildGitSha();
+    const current = this.currentProductGitSha();
+    if (recorded === undefined) {
+      console.log("Cal harness-build.json gitSha missing; rebuilding.");
+      return false;
+    }
+    if (current === undefined) {
+      return false;
+    }
+    if (recorded !== current) {
+      console.log(`Cal .next is for ${recorded}; HEAD is ${current}; rebuilding.`);
+      return false;
+    }
+    console.log(
+      `Cal production .next matches HEAD ${current}; skipping next build (set CAL_WEB_REBUILD=1 to rebuild).`,
+    );
+    return true;
+  }
+
+  /**
+   * packages/trpc/react/trpc.ts imports AppRouter from ../types/server/routers/_app,
+   * which is gitignored output of @calcom/trpc#build. turbo's @calcom/web#build gets
+   * it via ^build; a direct `next build` does not.
+   */
+  private async generateTrpcTypes(yarn: string): Promise<void> {
+    const expected = this.trpcAppRouterDts();
+    try {
+      console.log(`Generating Cal tRPC types (turbo @calcom/trpc, up to ${String(TRPC_BUILD_TIMEOUT_MS)}ms)…`);
+      await run(yarn, ["turbo", "run", "build", "--filter=@calcom/trpc"], {
+        cwd: this.productRoot,
+        timeoutMs: TRPC_BUILD_TIMEOUT_MS,
+        env: this.nodeHeapEnv(),
+      });
+    } catch (error) {
+      throw new Error(`Cal tRPC types were not generated (expected ${expected})`, { cause: error });
+    }
+    if (!fs.existsSync(expected)) {
+      throw new Error(`Cal tRPC types were not generated (expected ${expected})`);
+    }
+  }
+
   private async ensureProdBuild(yarn: string): Promise<void> {
-    const prodMarker = path.join(this.productRoot, "apps", "web", ".next", "required-server-files.json");
-    const rebuild = process.env.CAL_WEB_REBUILD === "1";
-    if (!rebuild && fs.existsSync(prodMarker)) {
-      console.log(`Cal production .next exists; skipping next build (set CAL_WEB_REBUILD=1 to rebuild).`);
+    if (this.shouldSkipProdBuild()) {
       return;
     }
     console.log("Preparing Cal static assets (copy-app-store-static)…");
     await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
       cwd: this.productRoot,
-      timeoutMs: 3 * 60_000,
+      timeoutMs: COPY_STATIC_TIMEOUT_MS,
       env: this.nodeHeapEnv(),
     });
-    const requested = process.env.CAL_WEB_BUILD_MS ? Number(process.env.CAL_WEB_BUILD_MS) : 45 * 60_000;
-    const buildWait = Number.isFinite(requested) && requested >= 120_000 ? requested : 45 * 60_000;
-    console.log(`Building Cal web (next build, up to ${buildWait}ms)…`);
+    await this.generateTrpcTypes(yarn);
+    const buildWait = this.nextBuildTimeoutMs();
+    console.log(`Building Cal web (next build, up to ${String(buildWait)}ms)…`);
     await run(yarn, ["workspace", "@calcom/web", "exec", "next", "build"], {
       cwd: this.productRoot,
       timeoutMs: buildWait,
       env: this.nodeHeapEnv(),
     });
+    const gitSha = this.currentProductGitSha();
+    if (gitSha !== undefined) {
+      this.writeHarnessBuildMarker(gitSha);
+    }
   }
 
   private webListen(): { host: string; port: string } {
