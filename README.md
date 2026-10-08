@@ -115,7 +115,11 @@ Consumer pin:
 
 ## How to start Cal and run smoke
 
-Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). Default is **`next build` then `next start`** (`CAL_WEB_MODE=prod`). Set `CAL_WEB_MODE=dev` for next-dev (Windows: `next dev --webpack`; Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`). Skip a rebuild when `apps/web/.next/required-server-files.json` exists (a real `next build`, not a leftover `next-dev` cache) unless `CAL_WEB_REBUILD=1`. `npm run smoke -- cal` calls `up()` first. Override the dev bundler with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
+Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). Default is **`next build` then `next start`** (`CAL_WEB_MODE=prod`). Set `CAL_WEB_MODE=dev` for next-dev (Windows: `next dev --webpack`; Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`).
+
+Before `next build`, the adapter runs `yarn turbo run build --filter=@calcom/trpc` and checks that `packages/trpc/types/server/routers/_app.d.ts` exists. That file is gitignored output of `@calcom/trpc#build`; `packages/trpc/react/trpc.ts` imports `AppRouter` from it. Turbo’s `@calcom/web#build` graph gets it via `^build`; a direct `next build` does not.
+
+Skip a rebuild only when `apps/web/.next/required-server-files.json` exists **and** `apps/web/.next/harness-build.json` records the same `gitSha` as `git rev-parse HEAD` in the Cal product root. Otherwise the adapter logs why and rebuilds. Force a rebuild with `CAL_WEB_REBUILD=1`. `npm run smoke -- cal` calls `up()` first. Override the dev bundler with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
 
 ```powershell
 cd D:\Jayami\Portfolio\qa-portfolio-harness
@@ -177,8 +181,8 @@ Live smoke: `waitHealthy` → `seed` → `authenticate` (token truncated in logs
 
 Honest gaps:
 
-- Tag `v0.2.0` from `main` after this production-start work is merged.
-- **Cal** `up()` starts Postgres and will spawn the web process unless the app is already healthy or `CAL_SKIP_WEB_START=1`. Default web mode is `next start` after `next build`. `CAL_WEB_MODE=dev` keeps next-dev (Windows webpack via `CAL_WEB_BUNDLER`).
+- Tag `v0.2.1` from `main` after the tRPC types / commit-aware skip work is merged (do not tag before the merge).
+- **Cal** `up()` starts Postgres and will spawn the web process unless the app is already healthy or `CAL_SKIP_WEB_START=1`. Default web mode is `next start` after `next build` (tRPC types first; skip only when `.next` matches product HEAD). `CAL_WEB_MODE=dev` keeps next-dev (Windows webpack via `CAL_WEB_BUNDLER`).
 - **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
 - **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
 - **Cal** `proveAuth()` tries `GET $CAL_API_BASE_URL/api/v2/me` (API v2 on 5555 is optional). If that process is down, it proves the hashed `CAL_API_KEY` exists in `"ApiKey"`. Override the HTTP path with `CAL_AUTH_PROBE_URL`.
@@ -192,4 +196,4 @@ Honest gaps:
 
 ## License
 
-Private portfolio package. Not published to npm. Tag `v0.2.0` from `main` after the production-start work is merged.
+Private portfolio package. Not published to npm. Tag `v0.2.1` from `main` after the tRPC types / commit-aware skip work is merged.
