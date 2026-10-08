@@ -3,7 +3,9 @@
 ## v0.2.1 — 2026-10-08
 
 - Generate Cal tRPC types with `yarn turbo run build --filter=@calcom/trpc` before `next build`, then require `packages/trpc/types/server/routers/_app.d.ts`.
-- Skip Cal `next build` only when `apps/web/.next/required-server-files.json` exists and `harness-build.json` `gitSha` matches product `HEAD`. `CAL_WEB_REBUILD=1` still forces a rebuild.
+- Skip Cal `next build` only when `apps/web/.next/required-server-files.json` exists and `harness-build.json` `gitSha` matches product `HEAD`. Uncommitted Cal working-tree edits are not detected; use `CAL_WEB_REBUILD=1` after local Cal edits.
+- `CAL_TRPC_BUILD_MS` overrides the tRPC turbo timeout (default 600000, min 120000).
+- Add `npm run typecheck` (`tsc --noEmit`).
 
 ## v0.2.0 — 2026-10-08
 
