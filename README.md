@@ -115,7 +115,7 @@ Consumer pin:
 
 ## How to start Cal and run smoke
 
-Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). Default is **`next build` then `next start`** (`CAL_WEB_MODE=prod`). Set `CAL_WEB_MODE=dev` for next-dev (Windows: `next dev --webpack`; Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`). Skip a rebuild when `apps/web/.next` exists unless `CAL_WEB_REBUILD=1`. `npm run smoke -- cal` calls `up()` first. Override the dev bundler with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
+Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). Default is **`next build` then `next start`** (`CAL_WEB_MODE=prod`). Set `CAL_WEB_MODE=dev` for next-dev (Windows: `next dev --webpack`; Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`). Skip a rebuild when `apps/web/.next/required-server-files.json` exists (a real `next build`, not a leftover `next-dev` cache) unless `CAL_WEB_REBUILD=1`. `npm run smoke -- cal` calls `up()` first. Override the dev bundler with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
 
 ```powershell
 cd D:\Jayami\Portfolio\qa-portfolio-harness

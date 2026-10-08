@@ -76,10 +76,10 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   }
 
   private async ensureProdBuild(yarn: string): Promise<void> {
-    const nextDir = path.join(this.productRoot, "apps", "web", ".next");
+    const prodMarker = path.join(this.productRoot, "apps", "web", ".next", "required-server-files.json");
     const rebuild = process.env.CAL_WEB_REBUILD === "1";
-    if (!rebuild && fs.existsSync(nextDir)) {
-      console.log(`Cal .next exists at ${nextDir}; skipping next build (set CAL_WEB_REBUILD=1 to rebuild).`);
+    if (!rebuild && fs.existsSync(prodMarker)) {
+      console.log(`Cal production .next exists; skipping next build (set CAL_WEB_REBUILD=1 to rebuild).`);
       return;
     }
     console.log("Preparing Cal static assets (copy-app-store-static)…");
