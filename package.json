@@ -1,6 +1,6 @@
 ﻿{
   "name": "qa-portfolio-harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Shared TypeScript harness to start, health-check, seed, and authenticate portfolio products (Cal, Documenso, Medusa, Twenty).",

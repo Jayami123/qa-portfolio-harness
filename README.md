@@ -103,19 +103,19 @@ const pool = createPgClient(adapter.dbUrl); // read-only intent; no migrations
 
 Build this repo first (`npm i && npm run build`) so `dist/` exists. TypeScript lives in `devDependencies`; `prepare` compiles when you install **in this repo**.
 
-Later consumer pin (do not tag until live smoke passes):
+Consumer pin:
 
 ```json
 {
   "dependencies": {
-    "qa-portfolio-harness": "github:Jayami123/qa-portfolio-harness#v0.1.0"
+    "qa-portfolio-harness": "github:Jayami123/qa-portfolio-harness#v0.2.0"
   }
 }
 ```
 
 ## How to start Cal and run smoke
 
-Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). On Windows that is `next dev --webpack` (Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`). Elsewhere it is `yarn dev`. `npm run smoke -- cal` calls `up()` first. Override with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
+Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). Default is **`next build` then `next start`** (`CAL_WEB_MODE=prod`). Set `CAL_WEB_MODE=dev` for next-dev (Windows: `next dev --webpack`; Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`). Skip a rebuild when `apps/web/.next/required-server-files.json` exists (a real `next build`, not a leftover `next-dev` cache) unless `CAL_WEB_REBUILD=1`. `npm run smoke -- cal` calls `up()` first. Override the dev bundler with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
 
 ```powershell
 cd D:\Jayami\Portfolio\qa-portfolio-harness
@@ -177,8 +177,8 @@ Live smoke: `waitHealthy` → `seed` → `authenticate` (token truncated in logs
 
 Honest gaps:
 
-- **Do not tag `v0.1.0` until live `npm run smoke -- cal` is green on a running app, and this work is merged to `main`.**
-- **Cal** `up()` starts Postgres and will spawn the web process unless the app is already healthy or `CAL_SKIP_WEB_START=1`. Windows defaults to webpack (`CAL_WEB_BUNDLER`).
+- Tag `v0.2.0` from `main` after this production-start work is merged.
+- **Cal** `up()` starts Postgres and will spawn the web process unless the app is already healthy or `CAL_SKIP_WEB_START=1`. Default web mode is `next start` after `next build`. `CAL_WEB_MODE=dev` keeps next-dev (Windows webpack via `CAL_WEB_BUNDLER`).
 - **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
 - **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
 - **Cal** `proveAuth()` tries `GET $CAL_API_BASE_URL/api/v2/me` (API v2 on 5555 is optional). If that process is down, it proves the hashed `CAL_API_KEY` exists in `"ApiKey"`. Override the HTTP path with `CAL_AUTH_PROBE_URL`.
@@ -192,4 +192,4 @@ Honest gaps:
 
 ## License
 
-Private portfolio package. Not published to npm. Tag `v0.1.0` from `main` only after live Cal smoke is green.
+Private portfolio package. Not published to npm. Tag `v0.2.0` from `main` after the production-start work is merged.
