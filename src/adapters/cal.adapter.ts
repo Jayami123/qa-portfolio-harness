@@ -63,6 +63,41 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     return platform() === "win32" ? "webpack" : "turbopack";
   }
 
+  /** Default is production (`next build` + `next start`). `CAL_WEB_MODE=dev` keeps next-dev. */
+  private webMode(): "prod" | "dev" {
+    return (process.env.CAL_WEB_MODE ?? "prod").trim().toLowerCase() === "dev" ? "dev" : "prod";
+  }
+
+  private nodeHeapEnv(): NodeJS.ProcessEnv {
+    return {
+      NEXT_TELEMETRY_DISABLED: "1",
+      NODE_OPTIONS: process.env.NODE_OPTIONS?.trim() || "--max-old-space-size=8192",
+    };
+  }
+
+  private async ensureProdBuild(yarn: string): Promise<void> {
+    const nextDir = path.join(this.productRoot, "apps", "web", ".next");
+    const rebuild = process.env.CAL_WEB_REBUILD === "1";
+    if (!rebuild && fs.existsSync(nextDir)) {
+      console.log(`Cal .next exists at ${nextDir}; skipping next build (set CAL_WEB_REBUILD=1 to rebuild).`);
+      return;
+    }
+    console.log("Preparing Cal static assets (copy-app-store-static)…");
+    await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
+      cwd: this.productRoot,
+      timeoutMs: 3 * 60_000,
+      env: this.nodeHeapEnv(),
+    });
+    const requested = process.env.CAL_WEB_BUILD_MS ? Number(process.env.CAL_WEB_BUILD_MS) : 45 * 60_000;
+    const buildWait = Number.isFinite(requested) && requested >= 120_000 ? requested : 45 * 60_000;
+    console.log(`Building Cal web (next build, up to ${buildWait}ms)…`);
+    await run(yarn, ["workspace", "@calcom/web", "exec", "next", "build"], {
+      cwd: this.productRoot,
+      timeoutMs: buildWait,
+      env: this.nodeHeapEnv(),
+    });
+  }
+
   private webListen(): { host: string; port: string } {
     const parsed = new URL(this.cfg.baseUrl);
     return {
@@ -180,7 +215,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
 
     if (process.env.CAL_SKIP_WEB_START === "1") {
       throw new Error(
-        `Cal web is not reachable at ${this.webRootUrl()} and CAL_SKIP_WEB_START=1. Start it yourself: cd ${this.productRoot} && yarn dev`,
+        `Cal web is not reachable at ${this.webRootUrl()} and CAL_SKIP_WEB_START=1. Start it yourself: cd ${this.productRoot} && yarn workspace @calcom/web exec next start (or CAL_WEB_MODE=dev for next dev).`,
       );
     }
 
@@ -211,17 +246,23 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     }
 
     const yarn = resolveYarn();
+    const mode = this.webMode();
     const bundler = this.bundler();
     const { host, port } = this.webListen();
 
     if (!this.webProcess || this.webProcess.exitCode !== null) {
       let args: string[];
       let label: string;
-      if (bundler === "webpack") {
+      if (mode === "prod") {
+        await this.ensureProdBuild(yarn);
+        args = ["workspace", "@calcom/web", "exec", "next", "start", "-H", host, "-p", port];
+        label = `next start -H ${host} -p ${port}`;
+      } else if (bundler === "webpack") {
         console.log("Preparing Cal static assets (copy-app-store-static)…");
         await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
           cwd: this.productRoot,
           timeoutMs: 3 * 60_000,
+          env: this.nodeHeapEnv(),
         });
         args = ["workspace", "@calcom/web", "exec", "next", "dev", "--webpack", "-H", host, "-p", port];
         label = `next dev --webpack -H ${host} -p ${port}`;
@@ -230,13 +271,13 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
         label = "yarn dev";
       }
 
-      console.log(`Starting Cal web: ${yarn} ${label} (logs: ${logFile})`);
+      console.log(`Starting Cal web (${mode}): ${yarn} ${label} (logs: ${logFile})`);
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.writeFileSync(logFile, "");
       this.webProcess = spawnLogged(yarn, args, {
         cwd: this.productRoot,
         logFile,
-        env: { NEXT_TELEMETRY_DISABLED: "1" },
+        env: this.nodeHeapEnv(),
       });
       await new Promise((resolve) => setTimeout(resolve, 8000));
       if (this.webProcess.exitCode !== null) {
