@@ -19,6 +19,7 @@ const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
 const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_NEXT_BUILD_TIMEOUT_MS = 45 * 60_000;
 const MIN_NEXT_BUILD_TIMEOUT_MS = 120_000;
+const MIN_TRPC_BUILD_TIMEOUT_MS = 120_000;
 const HARNESS_BUILD_MARKER = "harness-build.json";
 const TRPC_APP_ROUTER_RELATIVE = path.join(
   "packages",
@@ -108,11 +109,21 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     return path.join(this.productRoot, TRPC_APP_ROUTER_RELATIVE);
   }
 
+  private timeoutFromEnv(envName: string, defaultMs: number, minMs: number): number {
+    const raw = process.env[envName];
+    if (raw === undefined || raw.trim() === "") {
+      return defaultMs;
+    }
+    const requested = Number(raw);
+    return Number.isFinite(requested) && requested >= minMs ? requested : defaultMs;
+  }
+
   private nextBuildTimeoutMs(): number {
-    const requested = process.env.CAL_WEB_BUILD_MS ? Number(process.env.CAL_WEB_BUILD_MS) : DEFAULT_NEXT_BUILD_TIMEOUT_MS;
-    return Number.isFinite(requested) && requested >= MIN_NEXT_BUILD_TIMEOUT_MS
-      ? requested
-      : DEFAULT_NEXT_BUILD_TIMEOUT_MS;
+    return this.timeoutFromEnv("CAL_WEB_BUILD_MS", DEFAULT_NEXT_BUILD_TIMEOUT_MS, MIN_NEXT_BUILD_TIMEOUT_MS);
+  }
+
+  private trpcBuildTimeoutMs(): number {
+    return this.timeoutFromEnv("CAL_TRPC_BUILD_MS", TRPC_BUILD_TIMEOUT_MS, MIN_TRPC_BUILD_TIMEOUT_MS);
   }
 
   private currentProductGitSha(): string | undefined {
@@ -196,11 +207,12 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
    */
   private async generateTrpcTypes(yarn: string): Promise<void> {
     const expected = this.trpcAppRouterDts();
+    const trpcWait = this.trpcBuildTimeoutMs();
     try {
-      console.log(`Generating Cal tRPC types (turbo @calcom/trpc, up to ${String(TRPC_BUILD_TIMEOUT_MS)}ms)…`);
+      console.log(`Generating Cal tRPC types (turbo @calcom/trpc, up to ${String(trpcWait)}ms)…`);
       await run(yarn, ["turbo", "run", "build", "--filter=@calcom/trpc"], {
         cwd: this.productRoot,
-        timeoutMs: TRPC_BUILD_TIMEOUT_MS,
+        timeoutMs: trpcWait,
         env: this.nodeHeapEnv(),
       });
     } catch (error) {

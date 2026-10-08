@@ -117,7 +117,7 @@ Consumer pin:
 
 Cal `up()` starts **Postgres** and, if the web app is down, spawns the Cal web process (logs in `.harness/cal-web.log`). Default is **`next build` then `next start`** (`CAL_WEB_MODE=prod`). Set `CAL_WEB_MODE=dev` for next-dev (Windows: `next dev --webpack`; Cal’s `yarn dev --turbopack` dies on `instrumentation.ts`).
 
-Before `next build`, the adapter runs `yarn turbo run build --filter=@calcom/trpc` and checks that `packages/trpc/types/server/routers/_app.d.ts` exists. That file is gitignored output of `@calcom/trpc#build`; `packages/trpc/react/trpc.ts` imports `AppRouter` from it. Turbo’s `@calcom/web#build` graph gets it via `^build`; a direct `next build` does not.
+Before `next build`, the adapter runs `yarn turbo run build --filter=@calcom/trpc` and checks that `packages/trpc/types/server/routers/_app.d.ts` exists. That file is gitignored output of `@calcom/trpc#build`; `packages/trpc/react/trpc.ts` imports `AppRouter` from it. Turbo’s `@calcom/web#build` graph gets it via `^build`; a direct `next build` does not. Override the tRPC turbo timeout with `CAL_TRPC_BUILD_MS` (default 600000, min 120000).
 
 Skip a rebuild only when `apps/web/.next/required-server-files.json` exists **and** `apps/web/.next/harness-build.json` records the same `gitSha` as `git rev-parse HEAD` in the Cal product root. Otherwise the adapter logs why and rebuilds. Force a rebuild with `CAL_WEB_REBUILD=1`. `npm run smoke -- cal` calls `up()` first. Override the dev bundler with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
 
