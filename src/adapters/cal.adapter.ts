@@ -228,6 +228,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     if (this.shouldSkipProdBuild()) {
       return;
     }
+    fs.rmSync(this.harnessBuildMarkerPath(), { force: true });
     console.log("Preparing Cal static assets (copy-app-store-static)…");
     await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
       cwd: this.productRoot,
