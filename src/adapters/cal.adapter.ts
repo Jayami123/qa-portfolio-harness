@@ -1,4 +1,4 @@
-import { execSync, type ChildProcess } from "node:child_process";
+import { execFileSync, execSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
@@ -128,9 +128,10 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
 
   private currentProductGitSha(): string | undefined {
     try {
-      const sha = execSync("git rev-parse HEAD", {
+      const sha = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: this.productRoot,
         encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
       }).trim();
       return sha.length > 0 ? sha : undefined;
     } catch (error) {
@@ -143,6 +144,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   private readHarnessBuildGitSha(): string | undefined {
     const file = this.harnessBuildMarkerPath();
     if (!fs.existsSync(file)) {
+      console.log("Cal harness-build.json is absent; rebuilding.");
       return undefined;
     }
     try {
@@ -182,11 +184,10 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       return false;
     }
     const recorded = this.readHarnessBuildGitSha();
-    const current = this.currentProductGitSha();
     if (recorded === undefined) {
-      console.log("Cal harness-build.json gitSha missing; rebuilding.");
       return false;
     }
+    const current = this.currentProductGitSha();
     if (current === undefined) {
       return false;
     }
