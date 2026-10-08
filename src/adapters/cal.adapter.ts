@@ -208,19 +208,20 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
    */
   private async generateTrpcTypes(yarn: string): Promise<void> {
     const expected = this.trpcAppRouterDts();
+    const missingTypesMessage = `Cal tRPC types were not generated (expected ${expected})`;
     const trpcWait = this.trpcBuildTimeoutMs();
     try {
       console.log(`Generating Cal tRPC types (turbo @calcom/trpc, up to ${String(trpcWait)}ms)…`);
       await run(yarn, ["turbo", "run", "build", "--filter=@calcom/trpc"], {
         cwd: this.productRoot,
         timeoutMs: trpcWait,
-        env: this.nodeHeapEnv(),
+        env: { ...this.nodeHeapEnv(), TURBO_TELEMETRY_DISABLED: "1" },
       });
     } catch (error) {
-      throw new Error(`Cal tRPC types were not generated (expected ${expected})`, { cause: error });
+      throw new Error(missingTypesMessage, { cause: error });
     }
     if (!fs.existsSync(expected)) {
-      throw new Error(`Cal tRPC types were not generated (expected ${expected})`);
+      throw new Error(missingTypesMessage);
     }
   }
 
