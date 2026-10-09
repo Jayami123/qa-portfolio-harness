@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.2 — 2026-10-09
+
+- Add MIT `LICENSE`, `SECURITY.md`, `.github/CODEOWNERS`, pull request template, and `CONTRIBUTING.md`.
+- Add CI workflow: actionlint, `npm ci` / `prepare`, typecheck, build, `npm pack --dry-run` contents checks, import smoke, and `npm audit --audit-level=high`.
+- Add PR title validation, CodeQL (TypeScript and GitHub Actions), and Dependabot for npm and GitHub Actions.
+- Add `.nvmrc` (Node 22) and `.editorconfig`.
+- Security: bump `@faker-js/faker` to 10.6.0 (GHSA-qxc2-j82w-r537). Harness factory helpers already used v10-compatible APIs (`faker.person.*`, `faker.internet.email`); no source changes required.
+
 ## v0.2.1 — 2026-10-08
 
 - Generate Cal tRPC types with `yarn turbo run build --filter=@calcom/trpc` before `next build`, then require `packages/trpc/types/server/routers/_app.d.ts`.
