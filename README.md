@@ -113,7 +113,7 @@ Released consumer pin:
 ```json
 {
   "dependencies": {
-    "qa-portfolio-harness": "github:Jayami123/qa-portfolio-harness#v0.2.1"
+    "qa-portfolio-harness": "github:Jayami123/qa-portfolio-harness#v0.2.2"
   }
 }
 ```
@@ -209,12 +209,11 @@ Honest gaps:
 - No Playwright, page objects, k6, ZAP, or P1–P7 test suites in this repo.
 - `createPgClient` does **not** run migrations. Use a read-only DB role in shared environments.
 
-### Known gaps (v0.2.2)
+### Known gaps (post v0.2.2)
 
 - ESLint and Prettier (same setup as P1).
 - Unit tests for pure modules (config parsing, timeouts, URL handling, redaction) plus a `test` script and CI job.
 - Bump `package.json` `engines.node` to `>=22` (Node 20 reached end-of-life in April 2026; CI uses Node 22 via `.nvmrc`).
-- Resolve the high `@faker-js/faker` advisory (`npm audit --audit-level=high`) via a semver-appropriate dependency bump.
 
 ## License
 

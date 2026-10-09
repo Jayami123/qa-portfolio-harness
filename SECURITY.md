@@ -4,7 +4,7 @@
 
 | Version | Supported |
 | --- | --- |
-| Latest release tag (currently `v0.2.1`) | Yes |
+| Latest release tag (currently `v0.2.2` after release) | Yes |
 | `main` | Yes |
 | Older tags | Best effort only |
 
