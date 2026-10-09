@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  DIST_INDEX_JS: dist/index.js
+  DIST_INDEX_DTS: dist/index.d.ts
+  PACK_FILE_DIST_INDEX_JS: dist/index.js
+  PACK_FILE_DIST_INDEX_DTS: dist/index.d.ts
+  PACK_FILE_CAL_COMPOSE: docker/cal.compose.yml
+  PACK_FILE_UP_SCRIPT: scripts/up.mjs
+  PACK_FILE_LICENSE: LICENSE
+
+jobs:
+  lint-workflows:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -version | grep -F '1.7.12'
+
+      - name: Lint workflows
+        run: |
+          set -euo pipefail
+          ./actionlint
+
+  build:
+    name: typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install, typecheck, and build
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run typecheck
+          npm run build
+          test -f "${DIST_INDEX_JS}"
+          test -f "${DIST_INDEX_DTS}"
+
+      - name: Verify package tarball contents
+        run: |
+          set -euo pipefail
+          npm pack --dry-run 2>&1 | tee pack.log
+          for path in \
+            "${PACK_FILE_DIST_INDEX_JS}" \
+            "${PACK_FILE_DIST_INDEX_DTS}" \
+            "${PACK_FILE_CAL_COMPOSE}" \
+            "${PACK_FILE_UP_SCRIPT}" \
+            "${PACK_FILE_LICENSE}"; do
+            grep -Fq "${path}" pack.log || {
+              echo "Missing from npm pack --dry-run output: ${path}"
+              exit 1
+            }
+          done
+
+      - name: Import smoke (no getAdapter call)
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'EOF'
+          import { getAdapter, createPgClient, NotImplementedError } from "./dist/index.js";
+
+          for (const exported of [getAdapter, createPgClient, NotImplementedError]) {
+            if (typeof exported !== "function") {
+              throw new Error(`Expected function export, got ${typeof exported}`);
+            }
+          }
+          console.log("import smoke: ok");
+          EOF
+
+      - name: npm audit (high and above)
+        run: |
+          set -euo pipefail
+          npm audit --audit-level=high
