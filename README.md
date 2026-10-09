@@ -1,5 +1,10 @@
 # qa-portfolio-harness
 
+[![CI](https://github.com/Jayami123/qa-portfolio-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/Jayami123/qa-portfolio-harness/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Jayami123/qa-portfolio-harness/actions/workflows/codeql.yml/badge.svg)](https://github.com/Jayami123/qa-portfolio-harness/actions/workflows/codeql.yml)
+[![License: MIT](https://img.shields.io/github/license/Jayami123/qa-portfolio-harness)](LICENSE)
+[![tag](https://img.shields.io/github/v/tag/Jayami123/qa-portfolio-harness?label=latest%20tag)](https://github.com/Jayami123/qa-portfolio-harness/tags)
+
 Shared TypeScript package for Jayami’s QA portfolio. This is the **only** place that knows how to start each product, wait until it is healthy, seed a test user, mint an auth token, and open a **read-only** Postgres connection.
 
 Consumers: **P1** (web e2e), **P2** (backend/webhooks), **P5** (appsec), **P6** (load). Mobile (P3) and AI (P4) are out of scope.
@@ -41,7 +46,7 @@ qa-portfolio-harness/
 
 ## Prerequisites
 
-- Node 20+
+- Node 22 (see `.nvmrc`; `package.json` still lists `engines.node >= 20` until v0.2.2)
 - Docker Desktop
 - npm (this repo)
 - Local forks (not copied into this package):
@@ -91,7 +96,7 @@ const pool = createPgClient(adapter.dbUrl); // read-only intent; no migrations
 
 ## Usage from P1
 
-**Until a GitHub tag exists** (after live Cal smoke is green and this branch is on `main`), use the local package:
+For local development, point at the sibling folder:
 
 ```json
 {
@@ -103,7 +108,7 @@ const pool = createPgClient(adapter.dbUrl); // read-only intent; no migrations
 
 Build this repo first (`npm i && npm run build`) so `dist/` exists. TypeScript lives in `devDependencies`; `prepare` compiles when you install **in this repo**.
 
-Consumer pin:
+Released consumer pin:
 
 ```json
 {
@@ -177,11 +182,21 @@ node scripts/down.mjs cal
 
 Live smoke: `waitHealthy` → `seed` → `authenticate` (token truncated in logs) → `proveAuth` → `SELECT 1` via the read-only pg helper.
 
+## CI (this repo)
+
+On every pull request and on pushes to `main`:
+
+- **actionlint** on `.github/workflows`
+- **typecheck and build**: `npm ci` (runs `prepare` → `tsc`), `npm run typecheck`, `npm run build`, dist file checks, `npm pack --dry-run` contents checks, import smoke of `dist/index.js`, `npm audit --audit-level=high`
+- **PR title** conventional commit check
+- **CodeQL** for TypeScript and workflow files
+
+Live product smoke and Docker are not run here; P1 CI covers Cal E2E against a pinned harness tag.
+
 ## Limitations / TODOs
 
 Honest gaps:
 
-- Tag `v0.2.1` from `main` after the tRPC types / commit-aware skip work is merged (do not tag before the merge).
 - **Cal** `up()` starts Postgres and will spawn the web process unless the app is already healthy or `CAL_SKIP_WEB_START=1`. Default web mode is `next start` after `next build` (tRPC types first; skip only when `.next` matches product HEAD). `CAL_WEB_MODE=dev` keeps next-dev (Windows webpack via `CAL_WEB_BUNDLER`).
 - **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
 - **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
@@ -191,9 +206,16 @@ Honest gaps:
 - **Medusa** admin JWT: `POST /auth/user/emailpass`. Store APIs also need `x-publishable-api-key`.
 - **Twenty** uses image `twentycrm/twenty:2.44.0` (fork validation pin). App is published on **3002**. `ENCRYPTION_KEY` must already exist in `products/twenty-CRM/packages/twenty-docker/.env` — this package will not invent secrets. Prefer the fork’s `scripts/validation/anchor-b-up.ps1` if that env is not set.
 - **Twenty** sign-in posts to `/metadata` (`getLoginTokenFromCredentials`). **TODO(verify)** whether `origin` must be a workspace subdomain (e.g. apple.localhost) in some configs.
-- No Playwright, page objects, k6, ZAP, or P1–P7 CI in this repo.
+- No Playwright, page objects, k6, ZAP, or P1–P7 test suites in this repo.
 - `createPgClient` does **not** run migrations. Use a read-only DB role in shared environments.
+
+### Known gaps (v0.2.2)
+
+- ESLint and Prettier (same setup as P1).
+- Unit tests for pure modules (config parsing, timeouts, URL handling, redaction) plus a `test` script and CI job.
+- Bump `package.json` `engines.node` to `>=22` (Node 20 reached end-of-life in April 2026; CI uses Node 22 via `.nvmrc`).
+- Resolve the high `@faker-js/faker` advisory (`npm audit --audit-level=high`) via a semver-appropriate dependency bump.
 
 ## License
 
-Private portfolio package. Not published to npm. Tag `v0.2.1` from `main` after the tRPC types / commit-aware skip work is merged.
+[MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.
