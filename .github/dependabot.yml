@@ -11,8 +11,8 @@ updates:
       day: monday
       time: "06:00"
     commit-message:
-      prefix: chore(deps)
-      prefix-development: chore(deps-dev)
+      prefix: chore
+      prefix-development: chore
       include: scope
     groups:
       npm-minor-patch:
@@ -27,7 +27,7 @@ updates:
         patterns:
           - "*"
     ignore:
-      - dependency-name: "@types/node"
+      - dependency-name: "*"
         update-types:
           - version-update:semver-major
     open-pull-requests-limit: 5
@@ -40,10 +40,14 @@ updates:
       day: monday
       time: "06:00"
     commit-message:
-      prefix: ci(deps)
+      prefix: ci
       include: scope
     groups:
       actions:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
     open-pull-requests-limit: 5
