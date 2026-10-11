@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   assertDocumensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
+  assertDocumensoSigningCert,
   buildDocumensoAppEnv,
+  documensoLocalSigningCertPath,
   classifyDocumensoProbe,
   documensoHealthUrls,
   documensoListen,
@@ -16,7 +19,12 @@ import {
   runningWebappUrlMatches,
 } from "./documenso-env.js";
 
-const cfg = { baseUrl: "http://127.0.0.1:3001", dbUrl: "postgres://documenso:password@127.0.0.1:5451/documenso" };
+const productRoot = path.resolve("products", "documenso");
+const cfg = {
+  baseUrl: "http://127.0.0.1:3001",
+  dbUrl: "postgres://documenso:password@127.0.0.1:5451/documenso",
+  productRoot,
+};
 
 describe("documensoListen", () => {
   it("accepts 127.0.0.1 and defaults the port to 3001", () => {
@@ -78,6 +86,13 @@ describe("buildDocumensoAppEnv", () => {
     assert.equal(env.NEXT_PRIVATE_JOBS_PROVIDER, "local");
   });
 
+  it("points local signing at the fork example cert with an empty passphrase", () => {
+    assert.equal(env.NEXT_PRIVATE_SIGNING_TRANSPORT, "local");
+    assert.equal(env.NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH, documensoLocalSigningCertPath(productRoot));
+    assert.equal(path.isAbsolute(env.NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH), true);
+    assert.equal(env.NEXT_PRIVATE_SIGNING_PASSPHRASE, "");
+  });
+
   it("when publicUrl is unset, public and internal webapp URLs stay on the listen address", () => {
     const unset = buildDocumensoAppEnv(cfg);
     assert.equal(unset.NEXT_PUBLIC_WEBAPP_URL, "http://127.0.0.1:3001");
@@ -90,6 +105,33 @@ describe("buildDocumensoAppEnv", () => {
     assert.equal(set.NEXT_PUBLIC_WEBAPP_URL, "http://p1.lvh.me:3001");
     assert.equal(set.NEXT_PRIVATE_INTERNAL_WEBAPP_URL, "http://127.0.0.1:3001");
     assert.equal(set.PORT, "3001");
+  });
+});
+
+describe("documensoLocalSigningCertPath", () => {
+  it("resolves an absolute path under apps/remix/example/cert.p12", () => {
+    const certPath = documensoLocalSigningCertPath(productRoot);
+    assert.equal(certPath, path.resolve(productRoot, "apps", "remix", "example", "cert.p12"));
+    assert.equal(path.isAbsolute(certPath), true);
+  });
+});
+
+describe("assertDocumensoSigningCert", () => {
+  it("passes when the injected exists check finds the cert", () => {
+    assert.doesNotThrow(() => assertDocumensoSigningCert(productRoot, () => true));
+  });
+
+  it("names the missing path and tells the user to run npm ci", () => {
+    const certPath = documensoLocalSigningCertPath(productRoot);
+    assert.throws(
+      () => assertDocumensoSigningCert(productRoot, () => false),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.ok(error.message.includes(certPath));
+        assert.match(error.message, /Run npm ci in the Documenso fork/);
+        return true;
+      },
+    );
   });
 });
 

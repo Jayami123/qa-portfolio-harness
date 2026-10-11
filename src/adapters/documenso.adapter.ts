@@ -15,6 +15,7 @@ import { BaseAdapter } from "./base.js";
 import {
   assertDocumensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
+  assertDocumensoSigningCert,
   buildDocumensoAppEnv,
   classifyDocumensoProbe,
   documensoHealthUrls,
@@ -363,6 +364,7 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
 
   async up(): Promise<void> {
     assertDocumensoNodeVersion(process.versions.node);
+    assertDocumensoSigningCert(this.productRoot);
     const { host, port } = documensoListen(this.cfg.baseUrl);
 
     if (this.cfg.publicUrl !== undefined) {
