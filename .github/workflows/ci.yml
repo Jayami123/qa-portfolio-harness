@@ -23,6 +23,7 @@ env:
   PACK_FILE_DIST_INDEX_JS: dist/index.js
   PACK_FILE_DIST_INDEX_DTS: dist/index.d.ts
   PACK_FILE_CAL_COMPOSE: docker/cal.compose.yml
+  PACK_FILE_DOCUMENSO_COMPOSE: docker/documenso.compose.yml
   PACK_FILE_UP_SCRIPT: scripts/up.mjs
   PACK_FILE_LICENSE: LICENSE
 
@@ -69,6 +70,7 @@ jobs:
           set -euo pipefail
           npm ci
           npm run typecheck
+          npm test
           npm run build
           test -f "${DIST_INDEX_JS}"
           test -f "${DIST_INDEX_DTS}"
@@ -81,6 +83,7 @@ jobs:
             "${PACK_FILE_DIST_INDEX_JS}" \
             "${PACK_FILE_DIST_INDEX_DTS}" \
             "${PACK_FILE_CAL_COMPOSE}" \
+            "${PACK_FILE_DOCUMENSO_COMPOSE}" \
             "${PACK_FILE_UP_SCRIPT}" \
             "${PACK_FILE_LICENSE}"; do
             grep -Fq "${path}" pack.log || {

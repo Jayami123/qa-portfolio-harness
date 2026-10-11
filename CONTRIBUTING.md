@@ -18,15 +18,18 @@ Thank you for helping improve the QA portfolio harness. This package is consumed
 From the repo root:
 
 ```bash
-npm run typecheck
-npm run build
+npm run check
 ```
+
+`npm run check` is typecheck, the unit tests (`npm test`, node:test over `src/**/*.test.ts`), and build.
 
 When you change adapters or config loading, also run live smoke against a local product fork:
 
 ```bash
 npm run smoke -- cal
 ```
+
+For Documenso, run `node scripts/up.mjs documenso` under Node 24 (see README). Full `smoke -- documenso` also needs `DOCUMENSO_API_TOKEN`.
 
 Paste the summary lines in your PR.
 

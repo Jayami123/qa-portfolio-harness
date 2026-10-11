@@ -54,11 +54,11 @@ qa-portfolio-harness/
 | Product   | Path                                      | Typical ports (harness)      |
 |-----------|-------------------------------------------|------------------------------|
 | Cal.diy   | `../products/cal`                         | web 3000, API v2 5555, pg 5450 |
-| Documenso | `../products/documenso`                   | web **3001**, pg 54320         |
+| Documenso | `../products/documenso`                   | web **3001**, pg **5451** (harness compose), SMTP 2525 |
 | Medusa    | `../products/medusa`                      | HTTP 9000, pg 5433, redis 6380 |
 | Twenty    | `../products/twenty-CRM`                  | app **3002**, pg 5434          |
 
-Cal and Documenso both default to web **3000**. This harness does **not** change product defaults. Documenso is started with `PORT=3001`; Twenty’s compose overlay publishes **3002**.
+Cal defaults to web **3000**. Documenso is started by the harness on **127.0.0.1:3001**. Twenty’s compose overlay publishes **3002**. This harness does **not** change product defaults.
 
 ## Setup
 
@@ -117,6 +117,41 @@ Released consumer pin:
   }
 }
 ```
+
+## How to start Documenso
+
+Documenso needs **Node 24 or newer** (`engines.node >= 24.0.0` in the fork). The harness itself stays on Node 22. Use Node 24 only for the Documenso commands:
+
+```bash
+nvm install 24
+nvm use 24
+node -v    # expect v24.x or newer
+npm -v     # expect 11.17.0 or newer
+cd /d/Jayami/Portfolio/products/documenso
+npm ci     # once, under Node 24
+cd /d/Jayami/Portfolio/qa-portfolio-harness
+node scripts/up.mjs documenso
+nvm use 22 # switch back for the harness
+```
+
+If `node -v` is below 24, `up()` stops before Docker starts and prints `Documenso needs Node 24 or newer`.
+
+`up()` does this in order:
+
+1. Starts the harness compose (`docker/documenso.compose.yml`): Postgres on **127.0.0.1:5451** and Inbucket SMTP on **127.0.0.1:2525** (UI **127.0.0.1:9003**).
+2. Probes `http://127.0.0.1:3001/signin` and `/api/auth/csrf`. Both must return HTTP 200. If they already do, it returns.
+3. Copies the fork's `.env.example` to `.env` if that file is missing. This is a local, uncommitted file. Secrets are the stock placeholders, passed as env vars.
+4. Runs `prisma:migrate-deploy`, then `prisma:seed` if `example@documenso.com` is missing.
+5. Builds the Remix app, unless `apps/remix/build/harness-build.json` matches the product `HEAD`. Set `DOCUMENSO_WEB_REBUILD=1` to force a rebuild.
+6. Starts `npm run start -w @documenso/remix` with logs in `.harness/documenso-web.log`. The server is left running after `up()` returns. Stop it yourself.
+
+Health uses **127.0.0.1 only**. `localhost` is never accepted as a pass. If `localhost` answers but `127.0.0.1` does not, `up()` stops with an `ENVIRONMENT finding` (IPv6 bind).
+
+If port 3001 is in use by something that is not a healthy Documenso, `up()` prints the listener PID and executable (Windows) and stops. It never kills a process. Decide what to do with that process, then retry.
+
+Environment knobs: `DOCUMENSO_SKIP_WEB_START=1` (compose only), `DOCUMENSO_WEB_BUILD_MS`, `DOCUMENSO_WEB_WAIT_MS`, `DOCUMENSO_WEB_REBUILD=1`.
+
+`node scripts/down.mjs documenso` stops the harness compose containers only.
 
 ## How to start Cal and run smoke
 
@@ -201,7 +236,7 @@ Honest gaps:
 - **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
 - **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
 - **Cal** `proveAuth()` tries `GET $CAL_API_BASE_URL/api/v2/me` (API v2 on 5555 is optional). If that process is down, it proves the hashed `CAL_API_KEY` exists in `"ApiKey"`. Override the HTTP path with `CAL_AUTH_PROBE_URL`.
-- **Documenso** web must be started with `PORT=3001`. First API token cannot be minted without a logged-in session (`tRPC api-token-router`). Set `DOCUMENSO_API_TOKEN` after creating one in Settings → API tokens. **TODO(verify)** if a later seed script creates a token.
+- **Documenso** `up()` needs Node 24 (see below). It starts only the harness-owned Postgres and Inbucket, plus the Remix app on 127.0.0.1:3001. It does not start Redis, MinIO, or Gotenberg. The first API token cannot be minted without a logged-in session (`tRPC api-token-router`). Set `DOCUMENSO_API_TOKEN` after creating one in Settings → API tokens. **TODO(verify)** if a later seed script creates a token.
 - **Medusa** `up()` starts validation Postgres/Redis/MinIO only. MinIO host ports are remapped to **9011/9012** so they do not collide with Documenso. **TODO(verify)** which store starter Jayami runs (`medusa develop` at :9000). `seed()` still throws — P1/P2 need that starter decision before Medusa journeys.
 - **Medusa** admin JWT: `POST /auth/user/emailpass`. Store APIs also need `x-publishable-api-key`.
 - **Twenty** uses image `twentycrm/twenty:2.44.0` (fork validation pin). App is published on **3002**. `ENCRYPTION_KEY` must already exist in `products/twenty-CRM/packages/twenty-docker/.env` — this package will not invent secrets. Prefer the fork’s `scripts/validation/anchor-b-up.ps1` if that env is not set.

@@ -14,6 +14,11 @@ export function resolveYarn(): string {
   return "yarn.cmd";
 }
 
+/** npm on Windows is a `.cmd` shim; the shell resolves it from PATH (same Node the shell uses). */
+export function resolveNpm(): string {
+  return platform() === "win32" ? "npm.cmd" : "npm";
+}
+
 /** Keep the returned process referenced so Windows does not GC/kill it mid-smoke. */
 export function spawnLogged(
   command: string,

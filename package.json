@@ -1,6 +1,6 @@
 {
   "name": "qa-portfolio-harness",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -26,6 +26,8 @@
     "build": "tsc",
     "prepare": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test \"dist-test/**/*.test.js\"",
+    "check": "npm run typecheck && npm test && npm run build",
     "up": "node scripts/up.mjs",
     "down": "node scripts/down.mjs",
     "smoke": "node scripts/smoke.mjs"
