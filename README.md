@@ -138,12 +138,15 @@ If `node -v` is below 24, `up()` stops before Docker starts and prints `Documens
 
 `up()` does this in order:
 
-1. Starts the harness compose (`docker/documenso.compose.yml`): Postgres on **127.0.0.1:5451** and Inbucket SMTP on **127.0.0.1:2525** (UI **127.0.0.1:9003**).
-2. Probes `http://127.0.0.1:3001/signin` and `/api/auth/csrf`. Both must return HTTP 200. If they already do, it returns, unless `DOCUMENSO_PUBLIC_URL` is set and the running app still advertises a different `NEXT_PUBLIC_WEBAPP_URL` (stale passkey RP ID). In that case `up()` stops and prints the listener; it never kills the process.
-3. Copies the fork's `.env.example` to `.env` if that file is missing. This is a local, uncommitted file. Secrets are the stock placeholders, passed as env vars.
-4. Runs `prisma:migrate-deploy`, then `prisma:seed` if `example@documenso.com` is missing.
-5. Builds the Remix app, unless `apps/remix/build/harness-build.json` matches the product `HEAD`. Set `DOCUMENSO_WEB_REBUILD=1` to force a rebuild.
-6. Starts `npm run start -w @documenso/remix` with logs in `.harness/documenso-web.log`. The server is left running after `up()` returns. Stop it yourself.
+1. Checks that `apps/remix/example/cert.p12` exists under the Documenso product root. If it is missing, `up()` stops before Docker and prints the path. Run `npm ci` in the fork. The harness does not generate a certificate.
+2. Starts the harness compose (`docker/documenso.compose.yml`): Postgres on **127.0.0.1:5451** and Inbucket SMTP on **127.0.0.1:2525** (UI **127.0.0.1:9003**).
+3. Probes `http://127.0.0.1:3001/signin` and `/api/auth/csrf`. Both must return HTTP 200. If they already do, it returns, unless `DOCUMENSO_PUBLIC_URL` is set and the running app still advertises a different `NEXT_PUBLIC_WEBAPP_URL` (stale passkey RP ID). In that case `up()` stops and prints the listener; it never kills the process.
+4. Copies the fork's `.env.example` to `.env` if that file is missing. This is a local, uncommitted file. Secrets are the stock placeholders, passed as env vars.
+5. Runs `prisma:migrate-deploy`, then `prisma:seed` if `example@documenso.com` is missing.
+6. Builds the Remix app, unless `apps/remix/build/harness-build.json` matches the product `HEAD`. Set `DOCUMENSO_WEB_REBUILD=1` to force a rebuild.
+7. Starts `npm run start -w @documenso/remix`. Logs append to `.harness/documenso-web.log`. Each start adds a spawn banner, so earlier job errors stay in the file. The server is left running after `up()` returns. Stop it yourself.
+
+Completing a document runs the seal job, which signs the PDF. The harness sets `NEXT_PRIVATE_SIGNING_TRANSPORT=local`, `NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH` to the absolute path of that example `.p12`, and `NEXT_PRIVATE_SIGNING_PASSPHRASE` to empty (the bundled dev cert). Remix `npm run start` is `NODE_ENV=production`, so Documenso will not fall back to `./example/cert.p12`. Upstream CI sets the path for the same reason.
 
 Health uses **127.0.0.1 only**. `localhost` is never accepted as a pass. If `localhost` answers but `127.0.0.1` does not, `up()` stops with an `ENVIRONMENT finding` (IPv6 bind).
 
@@ -255,7 +258,7 @@ Honest gaps:
 - **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
 - **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
 - **Cal** `proveAuth()` tries `GET $CAL_API_BASE_URL/api/v2/me` (API v2 on 5555 is optional). If that process is down, it proves the hashed `CAL_API_KEY` exists in `"ApiKey"`. Override the HTTP path with `CAL_AUTH_PROBE_URL`.
-- **Documenso** `up()` needs Node 24 (see below). It starts only the harness-owned Postgres and Inbucket, plus the Remix app on 127.0.0.1:3001. Optional `DOCUMENSO_PUBLIC_URL` sets the passkey RP ID; health and the internal webapp URL stay on 127.0.0.1. It does not start Redis, MinIO, or Gotenberg. The first API token cannot be minted without a logged-in session (`tRPC api-token-router`). Set `DOCUMENSO_API_TOKEN` after creating one in Settings → API tokens. **TODO(verify)** if a later seed script creates a token.
+- **Documenso** `up()` needs Node 24 (see below). It starts only the harness-owned Postgres and Inbucket, plus the Remix app on 127.0.0.1:3001. Optional `DOCUMENSO_PUBLIC_URL` sets the passkey RP ID; health and the internal webapp URL stay on 127.0.0.1. Seal needs the fork example cert at `apps/remix/example/cert.p12` (local transport, empty passphrase). The web log is appended across restarts. It does not start Redis, MinIO, or Gotenberg. The first API token cannot be minted without a logged-in session (`tRPC api-token-router`). Set `DOCUMENSO_API_TOKEN` after creating one in Settings → API tokens. **TODO(verify)** if a later seed script creates a token.
 - **Medusa** `up()` starts validation Postgres/Redis/MinIO only. MinIO host ports are remapped to **9011/9012** so they do not collide with Documenso. **TODO(verify)** which store starter Jayami runs (`medusa develop` at :9000). `seed()` still throws — P1/P2 need that starter decision before Medusa journeys.
 - **Medusa** admin JWT: `POST /auth/user/emailpass`. Store APIs also need `x-publishable-api-key`.
 - **Twenty** uses image `twentycrm/twenty:2.44.0` (fork validation pin). App is published on **3002**. `ENCRYPTION_KEY` must already exist in `products/twenty-CRM/packages/twenty-docker/.env` — this package will not invent secrets. Prefer the fork’s `scripts/validation/anchor-b-up.ps1` if that env is not set.
