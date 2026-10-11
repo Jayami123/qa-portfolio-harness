@@ -438,7 +438,6 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     }
     const logFile = this.logFile();
     fs.mkdirSync(path.dirname(logFile), { recursive: true });
-    fs.writeFileSync(logFile, "");
     console.log(`Starting Documenso web: npm run start -w @documenso/remix (logs: ${logFile})`);
     this.webProcess = spawnLogged(resolveNpm(), ["run", "start", "-w", "@documenso/remix"], {
       cwd: this.productRoot,
