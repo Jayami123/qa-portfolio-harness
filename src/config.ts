@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
+import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-env.js";
 import { HARNESS_ROOT } from "./paths.js";
 import type { ProductId } from "./types.js";
 
@@ -30,6 +31,7 @@ const envSchema = z.object({
     .trim()
     .min(1)
     .default("postgres://documenso:password@127.0.0.1:5451/documenso"),
+  DOCUMENSO_PUBLIC_URL: optionalString,
   DOCUMENSO_API_TOKEN: optionalString,
 
   MEDUSA_BASE_URL: z.string().trim().url().default("http://localhost:9000"),
@@ -71,6 +73,8 @@ export interface CalConfig extends ProductConfig {
 export interface DocumensoConfig extends ProductConfig {
   id: "documenso";
   apiToken?: string;
+  /** Browser / passkey origin. Unset keeps NEXT_PUBLIC_WEBAPP_URL on baseUrl. */
+  publicUrl?: string;
 }
 
 export interface MedusaConfig extends ProductConfig {
@@ -138,6 +142,12 @@ export function loadConfig(): HarnessConfig {
       ),
       baseUrl: parsed.DOCUMENSO_BASE_URL.replace(/\/$/, ""),
       dbUrl: parsed.DOCUMENSO_DB_URL,
+      publicUrl: parsed.DOCUMENSO_PUBLIC_URL
+        ? parseDocumensoPublicUrl(
+            parsed.DOCUMENSO_PUBLIC_URL,
+            documensoListen(parsed.DOCUMENSO_BASE_URL.replace(/\/$/, "")).port,
+          )
+        : undefined,
       apiToken: parsed.DOCUMENSO_API_TOKEN,
     },
     medusa: {

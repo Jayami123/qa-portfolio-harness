@@ -14,14 +14,17 @@ import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import {
   assertDocumensoNodeVersion,
+  assertDocumensoPublicHostResolvesToLoopback,
   buildDocumensoAppEnv,
   classifyDocumensoProbe,
   documensoHealthUrls,
   documensoListen,
   isDocumensoHealthyStatus,
   localhostTwin,
+  parseDocumensoRunningWebappUrl,
   parseNetstatListeningPids,
   parseTasklistImageName,
+  runningWebappUrlMatches,
   type DocumensoProbeVerdict,
 } from "./documenso-env.js";
 
@@ -302,6 +305,32 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     );
   }
 
+  /** HTML of GET /signin on the listen URL. Used only to read window.__ENV__.NEXT_PUBLIC_WEBAPP_URL. */
+  private async fetchSigninHtml(): Promise<string | undefined> {
+    const { signin } = documensoHealthUrls(this.cfg.baseUrl);
+    try {
+      const response = await fetch(signin, {
+        method: "GET",
+        redirect: "manual",
+        headers: { Accept: "text/html, */*" },
+      });
+      if (response.status !== 200) return undefined;
+      return await response.text();
+    } catch {
+      return undefined;
+    }
+  }
+
+  private stalePublicUrlError(found: string | undefined, expected: string, port: string): Error {
+    const foundLabel = found ?? "(unreadable)";
+    return new Error(
+      `Documenso is already serving on 127.0.0.1:${port}, but NEXT_PUBLIC_WEBAPP_URL is ${foundLabel}, expected ${expected}. ` +
+        `The harness did not stop anything.\n` +
+        `Listeners:\n${this.portOwnerReport(port)}` +
+        `Stop that process yourself, then retry so the new public URL (passkey RP ID) is used.`,
+    );
+  }
+
   private async waitReady(timeoutMs: number, firstRequestMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let requestMs = firstRequestMs;
@@ -336,12 +365,29 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     assertDocumensoNodeVersion(process.versions.node);
     const { host, port } = documensoListen(this.cfg.baseUrl);
 
+    if (this.cfg.publicUrl !== undefined) {
+      await assertDocumensoPublicHostResolvesToLoopback(new URL(this.cfg.publicUrl).hostname);
+    }
+
     await composeUp(this.composeOpts(), { wait: true });
     console.log("Documenso Postgres (127.0.0.1:5451) and Inbucket (SMTP 127.0.0.1:2525) are up.");
 
     const already = await this.probe(FIRST_PROBE_REQUEST_MS);
     if (already.verdict === "healthy") {
+      if (this.cfg.publicUrl !== undefined) {
+        const html = await this.fetchSigninHtml();
+        if (html === undefined || !runningWebappUrlMatches(html, this.cfg.publicUrl)) {
+          throw this.stalePublicUrlError(
+            html === undefined ? undefined : parseDocumensoRunningWebappUrl(html),
+            this.cfg.publicUrl,
+            port,
+          );
+        }
+      }
       console.log(`Documenso already healthy at ${already.status.url} (HTTP 200).`);
+      if (this.cfg.publicUrl !== undefined) {
+        console.log(`Documenso public URL (passkeys): ${this.cfg.publicUrl}`);
+      }
       return;
     }
     if (already.verdict === "environment") {
@@ -371,6 +417,9 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     this.startWeb();
     await this.waitReady(this.webWaitMs(), FIRST_PROBE_REQUEST_MS);
     console.log(`Documenso web is up at ${this.cfg.baseUrl}`);
+    if (this.cfg.publicUrl !== undefined) {
+      console.log(`Documenso public URL (passkeys): ${this.cfg.publicUrl}`);
+    }
   }
 
   /** Generate the Prisma client (not run by `npm ci` for this fork), then apply migrations. */

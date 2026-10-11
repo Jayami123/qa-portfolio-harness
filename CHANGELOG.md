@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.4 — 2026-10-11
+
+- Optional `DOCUMENSO_PUBLIC_URL` (for example `http://p1.lvh.me:3001`) sets `NEXT_PUBLIC_WEBAPP_URL` so WebAuthn can use a hostname RP ID. `NEXT_PRIVATE_INTERNAL_WEBAPP_URL`, listen, and health stay on `DOCUMENSO_BASE_URL` (`http://127.0.0.1:3001`). Unset keeps v0.2.3 behaviour.
+- `DOCUMENSO_PUBLIC_URL` must be http(s), its port must match the listen port, and its hostname must not be localhost or an IP. Before `up()`, the hostname must resolve to `127.0.0.1` (hosts file); there is no localhost fallback.
+- When the public URL is set, a process that already answers on `127.0.0.1:3001` with a different `NEXT_PUBLIC_WEBAPP_URL` is reported as stale. The harness never kills it.
+
 ## v0.2.3 — 2026-10-11
 
 - Documenso `up()` starts the harness-owned Postgres (127.0.0.1:5451) and Inbucket (SMTP 127.0.0.1:2525), then migrates, seeds, builds, and starts the stock Remix app on 127.0.0.1:3001. It no longer depends on the fork's `docker/development/compose.yml`.

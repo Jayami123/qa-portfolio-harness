@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   assertDocumensoNodeVersion,
+  assertDocumensoPublicHostResolvesToLoopback,
   buildDocumensoAppEnv,
   classifyDocumensoProbe,
   documensoHealthUrls,
   documensoListen,
   isDocumensoHealthyStatus,
   localhostTwin,
+  parseDocumensoPublicUrl,
+  parseDocumensoRunningWebappUrl,
   parseNetstatListeningPids,
   parseTasklistImageName,
+  runningWebappUrlMatches,
 } from "./documenso-env.js";
 
 const cfg = { baseUrl: "http://127.0.0.1:3001", dbUrl: "postgres://documenso:password@127.0.0.1:5451/documenso" };
@@ -72,6 +76,107 @@ describe("buildDocumensoAppEnv", () => {
   it("keeps uploads on the database and jobs local (no MinIO or Redis)", () => {
     assert.equal(env.NEXT_PUBLIC_UPLOAD_TRANSPORT, "database");
     assert.equal(env.NEXT_PRIVATE_JOBS_PROVIDER, "local");
+  });
+
+  it("when publicUrl is unset, public and internal webapp URLs stay on the listen address", () => {
+    const unset = buildDocumensoAppEnv(cfg);
+    assert.equal(unset.NEXT_PUBLIC_WEBAPP_URL, "http://127.0.0.1:3001");
+    assert.equal(unset.NEXT_PRIVATE_INTERNAL_WEBAPP_URL, "http://127.0.0.1:3001");
+    assert.equal(unset.PORT, "3001");
+  });
+
+  it("when publicUrl is set, only NEXT_PUBLIC_WEBAPP_URL follows it", () => {
+    const set = buildDocumensoAppEnv({ ...cfg, publicUrl: "http://p1.lvh.me:3001" });
+    assert.equal(set.NEXT_PUBLIC_WEBAPP_URL, "http://p1.lvh.me:3001");
+    assert.equal(set.NEXT_PRIVATE_INTERNAL_WEBAPP_URL, "http://127.0.0.1:3001");
+    assert.equal(set.PORT, "3001");
+  });
+});
+
+describe("parseDocumensoPublicUrl", () => {
+  it("accepts an origin URL and returns scheme, host, and port only", () => {
+    assert.equal(parseDocumensoPublicUrl("http://p1.lvh.me:3001/", "3001"), "http://p1.lvh.me:3001");
+    assert.equal(parseDocumensoPublicUrl("http://p1.lvh.me:3001", "3001"), "http://p1.lvh.me:3001");
+  });
+
+  it("rejects localhost", () => {
+    assert.throws(
+      () => parseDocumensoPublicUrl("http://localhost:3001", "3001"),
+      /hostname must not be localhost or an IP \(got localhost\)/,
+    );
+  });
+
+  it("rejects IPv4 and IPv6 addresses", () => {
+    assert.throws(
+      () => parseDocumensoPublicUrl("http://127.0.0.1:3001", "3001"),
+      /hostname must not be localhost or an IP \(got 127\.0\.0\.1\)/,
+    );
+    assert.throws(
+      () => parseDocumensoPublicUrl("http://[::1]:3001", "3001"),
+      /hostname must not be localhost or an IP \(got ::1\)/,
+    );
+  });
+
+  it("rejects a port that does not match the listen port", () => {
+    assert.throws(
+      () => parseDocumensoPublicUrl("http://p1.lvh.me:3000", "3001"),
+      /port must match DOCUMENSO_BASE_URL listen port 3001 \(got 3000\)/,
+    );
+  });
+
+  it("rejects a path, query, hash, or credentials", () => {
+    const example = /Example: http:\/\/p1\.lvh\.me:3001/;
+    assert.throws(() => parseDocumensoPublicUrl("http://p1.lvh.me:3001/app", "3001"), example);
+    assert.throws(() => parseDocumensoPublicUrl("http://p1.lvh.me:3001?x=1", "3001"), example);
+    assert.throws(() => parseDocumensoPublicUrl("http://p1.lvh.me:3001#h", "3001"), example);
+    assert.throws(() => parseDocumensoPublicUrl("http://u:p@p1.lvh.me:3001", "3001"), example);
+  });
+});
+
+describe("assertDocumensoPublicHostResolvesToLoopback", () => {
+  it("passes when the injected lookup returns 127.0.0.1", async () => {
+    await assert.doesNotReject(() =>
+      assertDocumensoPublicHostResolvesToLoopback("p1.lvh.me", async () => ({ address: "127.0.0.1" })),
+    );
+  });
+
+  it("rejects any other IPv4 address and names the hosts-file line", async () => {
+    await assert.rejects(
+      () => assertDocumensoPublicHostResolvesToLoopback("p1.lvh.me", async () => ({ address: "8.8.8.8" })),
+      /does not resolve to 127\.0\.0\.1 \(got 8\.8\.8\.8\)[\s\S]*127\.0\.0\.1 p1\.lvh\.me/,
+    );
+  });
+
+  it("rejects ENOTFOUND with the hosts-file instruction", async () => {
+    await assert.rejects(
+      () =>
+        assertDocumensoPublicHostResolvesToLoopback("p1.lvh.me", async () => {
+          throw new Error("getaddrinfo ENOTFOUND p1.lvh.me");
+        }),
+      /does not resolve to 127\.0\.0\.1 \(getaddrinfo ENOTFOUND p1\.lvh\.me\)[\s\S]*Linux\/macOS: \/etc\/hosts/,
+    );
+  });
+});
+
+describe("parseDocumensoRunningWebappUrl", () => {
+  const envScript = (webappUrl: string) =>
+    `<html><script>window.__ENV__ = ${JSON.stringify({ NEXT_PUBLIC_WEBAPP_URL: webappUrl, NEXT_PUBLIC_UPLOAD_TRANSPORT: "database" })}; window.__webpack_nonce__ = "abc"</script></html>`;
+
+  it("reads a matching public URL from window.__ENV__", () => {
+    const html = envScript("http://p1.lvh.me:3001");
+    assert.equal(parseDocumensoRunningWebappUrl(html), "http://p1.lvh.me:3001");
+    assert.equal(runningWebappUrlMatches(html, "http://p1.lvh.me:3001/"), true);
+  });
+
+  it("treats a stale 127.0.0.1 webapp URL as a mismatch", () => {
+    const html = envScript("http://127.0.0.1:3001");
+    assert.equal(parseDocumensoRunningWebappUrl(html), "http://127.0.0.1:3001");
+    assert.equal(runningWebappUrlMatches(html, "http://p1.lvh.me:3001"), false);
+  });
+
+  it("returns undefined when the __ENV__ script is missing", () => {
+    assert.equal(parseDocumensoRunningWebappUrl("<html><body>signin</body></html>"), undefined);
+    assert.equal(runningWebappUrlMatches("<html></html>", "http://p1.lvh.me:3001"), false);
   });
 });
 
