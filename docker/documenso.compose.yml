@@ -1,4 +1,35 @@
-# Overlay for Documenso docker/development/compose.yml
-# Postgres stays on 54320 (already unique). Web app is NOT in this compose —
-# start it with PORT=3001 so it does not collide with Cal on 3000.
+# Harness-owned Documenso dependencies. Standalone: does NOT read the fork's compose.yml,
+# so the fork's uncommitted edits (MinIO Quay pin, scripts/validation) are never needed.
+#
+#   docker compose -p qa-harness-documenso -f docker/documenso.compose.yml up -d --wait
+#
+# Started: Postgres (host 5451) and Inbucket mail (SMTP 2525, UI 9003).
+# Not started: Redis, MinIO, Gotenberg (stock defaults use database uploads and local jobs).
+# All published ports bind to 127.0.0.1 only.
 name: qa-harness-documenso
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: documenso
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: documenso
+    ports:
+      - "127.0.0.1:5451:5432"
+    volumes:
+      - documenso_harness_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U documenso -d documenso"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  inbucket:
+    image: inbucket/inbucket
+    ports:
+      - "127.0.0.1:2525:2500"
+      - "127.0.0.1:9003:9000"
+
+volumes:
+  documenso_harness_pg:

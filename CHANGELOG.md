@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.3 — 2026-10-11
+
+- Documenso `up()` starts the harness-owned Postgres (127.0.0.1:5451) and Inbucket (SMTP 127.0.0.1:2525), then migrates, seeds, builds, and starts the stock Remix app on 127.0.0.1:3001. It no longer depends on the fork's `docker/development/compose.yml`.
+- Documenso `up()` requires Node 24 or newer and stops before any side effect on older Node.
+- Documenso health requires HTTP 200 on `/signin` and `/api/auth/csrf` on 127.0.0.1. A localhost-only answer is reported as an `ENVIRONMENT finding`, never a pass.
+- A port that is in use by an unhealthy process is reported with its PID and executable (Windows). The harness never stops it.
+- Default `DOCUMENSO_BASE_URL` is `http://127.0.0.1:3001` and `DOCUMENSO_DB_URL` uses port 5451. `localhost` is rejected.
+- Add `npm test` (node:test, no new dependency) and `npm run check`. CI runs `npm test`. The packed tarball includes `docker/documenso.compose.yml`.
+- `composeUp` accepts `{ wait: true }` (`docker compose up -d --wait`). `pollHealth` accepts `isOk` and `alternateLoopback`. Defaults are unchanged for Cal.
+
 ## v0.2.2 — 2026-10-09
 
 - Add MIT `LICENSE`, `SECURITY.md`, `.github/CODEOWNERS`, pull request template, and `CONTRIBUTING.md`.

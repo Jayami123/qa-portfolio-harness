@@ -17,8 +17,9 @@ function composeArgs(options: ComposeOptions, extra: string[]): string[] {
   return args;
 }
 
-export async function composeUp(options: ComposeOptions): Promise<void> {
-  await run("docker", composeArgs(options, ["up", "-d"]), {
+export async function composeUp(options: ComposeOptions, opts: { wait?: boolean } = {}): Promise<void> {
+  const extra = opts.wait ? ["up", "-d", "--wait"] : ["up", "-d"];
+  await run("docker", composeArgs(options, extra), {
     cwd: options.cwd,
     env: options.env,
   });

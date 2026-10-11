@@ -31,8 +31,7 @@ Paste real command output or CI links (never secrets):
 
 ```text
 npm ci
-npm run typecheck
-npm run build
+npm run check          # typecheck + npm test + build
 npm run smoke -- cal   # when adapter/config changed
 ```
 

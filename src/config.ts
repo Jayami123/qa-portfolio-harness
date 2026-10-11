@@ -24,12 +24,12 @@ const envSchema = z.object({
   CAL_WEBHOOK_SECRET: optionalString,
   CAL_API_KEY: optionalString,
 
-  DOCUMENSO_BASE_URL: z.string().trim().url().default("http://localhost:3001"),
+  DOCUMENSO_BASE_URL: z.string().trim().url().default("http://127.0.0.1:3001"),
   DOCUMENSO_DB_URL: z
     .string()
     .trim()
     .min(1)
-    .default("postgres://documenso:password@127.0.0.1:54320/documenso"),
+    .default("postgres://documenso:password@127.0.0.1:5451/documenso"),
   DOCUMENSO_API_TOKEN: optionalString,
 
   MEDUSA_BASE_URL: z.string().trim().url().default("http://localhost:9000"),
