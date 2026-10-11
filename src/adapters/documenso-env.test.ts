@@ -94,8 +94,9 @@ describe("buildDocumensoAppEnv", () => {
 });
 
 describe("parseDocumensoPublicUrl", () => {
-  it("accepts an http hostname on the listen port and strips a trailing slash", () => {
+  it("accepts an origin URL and returns scheme, host, and port only", () => {
     assert.equal(parseDocumensoPublicUrl("http://p1.lvh.me:3001/", "3001"), "http://p1.lvh.me:3001");
+    assert.equal(parseDocumensoPublicUrl("http://p1.lvh.me:3001", "3001"), "http://p1.lvh.me:3001");
   });
 
   it("rejects localhost", () => {
@@ -121,6 +122,14 @@ describe("parseDocumensoPublicUrl", () => {
       () => parseDocumensoPublicUrl("http://p1.lvh.me:3000", "3001"),
       /port must match DOCUMENSO_BASE_URL listen port 3001 \(got 3000\)/,
     );
+  });
+
+  it("rejects a path, query, hash, or credentials", () => {
+    const example = /Example: http:\/\/p1\.lvh\.me:3001/;
+    assert.throws(() => parseDocumensoPublicUrl("http://p1.lvh.me:3001/app", "3001"), example);
+    assert.throws(() => parseDocumensoPublicUrl("http://p1.lvh.me:3001?x=1", "3001"), example);
+    assert.throws(() => parseDocumensoPublicUrl("http://p1.lvh.me:3001#h", "3001"), example);
+    assert.throws(() => parseDocumensoPublicUrl("http://u:p@p1.lvh.me:3001", "3001"), example);
   });
 });
 

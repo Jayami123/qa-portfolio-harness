@@ -54,29 +54,51 @@ function effectiveUrlPort(parsed: URL): string {
   return parsed.protocol === "https:" ? "443" : "80";
 }
 
+const publicUrlExample = (listenPort: string) => `http://p1.lvh.me:${listenPort}`;
+
 /**
- * Validate optional DOCUMENSO_PUBLIC_URL. Hostname must not be localhost or an IP.
- * Port must equal the listen port from DOCUMENSO_BASE_URL. Trailing slash is stripped.
+ * Validate optional DOCUMENSO_PUBLIC_URL. Origin only (scheme, host, port): no path beyond `/`,
+ * query, hash, or credentials. Hostname must not be localhost or an IP. Port must match listen.
  */
 export function parseDocumensoPublicUrl(raw: string, listenPort: string): string {
+  const example = publicUrlExample(listenPort);
   let parsed: URL;
   try {
     parsed = new URL(raw.trim());
   } catch {
     throw new Error(
-      `DOCUMENSO_PUBLIC_URL must be an http(s) URL (got ${raw}). Example: http://p1.lvh.me:${listenPort}.`,
+      `DOCUMENSO_PUBLIC_URL must be an http(s) URL (got ${raw}). Example: ${example}.`,
     );
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(
-      `DOCUMENSO_PUBLIC_URL must use http or https (got ${parsed.protocol}). Example: http://p1.lvh.me:${listenPort}.`,
+      `DOCUMENSO_PUBLIC_URL must use http or https (got ${parsed.protocol}). Example: ${example}.`,
+    );
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error(
+      `DOCUMENSO_PUBLIC_URL must not include a username or password. Example: ${example}.`,
+    );
+  }
+  const path = parsed.pathname;
+  if (path !== "" && path !== "/") {
+    throw new Error(
+      `DOCUMENSO_PUBLIC_URL must not include a path (got ${path}). Example: ${example}.`,
+    );
+  }
+  if (parsed.search !== "") {
+    throw new Error(
+      `DOCUMENSO_PUBLIC_URL must not include a query string. Example: ${example}.`,
+    );
+  }
+  if (parsed.hash !== "") {
+    throw new Error(
+      `DOCUMENSO_PUBLIC_URL must not include a hash. Example: ${example}.`,
     );
   }
   const hostname = parsed.hostname;
   if (!hostname) {
-    throw new Error(
-      `DOCUMENSO_PUBLIC_URL must include a hostname. Example: http://p1.lvh.me:${listenPort}.`,
-    );
+    throw new Error(`DOCUMENSO_PUBLIC_URL must include a hostname. Example: ${example}.`);
   }
   const unbracketed =
     hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
@@ -92,7 +114,7 @@ export function parseDocumensoPublicUrl(raw: string, listenPort: string): string
       `DOCUMENSO_PUBLIC_URL port must match DOCUMENSO_BASE_URL listen port ${listenPort} (got ${publicPort}).`,
     );
   }
-  return stripTrailingSlash(parsed.href);
+  return parsed.origin;
 }
 
 function publicHostResolveError(hostname: string, detail: string): Error {
