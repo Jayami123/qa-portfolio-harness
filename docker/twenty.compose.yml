@@ -1,9 +1,16 @@
-# Overlay for twenty-CRM/packages/twenty-docker/docker-compose.yml
+# Overlay for twenty-CRM/packages/twenty-docker/docker-compose.yml (tracked file only).
 # Remap app 3000 → 3002 and publish Postgres on 5434 so Cal can keep 3000.
 # Image tag is passed as TAG (default v2.44.0 on Docker Hub).
 name: qa-harness-twenty
 
 services:
+  mailpit:
+    image: axllent/mailpit:v1.22.3
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    restart: unless-stopped
+
   server:
     image: twentycrm/twenty:${TAG:-v2.44.0}
     healthcheck:
@@ -12,14 +19,34 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    depends_on:
+      mailpit:
+        condition: service_started
     ports: !override
       - "3002:3000"
     environment:
       SERVER_URL: ${TWENTY_BASE_URL:-http://localhost:3002}
+      IS_MULTIWORKSPACE_ENABLED: "false"
+      EMAIL_DRIVER: smtp
+      EMAIL_SMTP_HOST: mailpit
+      EMAIL_SMTP_PORT: 1025
+      EMAIL_SMTP_NO_TLS: "true"
+      EMAIL_FROM_ADDRESS: qa-harness@test.local
+      IS_EMAIL_VERIFICATION_REQUIRED: "false"
   worker:
     image: twentycrm/twenty:${TAG:-v2.44.0}
+    depends_on:
+      mailpit:
+        condition: service_started
     environment:
       SERVER_URL: ${TWENTY_BASE_URL:-http://localhost:3002}
+      IS_MULTIWORKSPACE_ENABLED: "false"
+      EMAIL_DRIVER: smtp
+      EMAIL_SMTP_HOST: mailpit
+      EMAIL_SMTP_PORT: 1025
+      EMAIL_SMTP_NO_TLS: "true"
+      EMAIL_FROM_ADDRESS: qa-harness@test.local
+      IS_EMAIL_VERIFICATION_REQUIRED: "false"
   db:
     ports: !override
       - "5434:5432"

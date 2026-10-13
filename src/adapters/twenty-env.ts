@@ -16,6 +16,14 @@ export const TWENTY_SEED_PRESENCE_EMAIL = TWENTY_DEFAULT_ADMIN_EMAIL;
 export const TWENTY_DB_VOLUME_SUFFIX = "db-data";
 export const TWENTY_SERVER_VOLUME_SUFFIX = "server-local-data";
 
+/** Fork-only Anchor B overlay; harness must not depend on this file. */
+export const TWENTY_FORBIDDEN_COMPOSE_FRAGMENT = "docker-compose.validation.yml";
+
+/** Compose inputs: tracked fork `docker-compose.yml` + harness overlay only. */
+export function twentyComposeFilePaths(dockerDir: string, harnessComposeFilePath: string): string[] {
+  return [path.join(dockerDir, "docker-compose.yml"), harnessComposeFilePath];
+}
+
 const PLACEHOLDER_KEY = /^replace_me/i;
 
 export function twentyImageRef(tag: string): string {
@@ -127,12 +135,9 @@ export function classifyTwentySecretValue(value: string | undefined): TwentySecr
 }
 
 export function twentyVolumeResetCommand(dockerDir: string, harnessComposeFile: string): string {
-  const compose = path.join(dockerDir, "docker-compose.yml");
-  const validation = path.join(dockerDir, "docker-compose.validation.yml");
-  return (
-    `docker compose -p qa-harness-twenty -f ${compose} -f ${validation} -f ${harnessComposeFile} down -v ` +
-    `(from ${dockerDir})`
-  );
+  const files = twentyComposeFilePaths(dockerDir, harnessComposeFile);
+  const fileArgs = files.map((f) => `-f ${f}`).join(" ");
+  return `docker compose -p qa-harness-twenty ${fileArgs} down -v (from ${dockerDir})`;
 }
 
 export interface TwentyVolumeCheck {

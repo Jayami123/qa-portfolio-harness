@@ -12,6 +12,8 @@ import {
   seedFailRerunMessage,
   seedSkippedMessage,
   selectWorkspaceOrigin,
+  twentyComposeFilePaths,
+  TWENTY_FORBIDDEN_COMPOSE_FRAGMENT,
   twentyHarnessVolumesExist,
   twentyVolumeResetCommand,
 } from "./twenty-env.js";
@@ -258,5 +260,19 @@ describe("twentyVolumeResetCommand", () => {
   it("includes harness overlay path", () => {
     assert.match(twentyVolumeResetCommand("/docker-dir", "/overlay.yml"), /down -v/);
     assert.match(twentyVolumeResetCommand("/docker-dir", "/overlay.yml"), /overlay\.yml/);
+  });
+});
+
+describe("twentyComposeFilePaths", () => {
+  it("uses only tracked fork compose plus harness overlay", () => {
+    const dockerDir = path.join("products", "twenty-CRM", "packages", "twenty-docker");
+    const overlay = path.join("harness", "docker", "twenty.compose.yml");
+    const files = twentyComposeFilePaths(dockerDir, overlay);
+    assert.equal(files.length, 2);
+    assert.equal(files[0], path.join(dockerDir, "docker-compose.yml"));
+    assert.equal(files[1], overlay);
+    for (const file of files) {
+      assert.doesNotMatch(file, new RegExp(TWENTY_FORBIDDEN_COMPOSE_FRAGMENT));
+    }
   });
 });

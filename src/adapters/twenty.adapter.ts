@@ -19,6 +19,7 @@ import {
   seedSkippedMessage,
   TWENTY_DEFAULT_ADMIN_EMAIL,
   TWENTY_SEED_PRESENCE_EMAIL,
+  twentyComposeFilePaths,
   twentyImageRef,
   type LoginTokenExchangeShape,
   type SignInResultShape,
@@ -65,11 +66,7 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
   private composeOpts() {
     return {
       projectName: COMPOSE_PROJECT,
-      files: [
-        path.join(this.dockerDir(), "docker-compose.yml"),
-        path.join(this.dockerDir(), "docker-compose.validation.yml"),
-        harnessComposeFile("twenty.compose.yml"),
-      ],
+      files: twentyComposeFilePaths(this.dockerDir(), harnessComposeFile("twenty.compose.yml")),
       cwd: this.dockerDir(),
       env: {
         ...process.env,
@@ -116,25 +113,18 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
     });
   }
 
+  private dockerComposeArgs(subcommand: string[]): string[] {
+    const opts = this.composeOpts();
+    return ["compose", "-p", opts.projectName, ...opts.files.flatMap((f) => ["-f", f]), ...subcommand];
+  }
+
   private async assertRunningServerImage(): Promise<void> {
     const expected = twentyImageRef(this.cfg.imageTag);
+    const opts = this.composeOpts();
     const { stdout: containerId } = await runCapture(
       "docker",
-      [
-        "compose",
-        "-p",
-        COMPOSE_PROJECT,
-        "-f",
-        "docker-compose.yml",
-        "-f",
-        "docker-compose.validation.yml",
-        "-f",
-        harnessComposeFile("twenty.compose.yml"),
-        "ps",
-        "-q",
-        "server",
-      ],
-      { cwd: this.dockerDir(), env: { TAG: this.cfg.imageTag }, timeoutMs: 60_000 },
+      this.dockerComposeArgs(["ps", "-q", "server"]),
+      { cwd: opts.cwd, env: opts.env, timeoutMs: 60_000 },
     );
     const id = containerId.trim();
     if (!id) {
@@ -234,26 +224,17 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     try {
       await run(
         "docker",
-        [
-          "compose",
-          "-p",
-          COMPOSE_PROJECT,
-          "-f",
-          "docker-compose.yml",
-          "-f",
-          "docker-compose.validation.yml",
-          "-f",
-          harnessComposeFile("twenty.compose.yml"),
+        this.dockerComposeArgs([
           "exec",
           "-T",
           "server",
           "yarn",
           "command:prod",
           "workspace:seed:dev",
-        ],
+        ]),
         {
-          cwd: this.dockerDir(),
-          env: { TAG: this.cfg.imageTag, TWENTY_BASE_URL: this.cfg.baseUrl },
+          cwd: this.composeOpts().cwd,
+          env: this.composeOpts().env,
           timeoutMs: 40 * 60 * 1000,
         },
       );
