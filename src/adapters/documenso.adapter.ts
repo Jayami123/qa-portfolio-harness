@@ -244,18 +244,6 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     }
   }
 
-  private async restartWebServer(): Promise<void> {
-    const { host, port } = documensoListen(this.cfg.baseUrl);
-    await this.stopListeningWeb(host, port);
-    this.webProcess = undefined;
-    this.startWeb();
-    await this.waitReady(this.webWaitMs(), FIRST_PROBE_REQUEST_MS);
-    const bypass = process.env.DANGEROUS_BYPASS_RATE_LIMITS === "true";
-    console.log(
-      `Documenso web restarted (DANGEROUS_BYPASS_RATE_LIMITS=${bypass ? "true" : "unset"}).`,
-    );
-  }
-
   private isPortOpen(host: string, port: string): Promise<boolean> {
     return new Promise((resolve) => {
       const socket = net.connect({ host, port: Number(port), timeout: 1000 }, () => {
@@ -416,11 +404,6 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
 
     const already = await this.probe(FIRST_PROBE_REQUEST_MS);
     if (already.verdict === "healthy") {
-      if (process.env.DOCUMENSO_RESTART_WEB === "1") {
-        console.log("DOCUMENSO_RESTART_WEB=1: restarting Documenso web with current harness env.");
-        await this.restartWebServer();
-        return;
-      }
       if (this.cfg.publicUrl !== undefined) {
         const html = await this.fetchSigninHtml();
         if (html === undefined || !runningWebappUrlMatches(html, this.cfg.publicUrl)) {
@@ -494,7 +477,11 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
   }
 
   async down(): Promise<void> {
+    const { host, port } = documensoListen(this.cfg.baseUrl);
+    await this.stopListeningWeb(host, port);
+    this.webProcess = undefined;
     await composeDown(this.composeOpts());
+    console.log("Documenso web stopped and compose stack torn down.");
   }
 
   async health(): Promise<HealthStatus> {
