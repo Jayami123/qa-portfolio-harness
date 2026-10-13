@@ -1,16 +1,58 @@
-import fs from "node:fs";
 import path from "node:path";
 import type { TwentyConfig } from "../config.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
-import { run } from "../internal/run.js";
+import { run, runCapture } from "../internal/run.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
-import { pollHealth } from "../wait/health.js";
+import { pollHealth, waitUntilHealthy } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
+import {
+  assertTwentyImageTag,
+  bootstrapTwentyDockerEnv,
+  defaultTwentyFs,
+  defaultTwentyRandomBytes,
+  extractBearerFromLoginTokenExchange,
+  extractBearerFromSignIn,
+  isTwentyHealthyStatus,
+  parseTwentyMetadataBody,
+  selectWorkspaceOrigin,
+  seedFailRerunMessage,
+  seedSkippedMessage,
+  TWENTY_DEFAULT_ADMIN_EMAIL,
+  TWENTY_SEED_PRESENCE_EMAIL,
+  twentyImageRef,
+  type LoginTokenExchangeShape,
+  type SignInResultShape,
+} from "./twenty-env.js";
 
 const COMPOSE_PROJECT = "qa-harness-twenty";
+const DEFAULT_WAIT_MS = 10 * 60 * 1000;
+const MIN_WAIT_MS = 120_000;
+
+const SIGN_IN_MUTATION = `mutation SignIn($email: String!, $password: String!) {
+  signIn(email: $email, password: $password) {
+    tokens { accessOrWorkspaceAgnosticToken { token } }
+    availableWorkspaces {
+      availableWorkspacesForSignIn {
+        id
+        displayName
+        loginToken
+        workspaceUrls { subdomainUrl customUrl }
+      }
+    }
+  }
+}`;
+
+const EXCHANGE_LOGIN_TOKEN_MUTATION = `mutation GetAuthTokensFromLoginToken($loginToken: String!, $origin: String!) {
+  getAuthTokensFromLoginToken(loginToken: $loginToken, origin: $origin) {
+    tokens { accessOrWorkspaceAgnosticToken { token } }
+  }
+}`;
+
+const CURRENT_USER_QUERY = `query CurrentUser { currentUser { email } }`;
 
 export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
   readonly id = "twenty" as const;
+  private seedResult?: SeedResult;
 
   constructor(cfg: TwentyConfig) {
     super(cfg);
@@ -37,49 +79,46 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
     };
   }
 
-  private assertDockerEnv(): void {
-    const envPath = path.join(this.dockerDir(), ".env");
-    if (!fs.existsSync(envPath)) {
-      throw new Error(
-        `Twenty docker .env missing at ${envPath}. Copy .env.example → .env in packages/twenty-docker ` +
-          `and set ENCRYPTION_KEY / APP_SECRET (openssl rand -base64 32). This harness will not invent secrets. ` +
-          `Alternatively run the fork's scripts/validation/anchor-b-up.ps1`,
-      );
+  private healthUrl(): string {
+    return `${this.cfg.baseUrl}/healthz`;
+  }
+
+  private waitBudgetMs(): number {
+    const raw = process.env.TWENTY_WAIT_MS;
+    if (raw === undefined || raw.trim() === "") {
+      return DEFAULT_WAIT_MS;
     }
-    const text = fs.readFileSync(envPath, "utf8");
-    const encryption = text.match(/^\s*ENCRYPTION_KEY=(.*)$/m)?.[1]?.trim() ?? "";
-    if (!encryption || encryption.startsWith("replace_me")) {
-      throw new Error(
-        `Twenty ${envPath} has no ENCRYPTION_KEY. Set it locally (do not commit). This harness will not invent secrets.`,
-      );
+    const requested = Number(raw);
+    return Number.isFinite(requested) && requested >= MIN_WAIT_MS ? requested : DEFAULT_WAIT_MS;
+  }
+
+  private async listDockerVolumes(): Promise<string[]> {
+    try {
+      const { stdout } = await runCapture("docker", ["volume", "ls", "--format", "{{.Name}}"], {
+        cwd: this.dockerDir(),
+        timeoutMs: 60_000,
+      });
+      return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    } catch {
+      return [];
     }
   }
 
-  async up(): Promise<void> {
-    this.assertDockerEnv();
-    await composeUp(this.composeOpts());
-    console.log(`
-Twenty stack is starting (image twentycrm/twenty:${this.cfg.imageTag}).
-  App:      ${this.cfg.baseUrl}/healthz
-  Postgres: host port 5434 (container 5432)
-  Mailpit:  http://localhost:8025
-
-Seed is separate (can take 15–30 minutes): npm run smoke will call seed(), or:
-  docker compose -p ${COMPOSE_PROJECT} -f docker-compose.yml exec -T server yarn command:prod workspace:seed:dev
-`);
+  private async prepareDockerEnvAsync(): Promise<void> {
+    const names = await this.listDockerVolumes();
+    bootstrapTwentyDockerEnv({
+      dockerDir: this.dockerDir(),
+      harnessComposeFile: harnessComposeFile("twenty.compose.yml"),
+      fs: defaultTwentyFs,
+      randomBytes: defaultTwentyRandomBytes,
+      volumes: { listVolumes: () => names },
+      projectName: COMPOSE_PROJECT,
+    });
   }
 
-  async down(): Promise<void> {
-    await composeDown(this.composeOpts());
-  }
-
-  async health(): Promise<HealthStatus> {
-    return pollHealth(`${this.cfg.baseUrl}/healthz`, { timeoutMs: 0 });
-  }
-
-  async seed(): Promise<SeedResult> {
-    this.assertDockerEnv();
-    await run(
+  private async assertRunningServerImage(): Promise<void> {
+    const expected = twentyImageRef(this.cfg.imageTag);
+    const { stdout: containerId } = await runCapture(
       "docker",
       [
         "compose",
@@ -91,32 +130,153 @@ Seed is separate (can take 15–30 minutes): npm run smoke will call seed(), or:
         "docker-compose.validation.yml",
         "-f",
         harnessComposeFile("twenty.compose.yml"),
-        "exec",
-        "-T",
+        "ps",
+        "-q",
         "server",
-        "yarn",
-        "command:prod",
-        "workspace:seed:dev",
       ],
-      {
-        cwd: this.dockerDir(),
-        env: { TAG: this.cfg.imageTag, TWENTY_BASE_URL: this.cfg.baseUrl },
-        timeoutMs: 40 * 60 * 1000,
-      },
+      { cwd: this.dockerDir(), env: { TAG: this.cfg.imageTag }, timeoutMs: 60_000 },
     );
+    const id = containerId.trim();
+    if (!id) {
+      throw new Error("Twenty server container not found after compose up.");
+    }
+    const { stdout: imageLine } = await runCapture(
+      "docker",
+      ["inspect", "--format", "{{.Config.Image}}", id],
+      { cwd: this.dockerDir(), timeoutMs: 60_000 },
+    );
+    const running = imageLine.trim();
+    if (running !== expected) {
+      throw new Error(`Twenty server image is ${running}, expected ${expected}. Check TWENTY_IMAGE_TAG and docker/twenty.compose.yml.`);
+    }
+  }
 
-    return {
+  async up(): Promise<void> {
+    assertTwentyImageTag(this.cfg.imageTag);
+    await this.prepareDockerEnvAsync();
+    await composeUp(this.composeOpts(), { wait: true });
+    await this.assertRunningServerImage();
+    console.log(`
+Twenty stack is up (image ${twentyImageRef(this.cfg.imageTag)}).
+  App:      ${this.healthUrl()} (HTTP 200)
+  Postgres: host port 5434 (container 5432)
+  Mailpit:  http://127.0.0.1:8025 (SMTP 1025; Documenso Inbucket uses 2525 / 9003)
+
+Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
+  docker compose -p ${COMPOSE_PROJECT} -f docker-compose.yml exec -T server yarn command:prod workspace:seed:dev
+`);
+  }
+
+  async down(): Promise<void> {
+    const opts = this.composeOpts();
+    if (process.env.TWENTY_DOWN_VOLUMES === "1") {
+      await run("docker", ["compose", "-p", opts.projectName, ...opts.files.flatMap((f) => ["-f", f]), "down", "-v"], {
+        cwd: opts.cwd,
+        env: opts.env,
+      });
+      return;
+    }
+    await composeDown(opts);
+  }
+
+  async health(): Promise<HealthStatus> {
+    return pollHealth(this.healthUrl(), { timeoutMs: 0, isOk: isTwentyHealthyStatus });
+  }
+
+  async waitHealthy(timeoutMs?: number): Promise<void> {
+    await waitUntilHealthy(this.healthUrl(), {
+      timeoutMs: timeoutMs ?? this.waitBudgetMs(),
+      isOk: isTwentyHealthyStatus,
+    });
+  }
+
+  private seedUsers(): SeedResult["users"] {
+    return [
+      { email: TWENTY_DEFAULT_ADMIN_EMAIL, role: "Admin", notes: "shared TWENTY_PASSWORD (dev seeder)" },
+      { email: "jony.ive@apple.dev", role: "Member", notes: "shared TWENTY_PASSWORD (dev seeder)" },
+      { email: "phil.schiler@apple.dev", role: "Guest", notes: "shared TWENTY_PASSWORD (dev seeder)" },
+      { email: "tim@apple.dev", role: "Limited", notes: "shared TWENTY_PASSWORD (dev seeder)" },
+    ];
+  }
+
+  private async seedAlreadyPresent(): Promise<boolean> {
+    try {
+      const data = await this.metadataGraphql<SignInResultShape>(
+        SIGN_IN_MUTATION,
+        { email: this.cfg.email, password: this.cfg.password },
+        "seed presence signIn",
+      );
+      const workspaces = data.signIn?.availableWorkspaces?.availableWorkspacesForSignIn ?? [];
+      return workspaces.length > 0 || Boolean(extractBearerFromSignIn(data));
+    } catch {
+      return false;
+    }
+  }
+
+  async seed(): Promise<SeedResult> {
+    if (this.seedResult) {
+      return this.seedResult;
+    }
+    await this.prepareDockerEnvAsync();
+
+    if (await this.seedAlreadyPresent()) {
+      const notes = seedSkippedMessage(TWENTY_SEED_PRESENCE_EMAIL);
+      this.seedResult = {
+        product: this.id,
+        created: false,
+        users: this.seedUsers(),
+        notes,
+      };
+      console.log(notes);
+      return this.seedResult;
+    }
+
+    try {
+      await run(
+        "docker",
+        [
+          "compose",
+          "-p",
+          COMPOSE_PROJECT,
+          "-f",
+          "docker-compose.yml",
+          "-f",
+          "docker-compose.validation.yml",
+          "-f",
+          harnessComposeFile("twenty.compose.yml"),
+          "exec",
+          "-T",
+          "server",
+          "yarn",
+          "command:prod",
+          "workspace:seed:dev",
+        ],
+        {
+          cwd: this.dockerDir(),
+          env: { TAG: this.cfg.imageTag, TWENTY_BASE_URL: this.cfg.baseUrl },
+          timeoutMs: 40 * 60 * 1000,
+        },
+      );
+    } catch (error) {
+      const output =
+        error instanceof Error && "stderr" in error
+          ? `${(error as Error & { stderr?: string }).stderr ?? ""}\n${(error as Error & { stdout?: string }).stdout ?? ""}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      if (await this.seedAlreadyPresent()) {
+        throw new Error(seedFailRerunMessage(output));
+      }
+      throw error;
+    }
+
+    this.seedResult = {
       product: this.id,
       created: true,
-      users: [
-        {
-          email: "tim@apple.dev",
-          role: "demo",
-          notes: "Fork validation README: password equals email for demo users. Set TWENTY_EMAIL / TWENTY_PASSWORD in harness .env.",
-        },
-      ],
+      users: this.seedUsers(),
       notes: "Invoked `yarn command:prod workspace:seed:dev` inside the twenty server container.",
     };
+    return this.seedResult;
   }
 
   async authenticate(): Promise<AuthSession> {
@@ -131,50 +291,38 @@ Seed is separate (can take 15–30 minutes): npm run smoke will call seed(), or:
 
     const email = this.cfg.email;
     const password = this.cfg.password;
-    if (!email || !password) {
-      throw new Error(
-        "Twenty authenticate() needs TWENTY_API_KEY, or TWENTY_EMAIL + TWENTY_PASSWORD in the harness .env. " +
-          "Demo users are documented in the fork's scripts/validation/README.md — copy them into .env, do not commit.",
-      );
-    }
 
-    const origin = this.cfg.baseUrl;
-    const loginToken = await this.graphqlMetadata<{
-      getLoginTokenFromCredentials?: { loginToken?: { token?: string } };
-    }>(
-      `mutation GetLoginTokenFromCredentials($email: String!, $password: String!, $origin: String!) {
-        getLoginTokenFromCredentials(email: $email, password: $password, origin: $origin) {
-          loginToken { token }
-        }
-      }`,
-      { email, password, origin },
+    const signIn = await this.metadataGraphql<SignInResultShape>(
+      SIGN_IN_MUTATION,
+      { email, password },
+      "signIn",
     );
 
-    const token = loginToken.getLoginTokenFromCredentials?.loginToken?.token;
-    if (!token) {
-      throw new Error(
-        "Twenty getLoginTokenFromCredentials returned no token. Check TWENTY_EMAIL / TWENTY_PASSWORD and that seed has run.",
-      );
-    }
-
-    const auth = await this.graphqlMetadata<{
-      getAuthTokensFromLoginToken?: {
-        tokens?: { accessOrWorkspaceAgnosticToken?: { token?: string } };
+    const direct = extractBearerFromSignIn(signIn);
+    if (direct) {
+      return {
+        product: this.id,
+        baseUrl: this.cfg.baseUrl,
+        authorizationHeader: `Bearer ${direct}`,
+        raw: { source: "graphql-metadata-signIn", origin: this.cfg.baseUrl },
       };
-    }>(
-      `mutation GetAuthTokensFromLoginToken($loginToken: String!, $origin: String!) {
-        getAuthTokensFromLoginToken(loginToken: $loginToken, origin: $origin) {
-          tokens {
-            accessOrWorkspaceAgnosticToken { token expiresAt }
-            refreshToken { token expiresAt }
-          }
-        }
-      }`,
-      { loginToken: token, origin },
-    );
+    }
 
-    const access =
-      auth.getAuthTokensFromLoginToken?.tokens?.accessOrWorkspaceAgnosticToken?.token;
+    const workspaces = signIn.signIn?.availableWorkspaces?.availableWorkspacesForSignIn ?? [];
+    const workspace = workspaces[0];
+    if (!workspace?.loginToken) {
+      throw new Error(
+        "Twenty signIn returned no bearer token and no workspace loginToken. Check TWENTY_EMAIL / TWENTY_PASSWORD and that seed has run.",
+      );
+    }
+
+    const origin = selectWorkspaceOrigin(workspace, this.cfg.baseUrl);
+    const exchanged = await this.metadataGraphql<LoginTokenExchangeShape>(
+      EXCHANGE_LOGIN_TOKEN_MUTATION,
+      { loginToken: workspace.loginToken, origin },
+      "getAuthTokensFromLoginToken",
+    );
+    const access = extractBearerFromLoginTokenExchange(exchanged);
     if (!access) {
       throw new Error("Twenty getAuthTokensFromLoginToken returned no access token.");
     }
@@ -183,15 +331,40 @@ Seed is separate (can take 15–30 minutes): npm run smoke will call seed(), or:
       product: this.id,
       baseUrl: this.cfg.baseUrl,
       authorizationHeader: `Bearer ${access}`,
-      raw: {
-        source: "graphql-metadata-signIn",
-        // TODO(verify): origin may need a workspace subdomain (apple.localhost) in some Twenty configs.
-        origin,
-      },
+      raw: { source: "graphql-metadata-getAuthTokensFromLoginToken", origin },
     };
   }
 
-  private async graphqlMetadata<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  async proveAuth(session: AuthSession): Promise<void> {
+    const url = `${this.cfg.baseUrl}/metadata`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: session.authorizationHeader,
+      },
+      body: JSON.stringify({ query: CURRENT_USER_QUERY }),
+    });
+    const body = (await response.json()) as {
+      data?: { currentUser?: { email?: string } };
+      errors?: { message: string }[];
+    };
+    parseTwentyMetadataBody(response.status, body, "proveAuth currentUser");
+    const email = body.data?.currentUser?.email;
+    if (!email) {
+      throw new Error("Twenty proveAuth: currentUser returned no email.");
+    }
+    if (email !== this.cfg.email) {
+      throw new Error(`Twenty proveAuth: expected currentUser.email ${this.cfg.email}, got ${email}.`);
+    }
+    console.log(`Twenty auth probe: POST ${url} currentUser.email=${email} (HTTP ${response.status})`);
+  }
+
+  private async metadataGraphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    context: string,
+  ): Promise<T> {
     const url = `${this.cfg.baseUrl}/metadata`;
     const response = await fetch(url, {
       method: "POST",
@@ -199,14 +372,6 @@ Seed is separate (can take 15–30 minutes): npm run smoke will call seed(), or:
       body: JSON.stringify({ query, variables }),
     });
     const body = (await response.json()) as { data?: T; errors?: { message: string }[] };
-    if (!response.ok || body.errors?.length) {
-      throw new Error(
-        `Twenty POST ${url} failed (HTTP ${response.status}): ${body.errors?.map((e) => e.message).join("; ") || "no token"}`,
-      );
-    }
-    if (!body.data) {
-      throw new Error(`Twenty POST ${url} returned no data.`);
-    }
-    return body.data;
+    return parseTwentyMetadataBody(response.status, body, context);
   }
 }

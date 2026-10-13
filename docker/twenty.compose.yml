@@ -5,11 +5,13 @@ name: qa-harness-twenty
 
 services:
   server:
+    image: twentycrm/twenty:${TAG:-2.44.0}
     ports: !override
       - "3002:3000"
     environment:
       SERVER_URL: ${TWENTY_BASE_URL:-http://localhost:3002}
   worker:
+    image: twentycrm/twenty:${TAG:-2.44.0}
     environment:
       SERVER_URL: ${TWENTY_BASE_URL:-http://localhost:3002}
   db:
