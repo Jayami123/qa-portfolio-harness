@@ -11,7 +11,7 @@ import {
   listTwentyDockerVolumeNames,
   parseDockerVolumeList,
   parseTwentyMetadataBody,
-  seedFailRerunMessage,
+  seedExecFailedMessage,
   seedSkippedMessage,
   selectWorkspaceOrigin,
   twentyComposeFilePaths,
@@ -245,8 +245,12 @@ describe("selectWorkspaceOrigin", () => {
 describe("seed messages", () => {
   it("documents skip vs fail paths", () => {
     assert.match(seedSkippedMessage("jane@example.com"), /seed skipped/);
-    assert.match(seedFailRerunMessage(), /seeder output above/);
-    assert.match(seedFailRerunMessage(), /down -v/);
+    const cause = "Error response from daemon: No such exec instance";
+    const failMsg = seedExecFailedMessage("jane.austen@apple.dev", cause);
+    assert.match(failMsg, /jane\.austen@apple\.dev/);
+    assert.match(failMsg, /No such exec instance/);
+    assert.match(failMsg, /TWENTY_DOWN_VOLUMES=1/);
+    assert.doesNotMatch(failMsg, /already-seeded database/);
   });
 });
 

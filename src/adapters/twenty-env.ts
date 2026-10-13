@@ -243,10 +243,12 @@ export function seedSkippedMessage(email: string): string {
   return `Twenty seed skipped: seed user ${email} already present.`;
 }
 
-export function seedFailRerunMessage(): string {
+export function seedExecFailedMessage(email: string, cause: string): string {
   return (
-    "Twenty seed failed on an already-seeded database. See the seeder output above. " +
-    "Reset volumes with down -v before retrying."
+    "Twenty seed command exited with an error. " +
+    `Seed user ${email} is present afterwards, so the seed may have completed before the error or the database was already seeded. ` +
+    `Original error: ${cause}. ` +
+    "To get a clean state, reset volumes (TWENTY_DOWN_VOLUMES=1 down) and rerun."
   );
 }
 
