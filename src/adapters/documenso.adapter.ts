@@ -28,6 +28,7 @@ import {
   runningWebappUrlMatches,
   type DocumensoProbeVerdict,
 } from "./documenso-env.js";
+import { stopDocumensoWebFromPidFile, writeDocumensoWebPid } from "./documenso-web-pid.js";
 
 const COMPOSE_PROJECT = "qa-harness-documenso";
 const SEED_EXAMPLE_EMAIL = "example@documenso.com";
@@ -221,27 +222,14 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       this.webProcess.kill("SIGTERM");
       await sleep(3000);
     }
+    stopDocumensoWebFromPidFile(HARNESS_ROOT);
     if (!(await this.isPortOpen(host, port))) {
       return;
     }
-    if (platform() === "win32") {
-      const netstat = execFileSync("netstat", ["-ano"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      for (const pid of parseNetstatListeningPids(netstat, port)) {
-        execFileSync("taskkill", ["/PID", String(pid), "/F"], { stdio: "ignore" });
-      }
-    } else {
-      execFileSync("fuser", ["-k", `${port}/tcp`], { stdio: "ignore" });
-      await sleep(2000);
-    }
-    if (await this.isPortOpen(host, port)) {
-      throw new Error(
-        `Documenso web still listening on ${host}:${port} after stop attempt.\n` +
-          `Listeners:\n${this.portOwnerReport(port)}`,
-      );
-    }
+    throw new Error(
+      `Documenso web still listening on ${host}:${port} after stop attempt.\n` +
+        `Listeners:\n${this.portOwnerReport(port)}`,
+    );
   }
 
   private isPortOpen(host: string, port: string): Promise<boolean> {
@@ -471,7 +459,11 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       cwd: this.productRoot,
       logFile,
       env: this.appEnv(),
+      detached: platform() !== "win32",
     });
+    if (this.webProcess.pid !== undefined) {
+      writeDocumensoWebPid(this.webProcess.pid);
+    }
     // Keep the web server running after this CLI exits. Stop it yourself (it is not a container).
     this.webProcess.unref();
   }
