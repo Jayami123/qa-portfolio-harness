@@ -17,7 +17,7 @@ import {
   selectWorkspaceOrigin,
   listTwentyDockerVolumeNames,
   parseDockerVolumeList,
-  seedFailRerunMessage,
+  seedExecFailedMessage,
   seedSkippedMessage,
   TWENTY_DEFAULT_ADMIN_EMAIL,
   TWENTY_SEED_PRESENCE_EMAIL,
@@ -240,7 +240,8 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
       );
     } catch (error) {
       if (await this.seedAlreadyPresent()) {
-        throw new Error(seedFailRerunMessage());
+        const cause = error instanceof Error ? error.message : String(error);
+        throw new Error(seedExecFailedMessage(TWENTY_SEED_PRESENCE_EMAIL, cause), { cause: error });
       }
       throw error;
     }

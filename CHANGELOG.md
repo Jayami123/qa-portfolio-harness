@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.8 - 2026-10-14
+
+- Twenty `seed()` reports the real docker exec error when the seed command fails but the seed user is already present, instead of asserting an already-seeded database.
+
 ## v0.2.7 — 2026-10-13
 
 - Twenty pins `twentycrm/twenty:v2.44.0` in `docker/twenty.compose.yml`, rejects `latest`, and inspects the running server image after `docker compose up -d --wait`. Server `healthcheck.start_period` is 300s so compose `--wait` tolerates a slow first boot.
