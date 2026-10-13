@@ -8,6 +8,8 @@ import {
   extractBearerFromLoginTokenExchange,
   extractBearerFromSignIn,
   isTwentyHealthyStatus,
+  listTwentyDockerVolumeNames,
+  parseDockerVolumeList,
   parseTwentyMetadataBody,
   seedFailRerunMessage,
   seedSkippedMessage,
@@ -243,8 +245,29 @@ describe("selectWorkspaceOrigin", () => {
 describe("seed messages", () => {
   it("documents skip vs fail paths", () => {
     assert.match(seedSkippedMessage("jane@example.com"), /seed skipped/);
-    assert.match(seedFailRerunMessage("boom"), /down -v/);
-    assert.match(seedFailRerunMessage("boom"), /boom/);
+    assert.match(seedFailRerunMessage(), /seeder output above/);
+    assert.match(seedFailRerunMessage(), /down -v/);
+  });
+});
+
+describe("parseDockerVolumeList", () => {
+  it("splits docker volume ls lines", () => {
+    assert.deepEqual(parseDockerVolumeList("qa-harness-twenty_db-data\n\nqa-harness-twenty_server-local-data\n"), [
+      "qa-harness-twenty_db-data",
+      "qa-harness-twenty_server-local-data",
+    ]);
+  });
+});
+
+describe("listTwentyDockerVolumeNames", () => {
+  it("propagates when docker volume ls fails", async () => {
+    await assert.rejects(
+      () =>
+        listTwentyDockerVolumeNames(async () => {
+          throw new Error("docker volume ls failed");
+        }),
+      /docker volume ls failed/,
+    );
   });
 });
 

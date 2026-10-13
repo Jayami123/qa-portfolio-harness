@@ -15,6 +15,8 @@ import {
   isTwentyHealthyStatus,
   parseTwentyMetadataBody,
   selectWorkspaceOrigin,
+  listTwentyDockerVolumeNames,
+  parseDockerVolumeList,
   seedFailRerunMessage,
   seedSkippedMessage,
   TWENTY_DEFAULT_ADMIN_EMAIL,
@@ -90,15 +92,13 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
   }
 
   private async listDockerVolumes(): Promise<string[]> {
-    try {
+    return listTwentyDockerVolumeNames(async () => {
       const { stdout } = await runCapture("docker", ["volume", "ls", "--format", "{{.Name}}"], {
         cwd: this.dockerDir(),
         timeoutMs: 60_000,
       });
-      return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    } catch {
-      return [];
-    }
+      return parseDockerVolumeList(stdout);
+    });
   }
 
   private async prepareDockerEnvAsync(): Promise<void> {
@@ -239,14 +239,8 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
         },
       );
     } catch (error) {
-      const output =
-        error instanceof Error && "stderr" in error
-          ? `${(error as Error & { stderr?: string }).stderr ?? ""}\n${(error as Error & { stdout?: string }).stdout ?? ""}`
-          : error instanceof Error
-            ? error.message
-            : String(error);
       if (await this.seedAlreadyPresent()) {
-        throw new Error(seedFailRerunMessage(output));
+        throw new Error(seedFailRerunMessage());
       }
       throw error;
     }

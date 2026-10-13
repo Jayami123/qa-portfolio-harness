@@ -243,10 +243,22 @@ export function seedSkippedMessage(email: string): string {
   return `Twenty seed skipped: seed user ${email} already present.`;
 }
 
-export function seedFailRerunMessage(output: string): string {
+export function seedFailRerunMessage(): string {
   return (
-    `Twenty seed failed on an already-seeded database. Inspect the output below and reset volumes with down -v before retrying.\n${output}`
+    "Twenty seed failed on an already-seeded database. See the seeder output above. " +
+    "Reset volumes with down -v before retrying."
   );
+}
+
+export function parseDockerVolumeList(stdout: string): string[] {
+  return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+export type TwentyDockerVolumeLister = () => Promise<string[]>;
+
+/** Lists Docker volume names; propagates errors from `docker volume ls` (never treats failure as empty). */
+export async function listTwentyDockerVolumeNames(listVolumes: TwentyDockerVolumeLister): Promise<string[]> {
+  return listVolumes();
 }
 
 export const defaultTwentyFs: TwentyDockerEnvFs = {
