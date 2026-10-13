@@ -106,6 +106,26 @@ describe("buildDocumensoAppEnv", () => {
     assert.equal(set.NEXT_PRIVATE_INTERNAL_WEBAPP_URL, "http://127.0.0.1:3001");
     assert.equal(set.PORT, "3001");
   });
+
+  it("adds DANGEROUS_BYPASS_RATE_LIMITS only when process env is exactly true", () => {
+    const prev = process.env.DANGEROUS_BYPASS_RATE_LIMITS;
+    try {
+      delete process.env.DANGEROUS_BYPASS_RATE_LIMITS;
+      assert.equal(buildDocumensoAppEnv(cfg).DANGEROUS_BYPASS_RATE_LIMITS, undefined);
+
+      process.env.DANGEROUS_BYPASS_RATE_LIMITS = "1";
+      assert.equal(buildDocumensoAppEnv(cfg).DANGEROUS_BYPASS_RATE_LIMITS, undefined);
+
+      process.env.DANGEROUS_BYPASS_RATE_LIMITS = "true";
+      assert.equal(buildDocumensoAppEnv(cfg).DANGEROUS_BYPASS_RATE_LIMITS, "true");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.DANGEROUS_BYPASS_RATE_LIMITS;
+      } else {
+        process.env.DANGEROUS_BYPASS_RATE_LIMITS = prev;
+      }
+    }
+  });
 });
 
 describe("documensoLocalSigningCertPath", () => {

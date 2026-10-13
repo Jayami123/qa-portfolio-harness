@@ -23,7 +23,7 @@ export function resolveNpm(): string {
 export function spawnLogged(
   command: string,
   args: string[],
-  options: { cwd: string; logFile: string; env?: NodeJS.ProcessEnv },
+  options: { cwd: string; logFile: string; env?: NodeJS.ProcessEnv; detached?: boolean },
 ): ReturnType<typeof spawn> {
   fs.mkdirSync(path.dirname(options.logFile), { recursive: true });
   fs.appendFileSync(
@@ -32,12 +32,14 @@ export function spawnLogged(
   );
   const out = fs.openSync(options.logFile, "a");
   const err = fs.openSync(options.logFile, "a");
+  const detached = options.detached === true;
   return spawn(command, args, {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
     shell: platform() === "win32",
     stdio: ["ignore", out, err],
     windowsHide: true,
+    ...(detached ? { detached: true } : {}),
   });
 }
 

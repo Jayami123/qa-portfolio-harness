@@ -28,6 +28,7 @@ import {
   runningWebappUrlMatches,
   type DocumensoProbeVerdict,
 } from "./documenso-env.js";
+import { stopDocumensoWebFromPidFile, writeDocumensoWebPid } from "./documenso-web-pid.js";
 
 const COMPOSE_PROJECT = "qa-harness-documenso";
 const SEED_EXAMPLE_EMAIL = "example@documenso.com";
@@ -39,6 +40,8 @@ const MIN_BUILD_MS = 120_000;
 const DEFAULT_WAIT_MS = 10 * 60_000;
 const MIN_WAIT_MS = 120_000;
 const PRISMA_TIMEOUT_MS = 10 * 60_000;
+const DOCUMENSO_WEB_STOP_POLL_MS = 15_000;
+const DOCUMENSO_WEB_STOP_POLL_INTERVAL_MS = 200;
 
 interface HarnessBuildRecord {
   readonly gitSha: string;
@@ -214,6 +217,41 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       const record: HarnessBuildRecord = { gitSha: sha };
       fs.writeFileSync(this.buildMarkerPath(), `${JSON.stringify(record)}\n`, "utf8");
     }
+  }
+
+  private async waitForPortClosed(host: string, port: string, deadlineMs: number): Promise<boolean> {
+    const deadline = Date.now() + deadlineMs;
+    while (Date.now() < deadline) {
+      if (!(await this.isPortOpen(host, port))) {
+        return true;
+      }
+      await sleep(DOCUMENSO_WEB_STOP_POLL_INTERVAL_MS);
+    }
+    return !(await this.isPortOpen(host, port));
+  }
+
+  private async stopListeningWeb(host: string, port: string): Promise<void> {
+    if (this.webProcess?.exitCode === null) {
+      this.webProcess.kill("SIGTERM");
+      await sleep(3000);
+    }
+    let stopError: Error | undefined;
+    try {
+      stopDocumensoWebFromPidFile(HARNESS_ROOT);
+    } catch (error) {
+      stopError = error instanceof Error ? error : new Error(String(error));
+    }
+    const closed = await this.waitForPortClosed(host, port, DOCUMENSO_WEB_STOP_POLL_MS);
+    if (closed) {
+      return;
+    }
+    if (stopError !== undefined) {
+      throw stopError;
+    }
+    throw new Error(
+      `Documenso web still listening on ${host}:${port} after stop attempt.\n` +
+        `Listeners:\n${this.portOwnerReport(port)}`,
+    );
   }
 
   private isPortOpen(host: string, port: string): Promise<boolean> {
@@ -443,13 +481,21 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       cwd: this.productRoot,
       logFile,
       env: this.appEnv(),
+      detached: platform() !== "win32",
     });
+    if (this.webProcess.pid !== undefined) {
+      writeDocumensoWebPid(this.webProcess.pid);
+    }
     // Keep the web server running after this CLI exits. Stop it yourself (it is not a container).
     this.webProcess.unref();
   }
 
   async down(): Promise<void> {
+    const { host, port } = documensoListen(this.cfg.baseUrl);
+    await this.stopListeningWeb(host, port);
+    this.webProcess = undefined;
     await composeDown(this.composeOpts());
+    console.log("Documenso web stopped and compose stack torn down.");
   }
 
   async health(): Promise<HealthStatus> {

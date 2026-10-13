@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.6 — 2026-10-13
+
+- Documenso `up()` records the harness-started web server pid in `.harness/documenso-web.pid`. `down()` stops only that process tree (Windows: `taskkill /PID … /T /F`; Linux: process group `SIGTERM`) and removes the pid file. A missing or stale pid file does not throw. If the listen port is still in use after that stop, `down()` fails with the listener report and does not kill any other process.
+- Optional `DANGEROUS_BYPASS_RATE_LIMITS=true` on the harness process (test/CI only) is forwarded into the Documenso app env when the value is exactly `true`. Unset or any other value leaves rate limits enabled.
+
 ## v0.2.5 — 2026-10-12
 
 - Documenso `up()` sets local PDF signing to the fork example certificate at `apps/remix/example/cert.p12` (`NEXT_PRIVATE_SIGNING_TRANSPORT=local`, absolute `NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH`, empty passphrase). Remix start is `NODE_ENV=production`, so Documenso will not load `./example/cert.p12` by itself. If that file is missing, `up()` stops before Docker and prints the path.

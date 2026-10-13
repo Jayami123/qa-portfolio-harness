@@ -273,6 +273,9 @@ export function buildDocumensoAppEnv(cfg: {
     NEXT_PRIVATE_SIGNING_TRANSPORT: "local",
     NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: documensoLocalSigningCertPath(cfg.productRoot),
     NEXT_PRIVATE_SIGNING_PASSPHRASE: "",
+    ...(process.env.DANGEROUS_BYPASS_RATE_LIMITS === "true"
+      ? { DANGEROUS_BYPASS_RATE_LIMITS: "true" }
+      : {}),
   };
 }
 

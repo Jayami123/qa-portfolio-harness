@@ -144,7 +144,7 @@ If `node -v` is below 24, `up()` stops before Docker starts and prints `Documens
 4. Copies the fork's `.env.example` to `.env` if that file is missing. This is a local, uncommitted file. Secrets are the stock placeholders, passed as env vars.
 5. Runs `prisma:migrate-deploy`, then `prisma:seed` if `example@documenso.com` is missing.
 6. Builds the Remix app, unless `apps/remix/build/harness-build.json` matches the product `HEAD`. Set `DOCUMENSO_WEB_REBUILD=1` to force a rebuild.
-7. Starts `npm run start -w @documenso/remix`. Logs append to `.harness/documenso-web.log`. Each start adds a spawn banner, so earlier job errors stay in the file. The server is left running after `up()` returns. Stop it yourself.
+7. Starts `npm run start -w @documenso/remix`. Logs append to `.harness/documenso-web.log`. Each start adds a spawn banner, so earlier job errors stay in the file. The harness writes the web pid to `.harness/documenso-web.pid`. The server is left running after `up()` returns until you run `down`.
 
 Completing a document runs the seal job, which signs the PDF. The harness sets `NEXT_PRIVATE_SIGNING_TRANSPORT=local`, `NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH` to the absolute path of that example `.p12`, and `NEXT_PRIVATE_SIGNING_PASSPHRASE` to empty (the bundled dev cert). Remix `npm run start` is `NODE_ENV=production`, so Documenso will not fall back to `./example/cert.p12`. Upstream CI sets the path for the same reason.
 
@@ -173,7 +173,9 @@ Open the app in the browser at `http://p1.lvh.me:3001`, not `http://127.0.0.1:30
 
 Environment knobs: `DOCUMENSO_SKIP_WEB_START=1` (compose only), `DOCUMENSO_WEB_BUILD_MS`, `DOCUMENSO_WEB_WAIT_MS`, `DOCUMENSO_WEB_REBUILD=1`, `DOCUMENSO_PUBLIC_URL`.
 
-`node scripts/down.mjs documenso` stops the harness compose containers only.
+**Test-only rate-limit bypass:** set `DANGEROUS_BYPASS_RATE_LIMITS=true` on the harness process before `up()` (exact string `true`; `1` or unset leaves limits on). The harness passes it into the Remix app env; never set it in the Documenso fork `.env`. P1 uses a second `down`/`up` cycle after **P1-DOC-RL-001**.
+
+`node scripts/down.mjs documenso` stops the pid recorded in `.harness/documenso-web.pid` (process tree only), then tears down the harness compose stack. If the listen port is still busy, `down()` prints the listener report and exits without killing unrelated processes.
 
 ## How to start Cal and run smoke
 
