@@ -32,7 +32,7 @@ describe("assertTwentyImageTag", () => {
   });
 
   it("accepts a pinned tag", () => {
-    assert.doesNotThrow(() => assertTwentyImageTag("2.44.0"));
+    assert.doesNotThrow(() => assertTwentyImageTag("v2.44.0"));
   });
 });
 

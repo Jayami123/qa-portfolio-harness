@@ -1,17 +1,23 @@
 # Overlay for twenty-CRM/packages/twenty-docker/docker-compose.yml
 # Remap app 3000 → 3002 and publish Postgres on 5434 so Cal can keep 3000.
-# Image tag is passed as TAG (default 2.44.0, matching the fork's validation pin).
+# Image tag is passed as TAG (default v2.44.0 on Docker Hub).
 name: qa-harness-twenty
 
 services:
   server:
-    image: twentycrm/twenty:${TAG:-2.44.0}
+    image: twentycrm/twenty:${TAG:-v2.44.0}
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz
+      start_period: 300s
+      interval: 5s
+      timeout: 5s
+      retries: 20
     ports: !override
       - "3002:3000"
     environment:
       SERVER_URL: ${TWENTY_BASE_URL:-http://localhost:3002}
   worker:
-    image: twentycrm/twenty:${TAG:-2.44.0}
+    image: twentycrm/twenty:${TAG:-v2.44.0}
     environment:
       SERVER_URL: ${TWENTY_BASE_URL:-http://localhost:3002}
   db:

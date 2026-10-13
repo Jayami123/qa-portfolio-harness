@@ -2,7 +2,7 @@
 
 ## v0.2.7 — 2026-10-13
 
-- Twenty pins `twentycrm/twenty:2.44.0` in `docker/twenty.compose.yml`, rejects `latest`, and inspects the running server image after `docker compose up -d --wait`.
+- Twenty pins `twentycrm/twenty:v2.44.0` in `docker/twenty.compose.yml`, rejects `latest`, and inspects the running server image after `docker compose up -d --wait`. Server `healthcheck.start_period` is 300s so compose `--wait` tolerates a slow first boot.
 - Twenty `health()` / `waitHealthy()` require HTTP **200** on `GET /healthz` (default wait budget 10 minutes, override with `TWENTY_WAIT_MS`). Default `TWENTY_BASE_URL` is `http://127.0.0.1:3002`.
 - Twenty `up()` bootstraps gitignored `packages/twenty-docker/.env` secrets (`ENCRYPTION_KEY`, `APP_SECRET`) when missing or placeholder, with a volume/key mismatch guard before compose starts.
 - Twenty `authenticate()` uses the fork’s `signIn` metadata mutation (workspace `loginToken` + `getAuthTokensFromLoginToken` when needed). Defaults: Admin `jane.austen@apple.dev` and the shared dev-seeder `TWENTY_PASSWORD` (override in harness `.env`). `proveAuth()` posts `currentUser` on `/metadata` with the Bearer token.

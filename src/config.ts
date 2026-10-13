@@ -56,7 +56,7 @@ const envSchema = z.object({
     .preprocess(emptyToUndefined, z.string().trim().min(1).optional())
     .default(TWENTY_DEV_SEED_PASSWORD),
   TWENTY_API_KEY: optionalString,
-  TWENTY_IMAGE_TAG: z.string().trim().min(1).default("2.44.0"),
+  TWENTY_IMAGE_TAG: z.string().trim().min(1).default("v2.44.0"),
 });
 
 export interface ProductConfig {

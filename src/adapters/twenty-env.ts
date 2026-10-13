@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-export const TWENTY_DEFAULT_IMAGE_TAG = "2.44.0";
+export const TWENTY_DEFAULT_IMAGE_TAG = "v2.44.0";
 export const TWENTY_IMAGE_REPO = "twentycrm/twenty";
 
 /** Shared dev-seeder password (see fork `seed-users.util.ts` hash comment). Not a production secret. */
@@ -29,7 +29,7 @@ export function isTwentyHealthyStatus(statusCode: number): boolean {
 export function assertTwentyImageTag(imageTag: string): void {
   const tag = imageTag.trim();
   if (!tag) {
-    throw new Error("Twenty image tag is empty. Set TWENTY_IMAGE_TAG (for example 2.44.0). This harness does not run :latest.");
+    throw new Error("Twenty image tag is empty. Set TWENTY_IMAGE_TAG (for example v2.44.0). This harness does not run :latest.");
   }
   if (tag === "latest") {
     throw new Error(

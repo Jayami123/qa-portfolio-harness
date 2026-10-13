@@ -14,6 +14,52 @@ function printConfig() {
   console.log("dbUrl       ", redactDbUrl(adapter.dbUrl));
 }
 
+function smokeReachHints(productId, adapter) {
+  const footer = `
+Config-only check (no running app):
+  npm run smoke -- ${productId} --dry-run
+`;
+  switch (productId) {
+    case "twenty":
+      return `
+Could not reach ${productId} at ${adapter.baseUrl}.
+
+Typical causes:
+  - Docker Desktop is not running (Twenty runs entirely in Docker)
+  - First boot can take several minutes (image pull, migrations, seed); wait for GET /healthz HTTP 200
+  - Inspect the server: docker logs qa-harness-twenty-server-1
+${footer}`;
+    case "documenso":
+      return `
+Could not reach ${productId} at ${adapter.baseUrl}.
+
+Typical causes:
+  - Docker Desktop is not running (Postgres / Inbucket)
+  - Node 24+ required; first build/start can take a long time on 127.0.0.1:3001
+  - Web start skipped: unset DOCUMENSO_SKIP_WEB_START, or start Remix yourself
+${footer}`;
+    case "medusa":
+      return `
+Could not reach ${productId} at ${adapter.baseUrl}.
+
+Typical causes:
+  - Docker Desktop is not running (validation Postgres / Redis / MinIO)
+  - Medusa store process may not be started by the harness; confirm your starter on port 9000
+${footer}`;
+    case "cal":
+    default:
+      return `
+Could not reach ${productId} at ${adapter.baseUrl}.
+
+Typical causes:
+  - Docker Desktop is not running (needed for Postgres)
+  - First-time Cal install: cd ${adapter.productRoot} && yarn && copy .env.example to .env
+  - Web start skipped: unset CAL_SKIP_WEB_START, or start Cal yourself
+  - Windows: Cal Turbopack crashes; harness uses next dev --webpack (set CAL_WEB_BUNDLER=turbopack to override)
+${footer}`;
+  }
+}
+
 function redactDbUrl(url) {
   try {
     const parsed = new URL(url);
@@ -48,18 +94,7 @@ try {
   await adapter.waitHealthy(process.env.SMOKE_TIMEOUT_MS ? Number(process.env.SMOKE_TIMEOUT_MS) : 180_000);
 } catch (error) {
   console.error(`\nwaitHealthy failed: ${error instanceof Error ? error.message : error}`);
-  console.error(`
-Could not reach ${id} at ${adapter.baseUrl}.
-
-Typical causes:
-  - Docker Desktop is not running (needed for Postgres)
-  - First-time Cal install: cd ${adapter.productRoot} && yarn && copy .env.example to .env
-  - Web start skipped: unset CAL_SKIP_WEB_START, or start Cal yourself
-  - Windows: Cal Turbopack crashes; harness uses next dev --webpack (set CAL_WEB_BUNDLER=turbopack to override)
-
-Config-only check (no running app):
-  npm run smoke -- ${id} --dry-run
-`);
+  console.error(smokeReachHints(id, adapter));
   process.exit(1);
 }
 
