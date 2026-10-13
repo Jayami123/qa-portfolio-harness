@@ -1,7 +1,9 @@
-/** Documenso helpers. Parsers are pure (no I/O). DNS lookup is injected so tests stay offline. */
+/** Documenso helpers. Parsers are pure (no I/O). DNS lookup and cert existence are injected so tests stay offline. */
 
 import dns from "node:dns/promises";
+import fs from "node:fs";
 import net from "node:net";
+import path from "node:path";
 
 export const DOCUMENSO_NODE_MAJOR = 24;
 export const DOCUMENSO_DEFAULT_PORT = "3001";
@@ -207,6 +209,31 @@ export function runningWebappUrlMatches(html: string, expectedPublicUrl: string)
 }
 
 /**
+ * Absolute path to the fork's bundled dev certificate. Remix `npm run start` sets
+ * NODE_ENV=production, so Documenso will not fall back to `./example/cert.p12`.
+ * An absolute path does not depend on the Remix process cwd (the harness spawns at productRoot).
+ */
+export function documensoLocalSigningCertPath(productRoot: string): string {
+  return path.resolve(productRoot, "apps", "remix", "example", "cert.p12");
+}
+
+/**
+ * Fail before Docker when the fork example cert is not on disk. The harness does not generate one.
+ */
+export function assertDocumensoSigningCert(
+  productRoot: string,
+  exists: (filePath: string) => boolean = fs.existsSync,
+): void {
+  const certPath = documensoLocalSigningCertPath(productRoot);
+  if (!exists(certPath)) {
+    throw new Error(
+      `Documenso local signing certificate missing at ${certPath}. ` +
+        `Run npm ci in the Documenso fork, then retry.`,
+    );
+  }
+}
+
+/**
  * Local-only values for the app process and migrate/seed commands. These are the stock
  * `.env.example` placeholders from the fork, not secrets. The harness values win over the
  * product `.env` because dotenv does not override variables already set in the environment.
@@ -214,10 +241,14 @@ export function runningWebappUrlMatches(html: string, expectedPublicUrl: string)
  * NEXT_PRIVATE_INTERNAL_WEBAPP_URL always stays on the listen/base URL so the server can
  * talk to itself without depending on a public hostname. NEXT_PUBLIC_WEBAPP_URL follows
  * publicUrl when set (passkey RP ID / cookie domain).
+ *
+ * Local signing uses the fork example cert with an empty passphrase (same as `.env.example`).
+ * Seal calls signPdf under production start, which requires this path.
  */
 export function buildDocumensoAppEnv(cfg: {
   baseUrl: string;
   dbUrl: string;
+  productRoot: string;
   publicUrl?: string;
 }): Record<string, string> {
   const { port } = documensoListen(cfg.baseUrl);
@@ -239,6 +270,9 @@ export function buildDocumensoAppEnv(cfg: {
     NEXT_PRIVATE_SMTP_FROM_ADDRESS: "noreply@documenso.com",
     NEXT_PUBLIC_UPLOAD_TRANSPORT: "database",
     NEXT_PRIVATE_JOBS_PROVIDER: "local",
+    NEXT_PRIVATE_SIGNING_TRANSPORT: "local",
+    NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: documensoLocalSigningCertPath(cfg.productRoot),
+    NEXT_PRIVATE_SIGNING_PASSPHRASE: "",
   };
 }
 

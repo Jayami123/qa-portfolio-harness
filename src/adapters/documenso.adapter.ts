@@ -15,6 +15,7 @@ import { BaseAdapter } from "./base.js";
 import {
   assertDocumensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
+  assertDocumensoSigningCert,
   buildDocumensoAppEnv,
   classifyDocumensoProbe,
   documensoHealthUrls,
@@ -363,6 +364,7 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
 
   async up(): Promise<void> {
     assertDocumensoNodeVersion(process.versions.node);
+    assertDocumensoSigningCert(this.productRoot);
     const { host, port } = documensoListen(this.cfg.baseUrl);
 
     if (this.cfg.publicUrl !== undefined) {
@@ -436,7 +438,6 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     }
     const logFile = this.logFile();
     fs.mkdirSync(path.dirname(logFile), { recursive: true });
-    fs.writeFileSync(logFile, "");
     console.log(`Starting Documenso web: npm run start -w @documenso/remix (logs: ${logFile})`);
     this.webProcess = spawnLogged(resolveNpm(), ["run", "start", "-w", "@documenso/remix"], {
       cwd: this.productRoot,

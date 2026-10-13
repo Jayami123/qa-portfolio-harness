@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.5 — 2026-10-12
+
+- Documenso `up()` sets local PDF signing to the fork example certificate at `apps/remix/example/cert.p12` (`NEXT_PRIVATE_SIGNING_TRANSPORT=local`, absolute `NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH`, empty passphrase). Remix start is `NODE_ENV=production`, so Documenso will not load `./example/cert.p12` by itself. If that file is missing, `up()` stops before Docker and prints the path.
+- `.harness/documenso-web.log` is appended on each web start. A spawn banner marks the new process, so earlier seal and job errors stay in the log.
+
 ## v0.2.4 — 2026-10-11
 
 - Optional `DOCUMENSO_PUBLIC_URL` (for example `http://p1.lvh.me:3001`) sets `NEXT_PUBLIC_WEBAPP_URL` so WebAuthn can use a hostname RP ID. `NEXT_PRIVATE_INTERNAL_WEBAPP_URL`, listen, and health stay on `DOCUMENSO_BASE_URL` (`http://127.0.0.1:3001`). Unset keeps v0.2.3 behaviour.
