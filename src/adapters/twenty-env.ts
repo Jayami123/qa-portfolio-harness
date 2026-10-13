@@ -248,7 +248,7 @@ export function seedExecFailedMessage(email: string, cause: string): string {
     "Twenty seed command exited with an error. " +
     `Seed user ${email} is present afterwards, so the seed may have completed before the error or the database was already seeded. ` +
     `Original error: ${cause}. ` +
-    "To get a clean state, reset volumes (TWENTY_DOWN_VOLUMES=1 down) and rerun."
+    "To get a clean state, reset volumes with TWENTY_DOWN_VOLUMES=1 npm run down -- twenty and rerun."
   );
 }
 

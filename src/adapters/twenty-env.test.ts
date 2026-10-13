@@ -249,7 +249,7 @@ describe("seed messages", () => {
     const failMsg = seedExecFailedMessage("jane.austen@apple.dev", cause);
     assert.match(failMsg, /jane\.austen@apple\.dev/);
     assert.match(failMsg, /No such exec instance/);
-    assert.match(failMsg, /TWENTY_DOWN_VOLUMES=1/);
+    assert.match(failMsg, /TWENTY_DOWN_VOLUMES=1 npm run down -- twenty/);
     assert.doesNotMatch(failMsg, /already-seeded database/);
   });
 });
