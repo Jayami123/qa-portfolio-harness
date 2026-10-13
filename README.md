@@ -113,7 +113,7 @@ Released consumer pin:
 ```json
 {
   "dependencies": {
-    "qa-portfolio-harness": "github:Jayami123/qa-portfolio-harness#v0.2.3"
+    "qa-portfolio-harness": "github:Jayami123/qa-portfolio-harness#v0.2.8"
   }
 }
 ```
