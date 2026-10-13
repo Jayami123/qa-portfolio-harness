@@ -216,6 +216,46 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     }
   }
 
+  private async stopListeningWeb(host: string, port: string): Promise<void> {
+    if (this.webProcess?.exitCode === null) {
+      this.webProcess.kill("SIGTERM");
+      await sleep(3000);
+    }
+    if (!(await this.isPortOpen(host, port))) {
+      return;
+    }
+    if (platform() === "win32") {
+      const netstat = execFileSync("netstat", ["-ano"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      for (const pid of parseNetstatListeningPids(netstat, port)) {
+        execFileSync("taskkill", ["/PID", String(pid), "/F"], { stdio: "ignore" });
+      }
+    } else {
+      execFileSync("fuser", ["-k", `${port}/tcp`], { stdio: "ignore" });
+      await sleep(2000);
+    }
+    if (await this.isPortOpen(host, port)) {
+      throw new Error(
+        `Documenso web still listening on ${host}:${port} after stop attempt.\n` +
+          `Listeners:\n${this.portOwnerReport(port)}`,
+      );
+    }
+  }
+
+  private async restartWebServer(): Promise<void> {
+    const { host, port } = documensoListen(this.cfg.baseUrl);
+    await this.stopListeningWeb(host, port);
+    this.webProcess = undefined;
+    this.startWeb();
+    await this.waitReady(this.webWaitMs(), FIRST_PROBE_REQUEST_MS);
+    const bypass = process.env.DANGEROUS_BYPASS_RATE_LIMITS === "true";
+    console.log(
+      `Documenso web restarted (DANGEROUS_BYPASS_RATE_LIMITS=${bypass ? "true" : "unset"}).`,
+    );
+  }
+
   private isPortOpen(host: string, port: string): Promise<boolean> {
     return new Promise((resolve) => {
       const socket = net.connect({ host, port: Number(port), timeout: 1000 }, () => {
@@ -376,6 +416,11 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
 
     const already = await this.probe(FIRST_PROBE_REQUEST_MS);
     if (already.verdict === "healthy") {
+      if (process.env.DOCUMENSO_RESTART_WEB === "1") {
+        console.log("DOCUMENSO_RESTART_WEB=1: restarting Documenso web with current harness env.");
+        await this.restartWebServer();
+        return;
+      }
       if (this.cfg.publicUrl !== undefined) {
         const html = await this.fetchSigninHtml();
         if (html === undefined || !runningWebappUrlMatches(html, this.cfg.publicUrl)) {
