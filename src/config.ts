@@ -3,6 +3,7 @@ import path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-env.js";
+import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
 import { HARNESS_ROOT } from "./paths.js";
 import type { ProductId } from "./types.js";
 
@@ -44,16 +45,18 @@ const envSchema = z.object({
   MEDUSA_ADMIN_PASSWORD: optionalString,
   MEDUSA_PUBLISHABLE_API_KEY: optionalString,
 
-  TWENTY_BASE_URL: z.string().trim().url().default("http://localhost:3002"),
+  TWENTY_BASE_URL: z.string().trim().url().default("http://127.0.0.1:3002"),
   TWENTY_DB_URL: z
     .string()
     .trim()
     .min(1)
-    .default("postgres://postgres:postgres@localhost:5434/default"),
-  TWENTY_EMAIL: optionalString,
-  TWENTY_PASSWORD: optionalString,
+    .default("postgres://postgres:postgres@127.0.0.1:5434/default"),
+  TWENTY_EMAIL: z.preprocess(emptyToUndefined, z.string().trim().email().optional()).default(TWENTY_DEFAULT_ADMIN_EMAIL),
+  TWENTY_PASSWORD: z
+    .preprocess(emptyToUndefined, z.string().trim().min(1).optional())
+    .default(TWENTY_DEV_SEED_PASSWORD),
   TWENTY_API_KEY: optionalString,
-  TWENTY_IMAGE_TAG: z.string().trim().min(1).default("2.44.0"),
+  TWENTY_IMAGE_TAG: z.string().trim().min(1).default("v2.44.0"),
 });
 
 export interface ProductConfig {
@@ -86,8 +89,8 @@ export interface MedusaConfig extends ProductConfig {
 
 export interface TwentyConfig extends ProductConfig {
   id: "twenty";
-  email?: string;
-  password?: string;
+  email: string;
+  password: string;
   apiKey?: string;
   imageTag: string;
 }
