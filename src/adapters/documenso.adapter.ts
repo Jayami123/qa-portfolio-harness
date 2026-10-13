@@ -40,6 +40,8 @@ const MIN_BUILD_MS = 120_000;
 const DEFAULT_WAIT_MS = 10 * 60_000;
 const MIN_WAIT_MS = 120_000;
 const PRISMA_TIMEOUT_MS = 10 * 60_000;
+const DOCUMENSO_WEB_STOP_POLL_MS = 15_000;
+const DOCUMENSO_WEB_STOP_POLL_INTERVAL_MS = 200;
 
 interface HarnessBuildRecord {
   readonly gitSha: string;
@@ -217,14 +219,34 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     }
   }
 
+  private async waitForPortClosed(host: string, port: string, deadlineMs: number): Promise<boolean> {
+    const deadline = Date.now() + deadlineMs;
+    while (Date.now() < deadline) {
+      if (!(await this.isPortOpen(host, port))) {
+        return true;
+      }
+      await sleep(DOCUMENSO_WEB_STOP_POLL_INTERVAL_MS);
+    }
+    return !(await this.isPortOpen(host, port));
+  }
+
   private async stopListeningWeb(host: string, port: string): Promise<void> {
     if (this.webProcess?.exitCode === null) {
       this.webProcess.kill("SIGTERM");
       await sleep(3000);
     }
-    stopDocumensoWebFromPidFile(HARNESS_ROOT);
-    if (!(await this.isPortOpen(host, port))) {
+    let stopError: Error | undefined;
+    try {
+      stopDocumensoWebFromPidFile(HARNESS_ROOT);
+    } catch (error) {
+      stopError = error instanceof Error ? error : new Error(String(error));
+    }
+    const closed = await this.waitForPortClosed(host, port, DOCUMENSO_WEB_STOP_POLL_MS);
+    if (closed) {
       return;
+    }
+    if (stopError !== undefined) {
+      throw stopError;
     }
     throw new Error(
       `Documenso web still listening on ${host}:${port} after stop attempt.\n` +
