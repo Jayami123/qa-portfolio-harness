@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  commandLineMatchesProductRoot,
+  classifyHarnessLauncher,
+  collectDescendants,
+  parseCommandLine,
   parseLsofPids,
   parseNetstatListeningPids,
 } from "./medusa-listeners.js";
@@ -49,49 +51,222 @@ describe("parseLsofPids", () => {
   });
 });
 
-describe("commandLineMatchesProductRoot", () => {
-  const root = "D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter";
-
-  it("matches a Windows command line that runs from the product", () => {
-    assert.equal(
-      commandLineMatchesProductRoot(
-        "C:\\nvm4w\\nodejs\\node.exe D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\storefront\\node_modules\\next\\dist\\bin\\next start -p 8000",
-        root,
+describe("parseCommandLine", () => {
+  it("splits on spaces, keeps quoted paths together, and leaves backslashes alone", () => {
+    assert.deepEqual(
+      parseCommandLine(
+        '"C:\\Program Files\\nodejs\\node.exe" D:\\p\\next start -p 8000',
       ),
-      true,
+      [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "D:\\p\\next",
+        "start",
+        "-p",
+        "8000",
+      ],
     );
+  });
+
+  it("returns no arguments for an empty line", () => {
+    assert.deepEqual(parseCommandLine(""), []);
+    assert.deepEqual(parseCommandLine("   "), []);
+  });
+});
+
+describe("classifyHarnessLauncher", () => {
+  const root = "D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter";
+  const backendSpawn = parseCommandLine(
+    "C:\\nvm4w\\nodejs\\node.exe D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\backend\\node_modules\\@medusajs\\cli\\cli.js start",
+  );
+  const storefrontSpawn = parseCommandLine(
+    "C:\\nvm4w\\nodejs\\node.exe D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\storefront\\node_modules\\next\\dist\\bin\\next start -p 8000",
+  );
+
+  it("matches the backend spawn line", () => {
+    assert.equal(classifyHarnessLauncher(backendSpawn, root), "backend");
+  });
+
+  it("matches the storefront spawn line", () => {
+    assert.equal(classifyHarnessLauncher(storefrontSpawn, root), "storefront");
+  });
+
+  it("matches the pnpm store layout of the medusa CLI", () => {
+    const argv = parseCommandLine(
+      "node D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\node_modules\\.pnpm\\@medusajs+cli@2.21.2\\node_modules\\@medusajs\\cli\\cli.js start",
+    );
+    assert.equal(classifyHarnessLauncher(argv, root), "backend");
+  });
+
+  it("matches a script under apps/backend/.medusa/server", () => {
+    const argv = [
+      "node",
+      "D:/Jayami/Portfolio/products/medusa-dtc-starter/apps/backend/.medusa/server/index.js",
+    ];
+    assert.equal(classifyHarnessLauncher(argv, root), "backend");
   });
 
   it("matches across slash styles and case", () => {
+    const argv = [
+      "/usr/bin/node",
+      "D:/JAYAMI/portfolio/PRODUCTS/Medusa-DTC-Starter/apps/storefront/node_modules/next/dist/bin/next",
+      "start",
+    ];
     assert.equal(
-      commandLineMatchesProductRoot(
-        "node D:/Jayami/Portfolio/products/Medusa-DTC-Starter/apps/backend/x.js",
+      classifyHarnessLauncher(
+        argv,
         "d:\\jayami\\portfolio\\products\\medusa-dtc-starter",
       ),
-      true,
+      "storefront",
     );
+  });
+
+  it("does not match when the product path is only in a later argument", () => {
+    const argv = parseCommandLine(
+      "node D:\\other\\server.js --config D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\x",
+    );
+    assert.equal(classifyHarnessLauncher(argv, root), undefined);
+  });
+
+  it("does not match when the product CLI path is only a later argument", () => {
+    const argv = [
+      "node",
+      "D:/other/wrapper.js",
+      "D:/Jayami/Portfolio/products/medusa-dtc-starter/apps/storefront/node_modules/next/dist/bin/next",
+      "start",
+    ];
+    assert.equal(classifyHarnessLauncher(argv, root), undefined);
+  });
+
+  it("does not take a node flag value for the launch script", () => {
+    const argv = [
+      "node",
+      "--require",
+      "D:/Jayami/Portfolio/products/medusa-dtc-starter/apps/storefront/node_modules/next/dist/bin/next",
+      "unrelated.js",
+      "start",
+    ];
+    assert.equal(classifyHarnessLauncher(argv, root), undefined);
+  });
+
+  it("does not match the same CLI without start (build, dev)", () => {
+    const argv = parseCommandLine(
+      "node D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\storefront\\node_modules\\next\\dist\\bin\\next build",
+    );
+    assert.equal(classifyHarnessLauncher(argv, root), undefined);
   });
 
   it("does not match a sibling folder that only shares the prefix", () => {
+    const argv = [
+      "node",
+      "D:/Jayami/Portfolio/products/medusa-dtc-starter-old/apps/storefront/node_modules/next/dist/bin/next",
+      "start",
+    ];
+    assert.equal(classifyHarnessLauncher(argv, root), undefined);
+  });
+
+  it("does not match non-node executables or eval", () => {
     assert.equal(
-      commandLineMatchesProductRoot(
-        "node D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter-old\\server.js",
+      classifyHarnessLauncher(
+        [
+          "pnpm",
+          "D:/Jayami/Portfolio/products/medusa-dtc-starter/apps/storefront/node_modules/next/dist/bin/next",
+          "start",
+        ],
         root,
       ),
-      false,
+      undefined,
     );
-  });
-
-  it("does not match an unrelated process (no match = do not kill)", () => {
     assert.equal(
-      commandLineMatchesProductRoot("node D:\\other\\server.js", root),
-      false,
+      classifyHarnessLauncher(["node", "-e", "require('x')", "start"], root),
+      undefined,
     );
   });
 
-  it("never matches when the command line or root is missing or empty", () => {
-    assert.equal(commandLineMatchesProductRoot(undefined, root), false);
-    assert.equal(commandLineMatchesProductRoot("", root), false);
-    assert.equal(commandLineMatchesProductRoot("node server.js", ""), false);
+  it("does not match an empty command line or an empty root", () => {
+    assert.equal(
+      classifyHarnessLauncher(parseCommandLine(""), root),
+      undefined,
+    );
+    assert.equal(classifyHarnessLauncher(backendSpawn, ""), undefined);
+  });
+
+  describe("relative launch script with a Linux cwd", () => {
+    const productRoot = "/home/dev/products/medusa-dtc-starter";
+    const argv = [
+      "node",
+      "node_modules/next/dist/bin/next",
+      "start",
+      "-p",
+      "8000",
+    ];
+
+    it("matches when the cwd is inside apps/storefront", () => {
+      assert.equal(
+        classifyHarnessLauncher(
+          argv,
+          productRoot,
+          `${productRoot}/apps/storefront`,
+        ),
+        "storefront",
+      );
+    });
+
+    it("does not match when the cwd is outside the product apps", () => {
+      assert.equal(
+        classifyHarnessLauncher(argv, productRoot, "/tmp"),
+        undefined,
+      );
+      assert.equal(
+        classifyHarnessLauncher(argv, productRoot, `${productRoot}/apps/other`),
+        undefined,
+      );
+    });
+
+    it("does not match a relative script without a cwd", () => {
+      assert.equal(classifyHarnessLauncher(argv, productRoot), undefined);
+    });
+
+    it("does not let a relative script escape the product through ..", () => {
+      const escaping = [
+        "node",
+        "../../../outside/node_modules/next/dist/bin/next",
+        "start",
+      ];
+      assert.equal(
+        classifyHarnessLauncher(
+          escaping,
+          productRoot,
+          `${productRoot}/apps/storefront`,
+        ),
+        undefined,
+      );
+    });
+  });
+});
+
+describe("collectDescendants", () => {
+  const tree: Record<number, number[]> = {
+    1: [2, 3],
+    2: [4],
+    3: [],
+    4: [5],
+  };
+  const childrenOf = (pid: number) => tree[pid] ?? [];
+
+  it("returns all descendants, deepest first, without the root pid", () => {
+    assert.deepEqual(collectDescendants(1, childrenOf), [5, 4, 2, 3]);
+  });
+
+  it("returns an empty list for a pid with no children", () => {
+    assert.deepEqual(collectDescendants(3, childrenOf), []);
+    assert.deepEqual(collectDescendants(99, childrenOf), []);
+  });
+
+  it("survives a cycle in the process table", () => {
+    const cyclic: Record<number, number[]> = { 1: [2], 2: [3], 3: [1, 2] };
+    assert.deepEqual(
+      collectDescendants(1, (pid) => cyclic[pid] ?? []),
+      [3, 2],
+    );
   });
 });

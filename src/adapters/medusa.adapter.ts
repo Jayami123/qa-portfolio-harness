@@ -58,9 +58,12 @@ import {
   serializeMedusaComposeRecord,
 } from "./medusa-compose-record.js";
 import {
-  commandLineMatchesProductRoot,
+  classifyHarnessLauncher,
+  collectDescendants,
+  parseCommandLine,
   parseLsofPids,
   parseNetstatListeningPids,
+  type HarnessLauncherKind,
 } from "./medusa-listeners.js";
 import {
   ensureMedusaAdminUser,
@@ -574,7 +577,10 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     }
     stopMedusaStorefrontFromPidFile(HARNESS_ROOT);
     this.storefrontProcess = undefined;
-    this.reapProductListeners(medusaListen(this.cfg.storefrontUrl).port);
+    await this.reapProductListeners(
+      medusaListen(this.cfg.storefrontUrl).port,
+      "storefront",
+    );
   }
 
   private listeningPids(port: string): number[] {
@@ -601,68 +607,143 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     }
   }
 
-  private commandLineOf(pid: number): string | undefined {
+  /** Full argv of `pid`. Windows reads the CIM command line; Linux reads /proc, then falls back to ps. */
+  private processArgv(pid: number): string[] {
+    if (platform() === "win32") {
+      try {
+        const out = execFileSync(
+          "powershell",
+          [
+            "-NoProfile",
+            "-Command",
+            `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+          ],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+        );
+        return parseCommandLine(out.trim());
+      } catch {
+        return [];
+      }
+    }
     try {
-      const out =
-        platform() === "win32"
-          ? execFileSync(
-              "powershell",
-              [
-                "-NoProfile",
-                "-Command",
-                `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
-              ],
-              { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-            )
-          : execFileSync("ps", ["-o", "args=", "-p", String(pid)], {
-              encoding: "utf8",
-              stdio: ["ignore", "pipe", "pipe"],
-            });
-      return out.trim() === "" ? undefined : out.trim();
+      const argv = fs
+        .readFileSync(`/proc/${pid}/cmdline`, "utf8")
+        .split("\0")
+        .filter((arg) => arg !== "");
+      if (argv.length > 0) {
+        return argv;
+      }
+    } catch {
+      // No /proc (macOS): fall back to ps.
+    }
+    try {
+      const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return parseCommandLine(out.trim());
+    } catch {
+      return [];
+    }
+  }
+
+  /** Working directory of `pid`. Linux only (/proc/<pid>/cwd); undefined elsewhere. */
+  private processCwd(pid: number): string | undefined {
+    if (platform() === "win32") {
+      return undefined;
+    }
+    try {
+      return fs.readlinkSync(`/proc/${pid}/cwd`);
     } catch {
       return undefined;
     }
   }
 
-  private killProcessTree(pid: number): void {
+  private childPids(pid: number): number[] {
+    try {
+      return parseLsofPids(
+        execFileSync("pgrep", ["-P", String(pid)], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+      );
+    } catch {
+      // pgrep exits 1 when there are no children.
+      return [];
+    }
+  }
+
+  private signalPids(pids: readonly number[], signal: NodeJS.Signals): void {
+    for (const pid of pids) {
+      try {
+        process.kill(pid, signal);
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+
+  private pidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "EPERM";
+    }
+  }
+
+  /**
+   * Windows: taskkill /T /F. Unix: walk all descendants with pgrep -P, SIGTERM them deepest first and
+   * then the pid, wait 2 s, SIGKILL whatever is still alive. No process-group kill.
+   */
+  private async killProcessTree(pid: number): Promise<void> {
     if (platform() === "win32") {
       execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
         stdio: ["ignore", "pipe", "pipe"],
       });
       return;
     }
-    try {
-      execFileSync("pkill", ["-KILL", "-P", String(pid)], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch {
-      // pkill exits 1 when there are no children.
-    }
-    process.kill(pid, "SIGKILL");
+    const order = [
+      ...collectDescendants(pid, (parent) => this.childPids(parent)),
+      pid,
+    ];
+    this.signalPids(order, "SIGTERM");
+    await sleep(2000);
+    this.signalPids(
+      order.filter((target) => this.pidAlive(target)),
+      "SIGKILL",
+    );
   }
 
   /**
-   * After the pid-file stop, kill leftover listeners on `port` only when their command line
-   * runs from this product. Anything else is left alone.
+   * After the pid-file stop, kill leftover listeners on `port` only when they were launched through
+   * the harness's own entry point for `expected` (see classifyHarnessLauncher). Anything else is left alone.
    */
-  private reapProductListeners(port: string): void {
+  private async reapProductListeners(
+    port: string,
+    expected: HarnessLauncherKind,
+  ): Promise<void> {
     for (const pid of this.listeningPids(port)) {
-      const commandLine = this.commandLineOf(pid);
-      if (!commandLineMatchesProductRoot(commandLine, this.productRoot)) {
+      const kind = classifyHarnessLauncher(
+        this.processArgv(pid),
+        this.productRoot,
+        this.processCwd(pid),
+      );
+      if (kind !== expected) {
         console.log(
-          `Port ${port} is held by pid ${pid}, which does not run from ${this.productRoot}; not killing it.`,
+          `Port ${port} is held by pid ${pid}, which is not the harness ${expected} launched from ${this.productRoot}; not killing it.`,
         );
         continue;
       }
       try {
-        this.killProcessTree(pid);
+        await this.killProcessTree(pid);
         console.log(
-          `Killed leftover Medusa process on port ${port}: pid ${pid} and its children.`,
+          `Killed leftover Medusa ${expected} on port ${port}: pid ${pid} and its children.`,
         );
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         console.warn(
-          `Could not kill leftover Medusa process pid ${pid} on port ${port}: ${detail}`,
+          `Could not kill leftover Medusa ${expected} pid ${pid} on port ${port}: ${detail}`,
         );
       }
     }
@@ -847,7 +928,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     } catch (error) {
       stopError = error instanceof Error ? error : new Error(String(error));
     }
-    this.reapProductListeners(port);
+    await this.reapProductListeners(port, "backend");
     const closed = await this.waitForPortClosed(host, port, STOP_POLL_MS);
     this.backendProcess = undefined;
     if (closed) {
