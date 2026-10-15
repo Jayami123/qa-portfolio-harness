@@ -43,8 +43,9 @@ ${footer}`;
 Could not reach ${productId} at ${adapter.baseUrl}.
 
 Typical causes:
-  - Docker Desktop is not running (validation Postgres / Redis / MinIO)
-  - Medusa store process may not be started by the harness; confirm your starter on port 9000
+  - Docker Desktop is not running (harness Postgres on 127.0.0.1:5433; Redis only when MEDUSA_REDIS=1)
+  - Set MEDUSA_ADMIN_EMAIL and MEDUSA_ADMIN_PASSWORD in harness .env for seed/authenticate
+  - First boot: pnpm install in medusa-dtc-starter; medusa build can take several minutes
 ${footer}`;
     case "cal":
     default:

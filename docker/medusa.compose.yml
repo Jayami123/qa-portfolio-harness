@@ -1,6 +1,5 @@
 # Harness-owned Medusa Postgres. Does not read the DTC starter or the engine fork.
-# Redis is not started: apps/backend/medusa-config.ts never sets projectConfig.redisUrl,
-# and the framework does not read REDIS_URL. See docs/adr/0001-medusa-fake-redis.md.
+# Redis is not started unless MEDUSA_REDIS=1 (see docker/medusa.redis.compose.yml). Default: fake Redis — docs/adr/0001-medusa-fake-redis.md.
 #
 #   docker compose -p qa-harness-medusa -f docker/medusa.compose.yml up -d --wait
 #

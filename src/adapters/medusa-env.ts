@@ -24,11 +24,17 @@ export const MEDUSA_HTTP_MODE: MedusaHttpMode = "production";
  */
 export const MEDUSA_REBUILD_PACKAGES: readonly string[] = [];
 
-/**
- * False: `REDIS_URL` does not become `projectConfig.redisUrl`. The harness compose does not start Redis.
- * Confirmed against `@medusajs/framework` 2.21.2 and a `medusa start` log (see the plan and ADR 0001).
- */
-export const MEDUSA_REDIS_WIRED = false;
+/** Default harness Redis URL when `MEDUSA_REDIS=1`. */
+export const MEDUSA_DEFAULT_REDIS_URL = "redis://127.0.0.1:6380";
+
+export const MEDUSA_STRIPE_PROVIDER_ID = "pp_stripe_stripe";
+
+export const MEDUSA_SEED_PROMO_CODE = "QA10";
+export const MEDUSA_GERMAN_WAREHOUSE_NAME = "German Warehouse";
+export const MEDUSA_SEED_COLLECTION_TITLE = "Featured";
+export const MEDUSA_US_REGION_NAME = "United States";
+export const MEDUSA_DEFAULT_CUSTOMER_EMAIL = "customer@test.com";
+export const MEDUSA_DEFAULT_CUSTOMER_PASSWORD = "customer123";
 
 type Semver = readonly [number, number, number];
 
@@ -131,10 +137,32 @@ export function classifyMedusaProbe(strictOk: boolean, localhostOk: boolean): Me
   return localhostOk ? "environment" : "unhealthy";
 }
 
+export interface MedusaHarnessSwitches {
+  readonly redis: boolean;
+  readonly stripe: boolean;
+}
+
+export function parseMedusaHarnessSwitches(env: Record<string, string | undefined>): MedusaHarnessSwitches {
+  return {
+    redis: env.MEDUSA_REDIS === "1",
+    stripe: env.MEDUSA_STRIPE === "1",
+  };
+}
+
+export function medusaComposeFileNames(switches: MedusaHarnessSwitches): readonly string[] {
+  const files = ["medusa.compose.yml"];
+  if (switches.redis) {
+    files.push("medusa.redis.compose.yml");
+  }
+  return files;
+}
+
 export interface MedusaBackendEnvInput {
   databaseUrl: string;
-  /** Set only when Medusa actually reads Redis from the environment. */
+  /** Set when `MEDUSA_REDIS=1`. */
   redisUrl?: string;
+  stripeApiKey?: string;
+  stripeWebhookSecret?: string;
 }
 
 function splitLines(text: string): string[] {
@@ -145,33 +173,126 @@ function splitLines(text: string): string[] {
  * Copy the backend template and set DATABASE_URL.
  * REDIS_URL is written only when `redisUrl` is passed. Otherwise that line is dropped.
  */
-export function buildMedusaBackendEnvFile(template: string, input: MedusaBackendEnvInput): string {
-  let sawDatabase = false;
-  let sawRedis = false;
-  const lines: string[] = [];
-  for (const line of splitLines(template)) {
-    if (/^DATABASE_URL=/.test(line)) {
-      sawDatabase = true;
-      lines.push(`DATABASE_URL=${input.databaseUrl}`);
-      continue;
-    }
-    if (/^REDIS_URL=/.test(line)) {
-      sawRedis = true;
-      if (input.redisUrl !== undefined) {
-        lines.push(`REDIS_URL=${input.redisUrl}`);
+function upsertEnvLine(lines: string[], key: string, value: string | undefined): void {
+  const prefix = `${key}=`;
+  let saw = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index]?.startsWith(prefix)) {
+      saw = true;
+      if (value !== undefined) {
+        lines[index] = `${prefix}${value}`;
+      } else {
+        lines.splice(index, 1);
       }
-      continue;
+      return;
     }
-    lines.push(line);
   }
-  if (!sawDatabase) {
-    lines.push(`DATABASE_URL=${input.databaseUrl}`);
+  if (value !== undefined && !saw) {
+    lines.push(`${prefix}${value}`);
   }
-  if (input.redisUrl !== undefined && !sawRedis) {
-    lines.push(`REDIS_URL=${input.redisUrl}`);
-  }
+}
+
+export function buildMedusaBackendEnvFile(template: string, input: MedusaBackendEnvInput): string {
+  const lines = splitLines(template);
+  upsertEnvLine(lines, "DATABASE_URL", input.databaseUrl);
+  upsertEnvLine(lines, "REDIS_URL", input.redisUrl);
+  upsertEnvLine(lines, "STRIPE_API_KEY", input.stripeApiKey);
+  upsertEnvLine(lines, "STRIPE_WEBHOOK_SECRET", input.stripeWebhookSecret);
   const body = lines.join("\n");
   return body.endsWith("\n") ? body : `${body}\n`;
+}
+
+export interface MedusaStorefrontEnvInput {
+  backendUrl: string;
+  publishableKey: string;
+  stripePublishableKey?: string;
+}
+
+export function buildMedusaStorefrontEnvLocal(template: string, input: MedusaStorefrontEnvInput): string {
+  const lines = splitLines(template);
+  upsertEnvLine(lines, "NEXT_PUBLIC_MEDUSA_BACKEND_URL", input.backendUrl);
+  upsertEnvLine(lines, "NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY", input.publishableKey);
+  upsertEnvLine(lines, "NEXT_PUBLIC_STRIPE_KEY", input.stripePublishableKey);
+  const body = lines.join("\n");
+  return body.endsWith("\n") ? body : `${body}\n`;
+}
+
+export function shouldEnableStripeOnRegion(switches: MedusaHarnessSwitches, stripeApiKey?: string): boolean {
+  return switches.stripe && stripeApiKey !== undefined && stripeApiKey.trim() !== "";
+}
+
+export function medusaBuiltServerConfigPath(backendDir: string): string {
+  return path.join(medusaBuiltServerDir(backendDir), "medusa-config.js");
+}
+
+/**
+ * Gitignored runtime config written under `apps/backend/.medusa/server` before `medusa start`.
+ * Paths match `@medusajs/utils` `TEMPORARY_REDIS_MODULE_PACKAGE_NAMES` for 2.21.2.
+ */
+export function renderServerMedusaConfigJs(switches: MedusaHarnessSwitches): string {
+  const modules: string[] = [];
+  if (switches.redis) {
+    modules.push(
+      `    {
+      resolve: "@medusajs/medusa/event-bus-redis",
+      options: {
+        redisUrl: process.env.REDIS_URL,
+        workerOptions: { concurrency: 1 },
+      },
+    }`,
+      `    {
+      resolve: "@medusajs/medusa/cache-redis",
+      options: { redisUrl: process.env.REDIS_URL },
+    }`,
+      `    {
+      resolve: "@medusajs/medusa/workflow-engine-redis",
+      options: { redis: { url: process.env.REDIS_URL } },
+    }`,
+    );
+  }
+  if (switches.stripe) {
+    modules.push(
+      `    {
+      resolve: "@medusajs/medusa/payment",
+      options: {
+        providers: [
+          {
+            resolve: "@medusajs/medusa/payment-stripe",
+            id: "stripe",
+            options: {
+              apiKey: process.env.STRIPE_API_KEY,
+              webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+            },
+          },
+        ],
+      },
+    }`,
+    );
+  }
+  const redisUrlLine = switches.redis ? "    redisUrl: process.env.REDIS_URL,\n" : "";
+  const modulesBlock =
+    modules.length === 0
+      ? ""
+      : `,
+  modules: [
+${modules.join(",\n")},
+  ]`;
+  return `"use strict";
+const utils = require("@medusajs/framework/utils");
+utils.loadEnv(process.env.NODE_ENV || "development", process.cwd());
+module.exports = utils.defineConfig({
+  projectConfig: {
+    databaseUrl: process.env.DATABASE_URL,
+${redisUrlLine}    http: {
+      storeCors: process.env.STORE_CORS,
+      adminCors: process.env.ADMIN_CORS,
+      authCors: process.env.AUTH_CORS,
+      jwtSecret: process.env.JWT_SECRET,
+      cookieSecret: process.env.COOKIE_SECRET,
+    },
+  }${modulesBlock},
+});
+`;
 }
 
 /** KEY=VALUE lines. Comments and blanks are skipped. Values are not logged by this function. */

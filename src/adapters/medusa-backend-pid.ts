@@ -6,6 +6,7 @@ import { isPidRunning } from "../internal/spawn-detached.js";
 import { HARNESS_ROOT } from "../paths.js";
 
 export const MEDUSA_BACKEND_PID_BASENAME = "medusa-backend.pid";
+export const MEDUSA_STOREFRONT_PID_BASENAME = "medusa-storefront.pid";
 
 export interface MedusaBackendPidRecord {
   readonly pid: number;
@@ -17,8 +18,16 @@ export class MedusaBackendStopError extends Error {
   readonly preservePidFile = true;
 }
 
+export function medusaHarnessPidFile(basename: string, harnessRoot: string = HARNESS_ROOT): string {
+  return path.join(harnessRoot, ".harness", basename);
+}
+
 export function medusaBackendPidFile(harnessRoot: string = HARNESS_ROOT): string {
-  return path.join(harnessRoot, ".harness", MEDUSA_BACKEND_PID_BASENAME);
+  return medusaHarnessPidFile(MEDUSA_BACKEND_PID_BASENAME, harnessRoot);
+}
+
+export function medusaStorefrontPidFile(harnessRoot: string = HARNESS_ROOT): string {
+  return medusaHarnessPidFile(MEDUSA_STOREFRONT_PID_BASENAME, harnessRoot);
 }
 
 /** A non-empty decimal string that is a positive safe integer. */
@@ -85,22 +94,41 @@ export function captureProcessStartMark(pid: number): string | undefined {
   }
 }
 
-export function writeMedusaBackendPid(pid: number, harnessRoot: string = HARNESS_ROOT): void {
-  const file = medusaBackendPidFile(harnessRoot);
+export function writeMedusaPid(
+  basename: string,
+  pid: number,
+  harnessRoot: string = HARNESS_ROOT,
+): void {
+  const file = medusaHarnessPidFile(basename, harnessRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const startMark = captureProcessStartMark(pid);
   const record: MedusaBackendPidRecord = startMark === undefined ? { pid } : { pid, startMark };
   fs.writeFileSync(file, `${JSON.stringify(record)}\n`, "utf8");
 }
 
-export function readMedusaBackendPidRecord(
+export function writeMedusaBackendPid(pid: number, harnessRoot: string = HARNESS_ROOT): void {
+  writeMedusaPid(MEDUSA_BACKEND_PID_BASENAME, pid, harnessRoot);
+}
+
+export function writeMedusaStorefrontPid(pid: number, harnessRoot: string = HARNESS_ROOT): void {
+  writeMedusaPid(MEDUSA_STOREFRONT_PID_BASENAME, pid, harnessRoot);
+}
+
+function readMedusaPidRecord(
+  basename: string,
   harnessRoot: string = HARNESS_ROOT,
 ): MedusaBackendPidRecord | undefined {
-  const file = medusaBackendPidFile(harnessRoot);
+  const file = medusaHarnessPidFile(basename, harnessRoot);
   if (!fs.existsSync(file)) {
     return undefined;
   }
   return parseMedusaBackendPidFileText(fs.readFileSync(file, "utf8"));
+}
+
+export function readMedusaBackendPidRecord(
+  harnessRoot: string = HARNESS_ROOT,
+): MedusaBackendPidRecord | undefined {
+  return readMedusaPidRecord(MEDUSA_BACKEND_PID_BASENAME, harnessRoot);
 }
 
 export function defaultKillProcessTree(pid: number): void {
@@ -129,12 +157,13 @@ export interface StopMedusaBackendFromPidFileDeps {
  * Throws {@link MedusaBackendStopError} when kill fails and the pid is still live,
  * or when a live pid no longer matches the recorded start mark.
  */
-export function stopMedusaBackendFromPidFile(
+export function stopMedusaPidFile(
+  basename: string,
   harnessRoot: string = HARNESS_ROOT,
   deps?: Partial<StopMedusaBackendFromPidFileDeps>,
 ): void {
-  const pidFile = medusaBackendPidFile(harnessRoot);
-  const readRecord = deps?.readRecord ?? (() => readMedusaBackendPidRecord(harnessRoot));
+  const pidFile = medusaHarnessPidFile(basename, harnessRoot);
+  const readRecord = deps?.readRecord ?? (() => readMedusaPidRecord(basename, harnessRoot));
   const removePidFile =
     deps?.removePidFile ??
     (() => {
@@ -178,4 +207,18 @@ export function stopMedusaBackendFromPidFile(
   }
 
   removePidFile();
+}
+
+export function stopMedusaBackendFromPidFile(
+  harnessRoot: string = HARNESS_ROOT,
+  deps?: Partial<StopMedusaBackendFromPidFileDeps>,
+): void {
+  stopMedusaPidFile(MEDUSA_BACKEND_PID_BASENAME, harnessRoot, deps);
+}
+
+export function stopMedusaStorefrontFromPidFile(
+  harnessRoot: string = HARNESS_ROOT,
+  deps?: Partial<StopMedusaBackendFromPidFileDeps>,
+): void {
+  stopMedusaPidFile(MEDUSA_STOREFRONT_PID_BASENAME, harnessRoot, deps);
 }

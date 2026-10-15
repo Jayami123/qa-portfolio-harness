@@ -10,14 +10,18 @@ import {
   isMedusaHealthyStatus,
   medusaBackendConfigPath,
   medusaBackendStartArgs,
+  medusaComposeFileNames,
   medusaHarnessBuildMarkerPath,
   medusaHealthUrl,
   medusaListen,
   parseMedusaEnvFile,
   parseMedusaHarnessBuildGitSha,
+  parseMedusaHarnessSwitches,
   redactMedusaText,
   redactPublishableKey,
+  renderServerMedusaConfigJs,
   serializeMedusaHarnessBuildRecord,
+  shouldEnableStripeOnRegion,
 } from "./medusa-env.js";
 
 const TEMPLATE = [
@@ -107,6 +111,16 @@ describe("buildMedusaBackendEnvFile", () => {
     });
     assert.equal(parseMedusaEnvFile(file).REDIS_URL, "redis://127.0.0.1:6380");
   });
+
+  it("writes Stripe keys when passed", () => {
+    const file = buildMedusaBackendEnvFile(TEMPLATE, {
+      databaseUrl: DATABASE_URL,
+      stripeApiKey: "sk_test_fixture",
+      stripeWebhookSecret: "whsec_fixture",
+    });
+    assert.equal(parseMedusaEnvFile(file).STRIPE_API_KEY, "sk_test_fixture");
+    assert.equal(parseMedusaEnvFile(file).STRIPE_WEBHOOK_SECRET, "whsec_fixture");
+  });
 });
 
 describe("redactPublishableKey", () => {
@@ -168,6 +182,52 @@ describe("parseMedusaHarnessBuildGitSha", () => {
     assert.equal(parseMedusaHarnessBuildGitSha(serializeMedusaHarnessBuildRecord(sha)), sha);
     assert.equal(parseMedusaHarnessBuildGitSha("{}\n"), undefined);
     assert.equal(parseMedusaHarnessBuildGitSha("not-json"), undefined);
+  });
+});
+
+describe("parseMedusaHarnessSwitches", () => {
+  it("defaults both switches off", () => {
+    assert.deepEqual(parseMedusaHarnessSwitches({}), { redis: false, stripe: false });
+    assert.deepEqual(parseMedusaHarnessSwitches({ MEDUSA_REDIS: "0" }), { redis: false, stripe: false });
+  });
+
+  it("enables only when env is exactly 1", () => {
+    assert.deepEqual(parseMedusaHarnessSwitches({ MEDUSA_REDIS: "1", MEDUSA_STRIPE: "1" }), {
+      redis: true,
+      stripe: true,
+    });
+  });
+});
+
+describe("medusaComposeFileNames", () => {
+  it("adds the redis overlay only when MEDUSA_REDIS=1", () => {
+    assert.deepEqual(medusaComposeFileNames({ redis: false, stripe: false }), ["medusa.compose.yml"]);
+    assert.deepEqual(medusaComposeFileNames({ redis: true, stripe: false }), [
+      "medusa.compose.yml",
+      "medusa.redis.compose.yml",
+    ]);
+  });
+});
+
+describe("renderServerMedusaConfigJs", () => {
+  it("includes redis modules and redisUrl when MEDUSA_REDIS=1", () => {
+    const source = renderServerMedusaConfigJs({ redis: true, stripe: false });
+    assert.equal(source.includes("redisUrl: process.env.REDIS_URL"), true);
+    assert.equal(source.includes("@medusajs/medusa/event-bus-redis"), true);
+    assert.equal(source.includes("payment-stripe"), false);
+  });
+
+  it("includes Stripe payment module when MEDUSA_STRIPE=1", () => {
+    const source = renderServerMedusaConfigJs({ redis: false, stripe: true });
+    assert.equal(source.includes("@medusajs/medusa/payment-stripe"), true);
+  });
+});
+
+describe("shouldEnableStripeOnRegion", () => {
+  it("requires switch on and a secret key", () => {
+    assert.equal(shouldEnableStripeOnRegion({ redis: false, stripe: false }, "sk_test_x"), false);
+    assert.equal(shouldEnableStripeOnRegion({ redis: false, stripe: true }, ""), false);
+    assert.equal(shouldEnableStripeOnRegion({ redis: false, stripe: true }, "sk_test_x"), true);
   });
 });
 

@@ -11,8 +11,14 @@ import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
-import { stopMedusaBackendFromPidFile, writeMedusaBackendPid } from "./medusa-backend-pid.js";
 import {
+  stopMedusaBackendFromPidFile,
+  stopMedusaStorefrontFromPidFile,
+  writeMedusaBackendPid,
+  writeMedusaStorefrontPid,
+} from "./medusa-backend-pid.js";
+import {
+  MEDUSA_DEFAULT_REDIS_URL,
   MEDUSA_HTTP_MODE,
   MEDUSA_MIN_NODE,
   MEDUSA_MIN_PNPM,
@@ -21,19 +27,25 @@ import {
   assertMedusaNodeVersion,
   assertMedusaPnpmVersion,
   buildMedusaBackendEnvFile,
+  buildMedusaStorefrontEnvLocal,
   classifyMedusaProbe,
   decideMedusaBuildSkip,
   isMedusaHealthyStatus,
   medusaBackendStartArgs,
+  medusaBuiltServerConfigPath,
   medusaBuiltServerPackagePath,
+  medusaComposeFileNames,
   medusaHarnessBuildMarkerPath,
   medusaHealthUrl,
   medusaListen,
   parseMedusaEnvFile,
+  parseMedusaHarnessSwitches,
   redactMedusaText,
+  renderServerMedusaConfigJs,
   serializeMedusaHarnessBuildRecord,
   type MedusaProbeVerdict,
 } from "./medusa-env.js";
+import { readPublishableKeyFromDatabase, runMedusaSeed } from "./medusa-seed.js";
 
 const COMPOSE_PROJECT = "qa-harness-medusa";
 const DEFAULT_BUILD_MS = 10 * 60_000;
@@ -56,9 +68,16 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
   readonly id = "medusa" as const;
   private backendProcess?: ChildProcess;
+  private storefrontProcess?: ChildProcess;
+  private seedResult?: SeedResult;
+  private resolvedPublishableKey?: string;
 
   constructor(cfg: MedusaConfig) {
     super(cfg);
+  }
+
+  private harnessSwitches() {
+    return parseMedusaHarnessSwitches(process.env);
   }
 
   private backendDir(): string {
@@ -77,10 +96,19 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     return path.join(HARNESS_ROOT, ".harness", "medusa-backend.log");
   }
 
+  private storefrontLogFile(): string {
+    return path.join(HARNESS_ROOT, ".harness", "medusa-storefront.log");
+  }
+
+  private storefrontDir(): string {
+    return path.join(this.productRoot, "apps", "storefront");
+  }
+
   private composeOpts() {
+    const switches = this.harnessSwitches();
     return {
       projectName: COMPOSE_PROJECT,
-      files: [harnessComposeFile("medusa.compose.yml")],
+      files: medusaComposeFileNames(switches).map((name) => harnessComposeFile(name)),
       cwd: HARNESS_DOCKER_DIR,
     };
   }
@@ -139,8 +167,12 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     if (!fs.existsSync(templatePath)) {
       throw new Error(`Medusa backend .env.template missing at ${templatePath}.`);
     }
+    const switches = this.harnessSwitches();
     const file = buildMedusaBackendEnvFile(fs.readFileSync(templatePath, "utf8"), {
       databaseUrl: this.cfg.dbUrl,
+      redisUrl: switches.redis ? MEDUSA_DEFAULT_REDIS_URL : undefined,
+      stripeApiKey: switches.stripe ? this.cfg.stripeApiKey : undefined,
+      stripeWebhookSecret: switches.stripe ? this.cfg.stripeWebhookSecret : undefined,
     });
     const envPath = path.join(this.backendDir(), ".env");
     fs.writeFileSync(envPath, file, "utf8");
@@ -270,6 +302,108 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       );
     }
     this.writeBuildMarker();
+  }
+
+  private writeRuntimeMedusaConfig(): void {
+    const target = medusaBuiltServerConfigPath(this.backendDir());
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, renderServerMedusaConfigJs(this.harnessSwitches()), "utf8");
+  }
+
+  private async ensureStorefrontBuild(publishableKey: string): Promise<void> {
+    const nextDir = path.join(this.storefrontDir(), ".next");
+    const marker = path.join(nextDir, "harness-build.json");
+    const head = this.productGitSha();
+    if (
+      process.env.MEDUSA_WEB_REBUILD !== "1" &&
+      fs.existsSync(path.join(nextDir, "required-server-files.json")) &&
+      head !== undefined &&
+      fs.existsSync(marker) &&
+      fs.readFileSync(marker, "utf8").includes(head)
+    ) {
+      console.log(`Medusa storefront .next matches HEAD ${head}; skipping next build.`);
+      return;
+    }
+    this.writeStorefrontEnv(publishableKey);
+    console.log(`Building Medusa storefront (up to ${String(this.buildTimeoutMs())} ms)…`);
+    await this.runPnpm(["next", "build"], this.storefrontDir(), this.buildTimeoutMs());
+    if (head !== undefined) {
+      fs.mkdirSync(nextDir, { recursive: true });
+      fs.writeFileSync(marker, serializeMedusaHarnessBuildRecord(head), "utf8");
+    }
+  }
+
+  private writeStorefrontEnv(publishableKey: string): void {
+    const templatePath = path.join(this.storefrontDir(), ".env.template");
+    if (!fs.existsSync(templatePath)) {
+      throw new Error(`Medusa storefront .env.template missing at ${templatePath}.`);
+    }
+    const switches = this.harnessSwitches();
+    const file = buildMedusaStorefrontEnvLocal(fs.readFileSync(templatePath, "utf8"), {
+      backendUrl: this.cfg.baseUrl,
+      publishableKey,
+      stripePublishableKey: switches.stripe ? this.cfg.stripePublishableKey : undefined,
+    });
+    const envPath = path.join(this.storefrontDir(), ".env.local");
+    fs.writeFileSync(envPath, file, "utf8");
+    console.log(`Wrote Medusa storefront env at ${envPath} (gitignored).`);
+  }
+
+  private async waitForStorefrontReady(timeoutMs: number): Promise<void> {
+    const url = `${this.cfg.storefrontUrl}/dk`;
+    const started = Date.now();
+    const deadline = Date.now() + timeoutMs;
+    let lastStatus: number | undefined;
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+        lastStatus = response.status;
+        if (response.status === 200) {
+          const seconds = ((Date.now() - started) / 1000).toFixed(1);
+          console.log(`Medusa storefront GET /dk returned HTTP 200 in ${seconds} s (${url}).`);
+          return;
+        }
+      } catch {
+        lastStatus = undefined;
+      }
+      if (this.storefrontProcess && this.storefrontProcess.exitCode !== null) {
+        throw new Error(`Medusa storefront process exited (code ${this.storefrontProcess.exitCode}).`);
+      }
+      await sleep(2000);
+    }
+    throw new Error(
+      `Timed out waiting for ${url} to return HTTP 200 (last ${lastStatus === undefined ? "no response" : `HTTP ${lastStatus}`}).`,
+    );
+  }
+
+  private startStorefront(): void {
+    if (this.storefrontProcess && this.storefrontProcess.exitCode === null) {
+      return;
+    }
+    const logFile = this.storefrontLogFile();
+    const cwd = this.storefrontDir();
+    const { port } = medusaListen(this.cfg.storefrontUrl);
+    console.log(`Starting Medusa storefront on port ${port} (logs: ${logFile})`);
+    this.storefrontProcess = spawnLogged(resolvePnpm(), ["next", "start", "-p", port], {
+      cwd,
+      logFile,
+      env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
+      detached: true,
+      shell: false,
+    });
+    if (this.storefrontProcess.pid !== undefined) {
+      writeMedusaStorefrontPid(this.storefrontProcess.pid);
+    }
+    this.storefrontProcess.unref();
+  }
+
+  private async stopStorefront(): Promise<void> {
+    if (this.storefrontProcess?.exitCode === null) {
+      this.storefrontProcess.kill("SIGTERM");
+      await sleep(1000);
+    }
+    stopMedusaStorefrontFromPidFile(HARNESS_ROOT);
+    this.storefrontProcess = undefined;
   }
 
   private isPortOpen(host: string, port: string): Promise<boolean> {
@@ -446,8 +580,13 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     this.assertToolchain();
     const { host, port } = medusaListen(this.cfg.baseUrl);
 
+    const switches = this.harnessSwitches();
     await composeUp(this.composeOpts(), { wait: true });
-    console.log("Medusa Postgres (127.0.0.1:5433, database medusa) is up. Redis is not started.");
+    if (switches.redis) {
+      console.log("Medusa Postgres (127.0.0.1:5433) and Redis (127.0.0.1:6380) are up.");
+    } else {
+      console.log("Medusa Postgres (127.0.0.1:5433, database medusa) is up. Redis is not started (MEDUSA_REDIS unset).");
+    }
 
     const already = await this.probe();
     if (already.verdict === "healthy") {
@@ -477,14 +616,41 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     await this.rebuildProvenPackages();
     await this.migrate();
     await this.ensureBuild();
+    this.writeRuntimeMedusaConfig();
     const bootStarted = Date.now();
     this.startBackend();
     await this.waitReady(this.webWaitMs());
     const bootSeconds = ((Date.now() - bootStarted) / 1000).toFixed(1);
     console.log(`Medusa backend is up at ${this.cfg.baseUrl} (${MEDUSA_HTTP_MODE}, ${bootSeconds} s from spawn to HTTP 200).`);
+
+    if (process.env.MEDUSA_SKIP_STOREFRONT === "1") {
+      console.log("MEDUSA_SKIP_STOREFRONT=1; storefront not started.");
+      return;
+    }
+    const publishableKey = await this.resolvePublishableKeyForStorefront();
+    if (publishableKey === undefined) {
+      console.log(
+        "Medusa publishable API key not found yet; skipping storefront (run seed() or set MEDUSA_PUBLISHABLE_API_KEY).",
+      );
+      return;
+    }
+    await this.ensureStorefrontBuild(publishableKey);
+    this.startStorefront();
+    await this.waitForStorefrontReady(this.webWaitMs());
+  }
+
+  private async resolvePublishableKeyForStorefront(): Promise<string | undefined> {
+    if (this.resolvedPublishableKey) {
+      return this.resolvedPublishableKey;
+    }
+    if (this.cfg.publishableApiKey && this.cfg.publishableApiKey.trim() !== "") {
+      return this.cfg.publishableApiKey.trim();
+    }
+    return await readPublishableKeyFromDatabase(this.cfg.dbUrl);
   }
 
   async down(): Promise<void> {
+    await this.stopStorefront();
     const { host, port } = medusaListen(this.cfg.baseUrl);
     await this.stopBackend(host, port);
     await composeDown(this.composeOpts());
@@ -500,10 +666,21 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
   }
 
   async seed(): Promise<SeedResult> {
-    throw new Error(
-      "Medusa seed() is not wired yet. up() runs medusa db:migrate only. " +
-        "Admin user, collection, and the second stock location are a later task.",
-    );
+    if (this.seedResult) {
+      return this.seedResult;
+    }
+    const session = await this.authenticate();
+    this.seedResult = await runMedusaSeed({
+      cfg: this.cfg,
+      switches: this.harnessSwitches(),
+      authorizationHeader: session.authorizationHeader,
+      backendDir: this.backendDir(),
+      processEnv: this.backendProcessEnv(),
+    });
+    this.resolvedPublishableKey =
+      (await readPublishableKeyFromDatabase(this.cfg.dbUrl)) ??
+      this.cfg.publishableApiKey?.trim();
+    return this.seedResult;
   }
 
   async authenticate(): Promise<AuthSession> {
@@ -530,18 +707,36 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       );
     }
 
+    const publishableApiKey = this.resolvedPublishableKey ?? this.cfg.publishableApiKey;
     return {
       product: this.id,
       baseUrl: this.cfg.baseUrl,
       authorizationHeader: `Bearer ${body.token}`,
       raw: {
         token: body.token,
-        publishableApiKey: this.cfg.publishableApiKey,
-        storeHeader: this.cfg.publishableApiKey
-          ? { "x-publishable-api-key": this.cfg.publishableApiKey }
+        publishableApiKey,
+        storeHeader: publishableApiKey
+          ? { "x-publishable-api-key": publishableApiKey }
           : undefined,
         note: "Admin JWT via POST /auth/user/emailpass. Store APIs also need x-publishable-api-key.",
       },
     };
+  }
+
+  async proveAuth(session: AuthSession): Promise<void> {
+    const url = `${this.cfg.baseUrl}/admin/users/me`;
+    const response = await fetch(url, {
+      headers: { Authorization: session.authorizationHeader, Accept: "application/json" },
+    });
+    const body = (await response.json().catch(() => undefined)) as { user?: { email?: string } } | undefined;
+    if (!response.ok) {
+      throw new Error(`Medusa proveAuth GET ${url} failed (HTTP ${response.status}).`);
+    }
+    const email = body?.user?.email;
+    const expected = this.cfg.adminEmail;
+    if (!email || !expected || email !== expected) {
+      throw new Error(`Medusa proveAuth: expected user email ${expected ?? "(unset)"}, got ${email ?? "(missing)"}.`);
+    }
+    console.log(`Medusa proveAuth: ${url} HTTP ${response.status}, email matches.`);
   }
 }
