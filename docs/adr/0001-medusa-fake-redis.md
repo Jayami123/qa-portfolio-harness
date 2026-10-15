@@ -15,9 +15,9 @@ On 2026-10-15, `medusa start` was run with `REDIS_URL=redis://127.0.0.1:6380` in
 
 ## Decision
 
-- `docker/medusa.compose.yml` starts Postgres 15 only. It does not start `redis:7`.
-- The harness backend env writer drops `REDIS_URL` unless a later change proves Medusa reads it without editing tracked product files.
-- Do not edit `medusa-config.ts` in `medusa-dtc-starter` to pass `redisUrl`.
+- **Default:** `docker/medusa.compose.yml` starts Postgres 15 only. The runtime uses Medusa's in-process event bus (fake Redis).
+- **Opt-in:** `MEDUSA_REDIS=1` merges `docker/medusa.redis.compose.yml`, sets `REDIS_URL`, and the harness writes gitignored `apps/backend/.medusa/server/medusa-config.js` with Redis event-bus, cache, and workflow-engine modules before `medusa start`.
+- Do not edit tracked `medusa-config.ts` in `medusa-dtc-starter`.
 
 ## Alternatives considered
 
