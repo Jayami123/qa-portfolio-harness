@@ -841,9 +841,23 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     await this.maybeStartStorefront();
   }
 
+  private async storefrontAnswering(): Promise<boolean> {
+    const res = await fetch(`${this.cfg.storefrontUrl}/dk`, {
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => undefined);
+    return res?.status === 200;
+  }
+
   private async maybeStartStorefront(): Promise<void> {
     if (process.env.MEDUSA_SKIP_STOREFRONT === "1") {
       console.log("MEDUSA_SKIP_STOREFRONT=1; storefront not started.");
+      return;
+    }
+    // Probe before any build or spawn: a running storefront keeps its pid file untouched.
+    if (await this.storefrontAnswering()) {
+      console.log(
+        `Medusa storefront already running at ${this.cfg.storefrontUrl}/dk; skipping next build and start.`,
+      );
       return;
     }
     const { host, port } = medusaListen(this.cfg.storefrontUrl);
@@ -851,15 +865,6 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       !(this.storefrontProcess && this.storefrontProcess.exitCode === null) &&
       (await this.isPortOpen(host, port))
     ) {
-      const res = await fetch(`${this.cfg.storefrontUrl}/dk`, {
-        signal: AbortSignal.timeout(10_000),
-      }).catch(() => undefined);
-      if (res?.status === 200) {
-        console.log(
-          `Medusa storefront already answering on ${host}:${port}; not rebuilding or respawning.`,
-        );
-        return;
-      }
       throw new Error(
         `Port ${port} on ${host} is in use, but /dk is not HTTP 200. The harness did not stop anything.`,
       );

@@ -82,6 +82,8 @@ export async function ensureMedusaAdminUser(
       cwd: backendDir,
       env,
       timeoutMs: USER_TIMEOUT_MS,
+      // The password is an argv entry; keep it out of timeout/exit messages and captured output.
+      redact: [password],
     });
     const combined = `${result.stdout}\n${result.stderr}`;
     if (
@@ -104,8 +106,7 @@ export async function ensureMedusaAdminUser(
       );
       return;
     }
-    const message =
-      error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
     throw new Error(message.split(password).join("(redacted)"));
   }
 }

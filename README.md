@@ -21,10 +21,10 @@ qa-portfolio-harness/
 ├── .env.example
 ├── README.md
 ├── docker/
-│   ├── cal.compose.yml          # port/project overlays; do not change product defaults
-│   ├── documenso.compose.yml
-│   ├── medusa.compose.yml
-│   └── twenty.compose.yml
+│   ├── cal.compose.yml          # overlay after upstream compose; do not change product defaults
+│   ├── documenso.compose.yml    # standalone (not layered with a product compose file)
+│   ├── medusa.compose.yml       # standalone (the DTC starter has no product compose file)
+│   └── twenty.compose.yml       # overlay after upstream compose
 ├── scripts/
 │   ├── up.mjs                   # node scripts/up.mjs cal|documenso|medusa|twenty
 │   ├── down.mjs

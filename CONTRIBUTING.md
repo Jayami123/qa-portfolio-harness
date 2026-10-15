@@ -38,6 +38,7 @@ Paste the summary lines in your PR.
 - The Postgres helper is **read-only** intent: no migrations, no destructive SQL in shared helpers.
 - Never commit `.env`, storage state, or tokens. Use `.env.example` placeholders only.
 - Do not change upstream product defaults in `docker/*.compose.yml` overlays without an ADR-level reason.
+- Compose layout: Cal and Twenty files are targeted overrides passed after their upstream Compose files. Documenso's and Medusa's Compose files are standalone and are not layered with a product Compose file (the Medusa DTC starter has none).
 
 ## CI
 

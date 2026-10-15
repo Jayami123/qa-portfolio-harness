@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   assertMedusaBackendPresent,
@@ -43,18 +44,30 @@ const DATABASE_URL = "postgres://medusa:medusa@127.0.0.1:5433/medusa";
 
 describe("medusaListen", () => {
   it("accepts 127.0.0.1 and defaults the port to 9000", () => {
-    assert.deepEqual(medusaListen("http://127.0.0.1"), { host: "127.0.0.1", port: "9000" });
-    assert.deepEqual(medusaListen("http://127.0.0.1:9000"), { host: "127.0.0.1", port: "9000" });
+    assert.deepEqual(medusaListen("http://127.0.0.1"), {
+      host: "127.0.0.1",
+      port: "9000",
+    });
+    assert.deepEqual(medusaListen("http://127.0.0.1:9000"), {
+      host: "127.0.0.1",
+      port: "9000",
+    });
   });
 
   it("rejects localhost so an IPv6-only bind cannot pass silently", () => {
-    assert.throws(() => medusaListen("http://localhost:9000"), /must use 127\.0\.0\.1/);
+    assert.throws(
+      () => medusaListen("http://localhost:9000"),
+      /must use 127\.0\.0\.1/,
+    );
   });
 });
 
 describe("medusaHealthUrl", () => {
   it("is GET /health on the 127.0.0.1 listen URL", () => {
-    assert.equal(medusaHealthUrl("http://127.0.0.1:9000/"), "http://127.0.0.1:9000/health");
+    assert.equal(
+      medusaHealthUrl("http://127.0.0.1:9000/"),
+      "http://127.0.0.1:9000/health",
+    );
   });
 });
 
@@ -97,7 +110,9 @@ describe("assertMedusaPnpmVersion", () => {
 
 describe("buildMedusaBackendEnvFile", () => {
   it("sets DATABASE_URL to the harness Postgres URL on 127.0.0.1 and drops REDIS_URL", () => {
-    const file = buildMedusaBackendEnvFile(TEMPLATE, { databaseUrl: DATABASE_URL });
+    const file = buildMedusaBackendEnvFile(TEMPLATE, {
+      databaseUrl: DATABASE_URL,
+    });
     const env = parseMedusaEnvFile(file);
     assert.equal(env.DATABASE_URL, DATABASE_URL);
     assert.equal(env.REDIS_URL, undefined);
@@ -122,7 +137,10 @@ describe("buildMedusaBackendEnvFile", () => {
       stripeWebhookSecret: "whsec_fixture",
     });
     assert.equal(parseMedusaEnvFile(file).STRIPE_API_KEY, "sk_test_fixture");
-    assert.equal(parseMedusaEnvFile(file).STRIPE_WEBHOOK_SECRET, "whsec_fixture");
+    assert.equal(
+      parseMedusaEnvFile(file).STRIPE_WEBHOOK_SECRET,
+      "whsec_fixture",
+    );
   });
 });
 
@@ -164,7 +182,10 @@ describe("assertMedusaBackendPresent", () => {
       () => assertMedusaBackendPresent(root, () => false),
       (error: unknown) => {
         assert.ok(error instanceof Error);
-        assert.equal(error.message.includes(medusaBackendConfigPath(root)), true);
+        assert.equal(
+          error.message.includes(medusaBackendConfigPath(root)),
+          true,
+        );
         assert.equal(error.message.includes("medusa-dtc-starter"), true);
         return true;
       },
@@ -182,7 +203,10 @@ describe("medusaBackendStartArgs", () => {
 describe("parseMedusaHarnessBuildGitSha", () => {
   it("reads gitSha from harness-build.json text", () => {
     const sha = "f677db438f27294fc50e4c7c6612e71ff38eeff5";
-    assert.equal(parseMedusaHarnessBuildGitSha(serializeMedusaHarnessBuildRecord(sha)), sha);
+    assert.equal(
+      parseMedusaHarnessBuildGitSha(serializeMedusaHarnessBuildRecord(sha)),
+      sha,
+    );
     assert.equal(parseMedusaHarnessBuildGitSha("{}\n"), undefined);
     assert.equal(parseMedusaHarnessBuildGitSha("not-json"), undefined);
   });
@@ -190,21 +214,32 @@ describe("parseMedusaHarnessBuildGitSha", () => {
 
 describe("parseMedusaHarnessSwitches", () => {
   it("defaults both switches off", () => {
-    assert.deepEqual(parseMedusaHarnessSwitches({}), { redis: false, stripe: false });
-    assert.deepEqual(parseMedusaHarnessSwitches({ MEDUSA_REDIS: "0" }), { redis: false, stripe: false });
+    assert.deepEqual(parseMedusaHarnessSwitches({}), {
+      redis: false,
+      stripe: false,
+    });
+    assert.deepEqual(parseMedusaHarnessSwitches({ MEDUSA_REDIS: "0" }), {
+      redis: false,
+      stripe: false,
+    });
   });
 
   it("enables only when env is exactly 1", () => {
-    assert.deepEqual(parseMedusaHarnessSwitches({ MEDUSA_REDIS: "1", MEDUSA_STRIPE: "1" }), {
-      redis: true,
-      stripe: true,
-    });
+    assert.deepEqual(
+      parseMedusaHarnessSwitches({ MEDUSA_REDIS: "1", MEDUSA_STRIPE: "1" }),
+      {
+        redis: true,
+        stripe: true,
+      },
+    );
   });
 });
 
 describe("medusaComposeFileNames", () => {
   it("adds the redis overlay only when MEDUSA_REDIS=1", () => {
-    assert.deepEqual(medusaComposeFileNames({ redis: false, stripe: false }), ["medusa.compose.yml"]);
+    assert.deepEqual(medusaComposeFileNames({ redis: false, stripe: false }), [
+      "medusa.compose.yml",
+    ]);
     assert.deepEqual(medusaComposeFileNames({ redis: true, stripe: false }), [
       "medusa.compose.yml",
       "medusa.redis.compose.yml",
@@ -228,9 +263,18 @@ describe("renderServerMedusaConfigJs", () => {
 
 describe("shouldEnableStripeOnRegion", () => {
   it("requires switch on and a secret key", () => {
-    assert.equal(shouldEnableStripeOnRegion({ redis: false, stripe: false }, "sk_test_x"), false);
-    assert.equal(shouldEnableStripeOnRegion({ redis: false, stripe: true }, ""), false);
-    assert.equal(shouldEnableStripeOnRegion({ redis: false, stripe: true }, "sk_test_x"), true);
+    assert.equal(
+      shouldEnableStripeOnRegion({ redis: false, stripe: false }, "sk_test_x"),
+      false,
+    );
+    assert.equal(
+      shouldEnableStripeOnRegion({ redis: false, stripe: true }, ""),
+      false,
+    );
+    assert.equal(
+      shouldEnableStripeOnRegion({ redis: false, stripe: true }, "sk_test_x"),
+      true,
+    );
   });
 });
 
@@ -298,7 +342,7 @@ describe("decideMedusaBuildSkip", () => {
     const backend = "D:\\products\\medusa-dtc-starter\\apps\\backend";
     assert.equal(
       medusaHarnessBuildMarkerPath(backend),
-      "D:\\products\\medusa-dtc-starter\\apps\\backend\\.medusa\\server\\harness-build.json",
+      path.join(backend, ".medusa", "server", "harness-build.json"),
     );
   });
 });
@@ -306,7 +350,11 @@ describe("decideMedusaBuildSkip", () => {
 describe("decideMedusaStorefrontBuildSkip", () => {
   const head = "abc123def456";
   const pk = "pk_test_fixture_publishable_key_0123456789abcdef";
-  const marker = serializeMedusaStorefrontBuildRecord(head, pk, "collections:1");
+  const marker = serializeMedusaStorefrontBuildRecord(
+    head,
+    pk,
+    "collections:1",
+  );
 
   it("skips when HEAD and publishable key fingerprint match", () => {
     assert.deepEqual(
@@ -334,7 +382,10 @@ describe("decideMedusaStorefrontBuildSkip", () => {
       }).reason,
       "rebuild_publishable_key_mismatch",
     );
-    assert.notEqual(medusaPublishableKeyFingerprint(pk), medusaPublishableKeyFingerprint("pk_other_key"));
+    assert.notEqual(
+      medusaPublishableKeyFingerprint(pk),
+      medusaPublishableKeyFingerprint("pk_other_key"),
+    );
   });
 
   it("rebuilds when the marker only records gitSha (legacy)", () => {
