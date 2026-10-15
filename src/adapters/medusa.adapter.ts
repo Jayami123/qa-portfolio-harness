@@ -58,6 +58,11 @@ import {
   serializeMedusaComposeRecord,
 } from "./medusa-compose-record.js";
 import {
+  commandLineMatchesProductRoot,
+  parseLsofPids,
+  parseNetstatListeningPids,
+} from "./medusa-listeners.js";
+import {
   ensureMedusaAdminUser,
   readPublishableKeyFromDatabase,
   runMedusaSeed,
@@ -569,6 +574,98 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     }
     stopMedusaStorefrontFromPidFile(HARNESS_ROOT);
     this.storefrontProcess = undefined;
+    this.reapProductListeners(medusaListen(this.cfg.storefrontUrl).port);
+  }
+
+  private listeningPids(port: string): number[] {
+    try {
+      if (platform() === "win32") {
+        const netstat = execFileSync("netstat", ["-ano"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        return parseNetstatListeningPids(netstat, port);
+      }
+      const lsof = execFileSync(
+        "lsof",
+        ["-ti", `tcp:${port}`, "-sTCP:LISTEN"],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      return parseLsofPids(lsof);
+    } catch {
+      // lsof exits 1 when nothing listens on the port.
+      return [];
+    }
+  }
+
+  private commandLineOf(pid: number): string | undefined {
+    try {
+      const out =
+        platform() === "win32"
+          ? execFileSync(
+              "powershell",
+              [
+                "-NoProfile",
+                "-Command",
+                `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+              ],
+              { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+            )
+          : execFileSync("ps", ["-o", "args=", "-p", String(pid)], {
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "pipe"],
+            });
+      return out.trim() === "" ? undefined : out.trim();
+    } catch {
+      return undefined;
+    }
+  }
+
+  private killProcessTree(pid: number): void {
+    if (platform() === "win32") {
+      execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return;
+    }
+    try {
+      execFileSync("pkill", ["-KILL", "-P", String(pid)], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      // pkill exits 1 when there are no children.
+    }
+    process.kill(pid, "SIGKILL");
+  }
+
+  /**
+   * After the pid-file stop, kill leftover listeners on `port` only when their command line
+   * runs from this product. Anything else is left alone.
+   */
+  private reapProductListeners(port: string): void {
+    for (const pid of this.listeningPids(port)) {
+      const commandLine = this.commandLineOf(pid);
+      if (!commandLineMatchesProductRoot(commandLine, this.productRoot)) {
+        console.log(
+          `Port ${port} is held by pid ${pid}, which does not run from ${this.productRoot}; not killing it.`,
+        );
+        continue;
+      }
+      try {
+        this.killProcessTree(pid);
+        console.log(
+          `Killed leftover Medusa process on port ${port}: pid ${pid} and its children.`,
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `Could not kill leftover Medusa process pid ${pid} on port ${port}: ${detail}`,
+        );
+      }
+    }
   }
 
   private isPortOpen(host: string, port: string): Promise<boolean> {
@@ -750,6 +847,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     } catch (error) {
       stopError = error instanceof Error ? error : new Error(String(error));
     }
+    this.reapProductListeners(port);
     const closed = await this.waitForPortClosed(host, port, STOP_POLL_MS);
     this.backendProcess = undefined;
     if (closed) {
@@ -759,7 +857,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       throw stopError;
     }
     throw new Error(
-      `Medusa backend still listening on ${host}:${port} after stopping the harness pid. The harness did not kill any other process.`,
+      `Medusa backend still listening on ${host}:${port} after stopping the harness pid. Only processes running from ${this.productRoot} are reaped; this one was not.`,
     );
   }
 
