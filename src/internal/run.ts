@@ -9,16 +9,39 @@ export interface RunOptions {
   timeoutMs?: number;
 }
 
+export interface RunCaptureOptions extends RunOptions {
+  /** Secret values replaced with `***` in thrown error messages and captured output. */
+  redact?: string[];
+}
+
 export interface RunCaptureResult {
   stdout: string;
   stderr: string;
+}
+
+/** Replaces every non-empty secret in `text` with `***`. */
+export function redactSecrets(
+  text: string,
+  secrets: readonly string[] = [],
+): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret !== "") {
+      out = out.split(secret).join("***");
+    }
+  }
+  return out;
 }
 
 /**
  * Run a command, inherit stdio, reject on non-zero exit.
  * Uses a shell on Windows so `.cmd` shims (yarn, npm, docker) resolve.
  */
-export function run(command: string, args: string[], options: RunOptions): Promise<void> {
+export function run(
+  command: string,
+  args: string[],
+  options: RunOptions,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -30,7 +53,11 @@ export function run(command: string, args: string[], options: RunOptions): Promi
     const timeout = options.timeoutMs
       ? setTimeout(() => {
           child.kill();
-          reject(new Error(`${command} ${args.join(" ")} timed out after ${options.timeoutMs}ms`));
+          reject(
+            new Error(
+              `${command} ${args.join(" ")} timed out after ${options.timeoutMs}ms`,
+            ),
+          );
         }, options.timeoutMs)
       : undefined;
 
@@ -45,13 +72,23 @@ export function run(command: string, args: string[], options: RunOptions): Promi
         resolve();
         return;
       }
-      reject(new Error(`${command} ${args.join(" ")} exited with code ${code ?? "unknown"}`));
+      reject(
+        new Error(
+          `${command} ${args.join(" ")} exited with code ${code ?? "unknown"}`,
+        ),
+      );
     });
   });
 }
 
 /** Same as `run`, but capture stdout/stderr (for parsing seed keys). */
-export function runCapture(command: string, args: string[], options: RunOptions): Promise<RunCaptureResult> {
+export function runCapture(
+  command: string,
+  args: string[],
+  options: RunCaptureOptions,
+): Promise<RunCaptureResult> {
+  const redact = options.redact ?? [];
+  const commandLine = redactSecrets(`${command} ${args.join(" ")}`, redact);
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -64,18 +101,20 @@ export function runCapture(command: string, args: string[], options: RunOptions)
     child.stdout?.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
       stdout += text;
-      process.stdout.write(text);
+      process.stdout.write(redactSecrets(text, redact));
     });
     child.stderr?.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
       stderr += text;
-      process.stderr.write(text);
+      process.stderr.write(redactSecrets(text, redact));
     });
 
     const timeout = options.timeoutMs
       ? setTimeout(() => {
           child.kill();
-          reject(new Error(`${command} ${args.join(" ")} timed out after ${options.timeoutMs}ms`));
+          reject(
+            new Error(`${commandLine} timed out after ${options.timeoutMs}ms`),
+          );
         }, options.timeoutMs)
       : undefined;
 
@@ -91,16 +130,18 @@ export function runCapture(command: string, args: string[], options: RunOptions)
         return;
       }
       const error = new Error(
-        `${command} ${args.join(" ")} exited with code ${code ?? "unknown"}`,
+        `${commandLine} exited with code ${code ?? "unknown"}`,
       ) as Error & { stdout: string; stderr: string };
-      error.stdout = stdout;
-      error.stderr = stderr;
+      error.stdout = redactSecrets(stdout, redact);
+      error.stderr = redactSecrets(stderr, redact);
       reject(error);
     });
   });
 }
 
-export function detectPackageManager(productRoot: string): "yarn" | "pnpm" | "npm" {
+export function detectPackageManager(
+  productRoot: string,
+): "yarn" | "pnpm" | "npm" {
   if (fs.existsSync(path.join(productRoot, "pnpm-lock.yaml"))) return "pnpm";
   if (fs.existsSync(path.join(productRoot, "yarn.lock"))) return "yarn";
   return "npm";

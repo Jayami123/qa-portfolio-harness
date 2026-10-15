@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.9 — 2026-10-15
+
+- Medusa adapter targets `medusa-dtc-starter`: harness Postgres (and opt-in Redis), production backend on **127.0.0.1:9000**, storefront on **127.0.0.1:8000**, `seed()` (German Warehouse, Featured collection, `QA10`, US region, customer), `proveAuth()`, and gitignored runtime `medusa-config.js` when `MEDUSA_REDIS=1` or `MEDUSA_STRIPE=1` (default off). Stripe CLI webhook path: `/hooks/payment/stripe_stripe`.
+
 ## v0.2.8 - 2026-10-14
 
 - Twenty `seed()` reports the real docker exec error when the seed command fails but the seed user is already present, instead of asserting an already-seeded database.

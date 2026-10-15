@@ -19,11 +19,16 @@ export function resolveNpm(): string {
   return platform() === "win32" ? "npm.cmd" : "npm";
 }
 
+/** pnpm on Windows is a `.cmd` shim. The DTC starter pins pnpm via packageManager. */
+export function resolvePnpm(): string {
+  return platform() === "win32" ? "pnpm.cmd" : "pnpm";
+}
+
 /** Keep the returned process referenced so Windows does not GC/kill it mid-smoke. */
 export function spawnLogged(
   command: string,
   args: string[],
-  options: { cwd: string; logFile: string; env?: NodeJS.ProcessEnv; detached?: boolean },
+  options: { cwd: string; logFile: string; env?: NodeJS.ProcessEnv; detached?: boolean; shell?: boolean },
 ): ReturnType<typeof spawn> {
   fs.mkdirSync(path.dirname(options.logFile), { recursive: true });
   fs.appendFileSync(
@@ -33,10 +38,13 @@ export function spawnLogged(
   const out = fs.openSync(options.logFile, "a");
   const err = fs.openSync(options.logFile, "a");
   const detached = options.detached === true;
+  // Default shell on Windows so `.cmd` shims resolve. Pass shell:false for node.exe:
+  // a cmd wrapper is the pid we record, and taskkill /T does not stop the node child that keeps the port.
+  const shell = options.shell ?? platform() === "win32";
   return spawn(command, args, {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
-    shell: platform() === "win32",
+    shell,
     stdio: ["ignore", out, err],
     windowsHide: true,
     ...(detached ? { detached: true } : {}),

@@ -35,15 +35,21 @@ const envSchema = z.object({
   DOCUMENSO_PUBLIC_URL: optionalString,
   DOCUMENSO_API_TOKEN: optionalString,
 
-  MEDUSA_BASE_URL: z.string().trim().url().default("http://localhost:9000"),
+  MEDUSA_BASE_URL: z.string().trim().url().default("http://127.0.0.1:9000"),
   MEDUSA_DB_URL: z
     .string()
     .trim()
     .min(1)
-    .default("postgres://medusa:medusa@localhost:5433/medusa_validation"),
+    .default("postgres://medusa:medusa@127.0.0.1:5433/medusa"),
+  MEDUSA_STOREFRONT_URL: z.string().trim().url().default("http://127.0.0.1:8000"),
   MEDUSA_ADMIN_EMAIL: optionalString,
   MEDUSA_ADMIN_PASSWORD: optionalString,
   MEDUSA_PUBLISHABLE_API_KEY: optionalString,
+  MEDUSA_SEED_CUSTOMER_EMAIL: optionalString,
+  MEDUSA_SEED_CUSTOMER_PASSWORD: optionalString,
+  STRIPE_API_KEY: optionalString,
+  STRIPE_WEBHOOK_SECRET: optionalString,
+  NEXT_PUBLIC_STRIPE_KEY: optionalString,
 
   TWENTY_BASE_URL: z.string().trim().url().default("http://127.0.0.1:3002"),
   TWENTY_DB_URL: z
@@ -82,9 +88,13 @@ export interface DocumensoConfig extends ProductConfig {
 
 export interface MedusaConfig extends ProductConfig {
   id: "medusa";
+  storefrontUrl: string;
   adminEmail?: string;
   adminPassword?: string;
   publishableApiKey?: string;
+  stripeApiKey?: string;
+  stripeWebhookSecret?: string;
+  stripePublishableKey?: string;
 }
 
 export interface TwentyConfig extends ProductConfig {
@@ -157,13 +167,17 @@ export function loadConfig(): HarnessConfig {
       id: "medusa",
       productRoot: resolveExistingDir(
         "Medusa product root",
-        parsed.MEDUSA_PRODUCT_DIR ?? path.join(productsRoot, "medusa"),
+        parsed.MEDUSA_PRODUCT_DIR ?? path.join(productsRoot, "medusa-dtc-starter"),
       ),
       baseUrl: parsed.MEDUSA_BASE_URL.replace(/\/$/, ""),
+      storefrontUrl: parsed.MEDUSA_STOREFRONT_URL.replace(/\/$/, ""),
       dbUrl: parsed.MEDUSA_DB_URL,
       adminEmail: parsed.MEDUSA_ADMIN_EMAIL,
       adminPassword: parsed.MEDUSA_ADMIN_PASSWORD,
       publishableApiKey: parsed.MEDUSA_PUBLISHABLE_API_KEY,
+      stripeApiKey: parsed.STRIPE_API_KEY,
+      stripeWebhookSecret: parsed.STRIPE_WEBHOOK_SECRET,
+      stripePublishableKey: parsed.NEXT_PUBLIC_STRIPE_KEY,
     },
     twenty: {
       id: "twenty",
