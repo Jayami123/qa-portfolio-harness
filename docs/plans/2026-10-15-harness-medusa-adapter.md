@@ -279,16 +279,28 @@ Task 2, before `seed()` exists: the live cycles are `up` → `waitHealthy` → `
 
 ## 5 Production boot times (fill in task 2)
 
+Measured 2026-10-15 on this PC (Node v24.21.0, pnpm 10.11.1). One run each. Wall clock is the stopwatch around the command, not the CLI's internal timer.
+
 | Step | Duration | Label |
 |---|---|---|
-| `pnpm medusa build` (apps/backend) | TBD | NOT MEASURED |
-| `pnpm medusa start` until `GET /health` 200 | TBD | NOT MEASURED |
-| `pnpm next build` (apps/storefront) | TBD | NOT MEASURED |
-| `pnpm next start -p 8000` until `GET /dk` 200 | TBD | NOT MEASURED |
-| Total cold build + start | TBD | NOT MEASURED |
-| Mode chosen | TBD (production if total under 10 minutes) | |
+| `pnpm medusa build` (apps/backend) | **94.918 s** (94918 ms), exit 0. CLI also printed backend 51.32 s and frontend 78.66 s; those overlap inside the wall clock. | verified |
+| `medusa start` until `GET http://127.0.0.1:9000/health` 200 | **8.169 s** (8169 ms). Medusa logged `Server is ready on port: 9000 – 4890ms`. | verified |
+| `pnpm next build` (apps/storefront) | **71.444 s** (71444 ms), exit 0. A later rebuild with the real publishable key was 31.513 s and is not this cold number. | verified |
+| `pnpm next start -p 8000` until `GET http://127.0.0.1:8000/dk` 200 | **6.776 s** (6776 ms), after the keyed rebuild. | verified |
+| Total cold build + start | **181.307 s** (181307 ms), about 3 min 1 s | verified |
+| Mode chosen | **production** (`medusa build` + `medusa start`). Total is under 10 minutes. | verified |
 
-pnpm rebuild / approve result for `sharp`, `@swc/core`, `esbuild`: TBD in task 2.
+`pnpm install` warned that build scripts for `sharp`, `@swc/core`, and `esbuild` were ignored. `pnpm approve-builds` and `pnpm rebuild` were not run. Build, start, `next build`, and `next start` all exited 0 anyway. Those three packages are not approved.
+
+`pnpm medusa start` with cwd `apps/backend` exited 1: `Could not find index.html in the admin build directory`. The admin output is `apps/backend/.medusa/server/public/admin/index.html`, and the loader joins `./public/admin` onto the process cwd. The harness starts `node apps/backend/node_modules/@medusajs/cli/cli.js start` with cwd `apps/backend/.medusa/server`. That directory is not a pnpm workspace package, so `pnpm medusa start` cannot see the `medusa` bin there.
+
+Redis check, same start, `REDIS_URL=redis://127.0.0.1:6380` in the gitignored backend `.env`, no Redis container: the log said `redisUrl not found. A fake redis instance will be used.` and `Local Event Bus installed.` Compose does not start Redis. See `docs/adr/0001-medusa-fake-redis.md`.
+
+Live cycles after that measurement (adapter `up` / `down`, volumes):
+
+- Fresh: `docker compose ... down -v`, then `node scripts/up.mjs medusa` exit 0 in **124.830 s** (124830 ms). That run rebuilt because a hand-written build marker had a BOM; migrate **29.1 s**, build **70.6 s**, spawn to HTTP 200 **10.8 s**. `GET /health` after the CLI exited was HTTP 200, body `OK`.
+- `down` of that process exited 1 in 16.111 s. The recorded pid was a cmd wrapper (`shell: true`), and `taskkill /T` left the node listener on port 9000. Fixed by spawning `node.exe` with `shell: false` and `detached: true`. The leftover listener was the harness server and was killed before the retry.
+- Kept volumes, after the fix: `up` exit 0 in **36.398 s**, `GET /health` after the CLI exited HTTP 200; `down` exit 0 in **1.909 s**, port 9000 free, volume `qa-harness-medusa_medusa_harness_pg` still present; `up` again exit 0 in **40.260 s**, `GET /health` after the CLI exited HTTP 200. Build skipped (marker matched `f677db4`).
 
 ## 6 Task breakdown
 
