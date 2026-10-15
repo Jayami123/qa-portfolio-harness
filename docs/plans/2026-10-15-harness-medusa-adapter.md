@@ -7,18 +7,25 @@
 - Package version today: `0.2.8`. Tag `v0.2.8` is two docs commits behind HEAD.
 - Product (read-only, never edit): `D:\Jayami\Portfolio\products\medusa-dtc-starter` · [Jayami123/medusa-dtc-starter](https://github.com/Jayami123/medusa-dtc-starter) HEAD **`f677db438f27294fc50e4c7c6612e71ff38eeff5`** (`f677db4`, 2026-10-09, upstream `fix/remove-static-params`). Pin this SHA in the README when the adapter lands.
 - Engine fork `D:\Jayami\Portfolio\products\medusa` stays untouched. After this rewrite the adapter must not read `scripts/portfolio-validation`, MinIO, or that folder.
-- Date: 2026-10-15. Probe ran against a scratch clone of the same SHA; that scratch clone is deleted after this plan commit. An ADR for fake Redis is written in task 2 if Redis stays unwired.
+- Date: 2026-10-15. Probe ran against a scratch clone of the same SHA; that scratch clone is deleted after this plan commit. Task 2 landed (adapter up/down, fake Redis ADR `docs/adr/0001-medusa-fake-redis.md`, harness-build marker under `.medusa/server/`). Branch head after task 2 fixes: **`14587db`**.
 - Start and stop Medusa only through `node scripts/up.mjs medusa` and `node scripts/down.mjs medusa` once the adapter exists. Reset volumes with a documented `down -v`, not by editing the fork.
 
 Labels in this file: **verified** (this session's probe, 2026-10-15), **inferred**, **NOT MEASURED**.
 
-## 2 Goal and scope
+## 2 Goal and scope — full Medusa v0.2.9
 
-The adapter exists (`src/adapters/medusa.adapter.ts`) but targets the engine monorepo: `up()` starts validation Postgres/Redis/MinIO only, HTTP is not started, `seed()` throws. The live product is the DTC starter (`apps/backend` + `apps/storefront`).
+**Product:** `medusa-dtc-starter` (`apps/backend` + `apps/storefront`). Engine monorepo `products/medusa` stays untouched.
 
-**In scope:** rewrite the adapter to the Documenso bar against `medusa-dtc-starter`; harness-owned Postgres 15; spawn backend :9000 and storefront :8000; `GET /health` HTTP 200; idempotent seed (migrate, admin user, collection, second stock location); redacted publishable key; German admin documented from the probe; Stripe only if a config overlay works without editing tracked fork files; unit tests; CHANGELOG, README, version 0.2.9; two live smokes per task (fresh volumes, then kept volumes).
+**Default (P1-light):** Postgres 15 only; fake Redis; `pp_system_default`; no storefront spawn until task 5; `seed()` still throws until task 3. Opt-in harness env switches stay **off** so portfolio P1 does not pay Redis/Stripe cost unless a project opts in.
 
-**Out of scope:** any edit of `medusa-dtc-starter` or `products/medusa`; Cal/Documenso/Twenty adapters; P1 Playwright (README may record that future storefront smoke uses `/dk/products/t-shirt`); harness CI Docker live smoke; real Stripe live keys; CodeRabbit CLI; merge, tag, or PR.
+**In scope (tasks 3–6):**
+
+- Idempotent **full seed** (section 4 `seed()`).
+- **Opt-in switches** (section 4): `MEDUSA_REDIS=1`, `MEDUSA_STRIPE=1` (harness `.env`, default off).
+- **Config overlay** without editing tracked fork files (section 4); prove `git status --short` empty in the product after `up`.
+- Storefront on :8000; `npm run smoke -- medusa` with switches on and off; `proveAuth`; CHANGELOG; README including **Which project turns on what**; version **0.2.9**; tag after Jayami merge.
+
+**Out of scope:** tracked edits under `medusa-dtc-starter`; Cal/Documenso/Twenty adapters; P1 Playwright in this repo; harness CI Docker live smoke; real Stripe live keys; CodeRabbit CLI; merge, tag, or PR without Jayami.
 
 ## 3 Probe results (2026-10-15)
 
@@ -181,7 +188,7 @@ flowchart TD
   upStart[up]
   nodeGate[assert Node >= 22.22 and pnpm]
   envFiles[bootstrap gitignored backend and storefront env]
-  compose[composeUp postgres 15 and redis only if wired]
+  compose[composeUp postgres and redis if MEDUSA_REDIS=1]
   migrate[medusa db:migrate]
   user[medusa user or skip if email exists]
   extras[collection plus German Warehouse]
@@ -208,11 +215,11 @@ P1 CI that stubs `products/medusa` for `loadConfig()` must stub `medusa-dtc-star
 
 ### Compose
 
-**Chosen:** rewrite `docker/medusa.compose.yml` as harness-owned: `postgres:15`, user/pass/db `medusa`/`medusa`/`medusa`, host port `127.0.0.1:5433`, healthcheck `pg_isready`. Drop MinIO.
+**Chosen (task 2, default):** harness-owned `postgres:15` on `127.0.0.1:5433`. No Redis. See ADR 0001 (fake Redis when switches are off).
 
-Redis: industry standard is a real Redis for the event bus and cache so webhook and subscriber tests see async behaviour. Start `redis:7` on `127.0.0.1:6380` **only if** env alone makes Medusa use it (`REDIS_URL` or whatever the framework reads without editing `medusa-config.ts`). The probe already showed `redisUrl not found` with `REDIS_URL` set. Task 2 re-checks once against `medusa start` (not only `develop`). If it still ignores the env, **do not start an idle Redis**, and record "fake Redis in use" in the README and an ADR.
+**Opt-in `MEDUSA_REDIS=1` (task 4):** add `redis:7` to `docker/medusa.compose.yml` (or a small overlay file) on `127.0.0.1:6380`, healthcheck, same project name. Start Redis **only** when this switch is on. Do not start an idle Redis when the switch is off.
 
-**Rejected:** keep the engine overlay; start Redis that the app never opens.
+**Rejected:** keep the engine validation overlay; default-on Redis for all consumers.
 
 ### HTTP mode
 
@@ -224,35 +231,59 @@ Logs: `.harness/medusa-backend.log`, `.harness/medusa-storefront.log`. Pids: `.h
 
 Health: `GET {baseUrl}/health` status **=== 200**. Storefront: `GET {storefrontUrl}/dk` === 200. Wait budget: floor 2 minutes until production times replace it.
 
-### seed()
+### Opt-in switches (harness `.env`, default off)
 
-**Chosen:**
+| Switch | When on | Compose | Backend config / env |
+|---|---|---|---|
+| *(none)* | Default | Postgres only | Tracked `medusa-config.ts` behaviour via built server; fake Redis (ADR 0001). |
+| `MEDUSA_REDIS=1` | P2, P6, webhook cases | `redis:7` @ `127.0.0.1:6380` | `projectConfig.redisUrl`; register Medusa **Redis** event-bus, cache, and workflow-engine modules (exact `resolve` paths from `@medusajs/medusa` 2.21.2 docs or package exports). Set `REDIS_URL` in gitignored backend `.env`. |
+| `MEDUSA_STRIPE=1` | Stripe webhook / payment tests | No extra service | Register `@medusajs/medusa/payment-stripe`; forward `STRIPE_API_KEY` and `STRIPE_WEBHOOK_SECRET` from harness `.env` into gitignored backend `.env`; storefront `NEXT_PUBLIC_STRIPE_KEY` when storefront runs. `seed()` enables **`pp_stripe_stripe`** on the Europe region when the secret key is set. Document local webhook forwarding: Stripe CLI → `http://127.0.0.1:9000/hooks/payment/stripe_stripe`. |
 
-1. `medusa db:migrate` (idempotent via `script_migrations`).
-2. `medusa user` only if `public.user` has no `MEDUSA_ADMIN_EMAIL`. Second create exits 1.
-3. Capture the publishable token from `api_key` (type `publishable`, not revoked). Pass it into storefront env and `AuthSession.raw` as needed. Log only a redacted form. Persist by telling the operator to set `MEDUSA_PUBLISHABLE_API_KEY`. Never print the full token.
-4. If collections count is 0: `POST /admin/product-collections` and attach the four seeded products so `/dk` can show a rail. Do not run `seed-demo-products.ts`.
-5. Second stock location: create `German Warehouse`, Berlin, `de` if a location with that name is missing. Then inventory levels for existing items at that location, and a sales-channel link. Presence check so a second `seed()` is a no-op. Measure those extra calls in task 3 and paste durations into this plan.
+Unit tests: pure helpers for each switch (compose file list, env lines written, module list in generated config, stripe provider enable predicate). No live Redis/Stripe in unit tests.
 
-P1's future storefront smoke targets **`/dk/products/t-shirt`**, not the home rail. Record that in the README P1 notes. This repo does not add Playwright.
+README section **Which project turns on what** (task 4 or 6): **P1** — neither switch; **P2 / P6** — `MEDUSA_REDIS=1`; webhook / payment cases — `MEDUSA_REDIS=1` and `MEDUSA_STRIPE=1`.
+
+### Config without editing tracked fork files (investigate in task 4)
+
+Fork constraint: after `node scripts/up.mjs medusa`, `git -C medusa-dtc-starter status --short` must be **empty** (no modified tracked files, no new tracked paths). Harness may write only gitignored product paths (`.env`, `.medusa/**`, `apps/storefront/.env.local`).
+
+**Evidence (framework 2.21.2, verified in `node_modules` on this PC):**
+
+| Approach | Result |
+|---|---|
+| `MEDUSA_CONFIG` / CLI `--config` | **Not found** in `@medusajs/cli@2.21.2` `create-cli.js` (no config path flag on `build` / `start` / `develop`). |
+| Official merge of a second config file | **Not found.** `@medusajs/utils` `get-config-file.js` loads `require(join(rootDir, "medusa-config"))` only. No documented override filename. |
+| `REDIS_URL` / env-only module registration | **Insufficient.** Task 2 proved `REDIS_URL` alone does not set `projectConfig.redisUrl`; modules (Stripe, Redis bus) need a `modules` block in config. |
+| New file `apps/backend/medusa-config.js` | **Dirty tree.** Not gitignored; would appear as `??` in `git status`. **Do not use.** |
+| Gitignored `.medusa/server/medusa-config.js` | **Candidate.** `apps/backend/.gitignore` ignores `.medusa`. Production start cwd is `.medusa/server` (task 2). A `medusa-config.js` already exists there after `medusa build`. Harness can **regenerate** that file from a **tracked harness template** (`docker/medusa.harness-config.mjs` or similar) immediately before `node …/cli.js start`, merging tracked defaults plus switch-dependent `projectConfig` / `modules`. `medusa db:migrate` and `medusa build` keep using tracked `medusa-config.ts`; runtime start uses the gitignored generated file. |
+
+**Task 4 gate:** implement the candidate; boot with `MEDUSA_REDIS=1` and grep logs for absence of `redisUrl not found` / `Local Event Bus`; boot with `MEDUSA_STRIPE=1` and confirm `pp_stripe_stripe` in admin region providers after seed; **`git status --short` empty** after each `up`. If the candidate fails (e.g. start ignores overwritten `medusa-config.js`), **stop task 4** and report the three rows above plus boot logs — do not edit tracked `medusa-config.ts`.
+
+### seed() — full (task 3)
+
+**Chosen:** all steps idempotent with **presence checks** (admin API or SQL). `up()` may still run `medusa db:migrate`; `seed()` owns the rest.
+
+1. Admin user: `medusa user` only if `MEDUSA_ADMIN_EMAIL` is absent (exit 1 if duplicate — skip).
+2. Publishable key: read from DB; redact in logs; write gitignored storefront env when task 5 exists.
+3. **German Warehouse** (Berlin, `de`): create if missing; **inventory levels** for all variants at that location; **sales-channel** link to default channel.
+4. **One collection** containing the **four** seeded products (home rail / storefront collections).
+5. **One promo code** (e.g. `QA10`, **10%** off) with presence check.
+6. **One customer** account (email/password from harness env or fixed fixture).
+7. **Second region** (e.g. **US** / `usd`) with presence check; do not remove Europe.
+
+Do not run `seed-demo-products.ts`. Paste measured admin API durations into this plan after task 3.
+
+P1 storefront smoke URL remains **`/dk/products/t-shirt`** (README). This repo does not add Playwright.
 
 ### Publishable key redaction
 
 `scripts/lib.mjs` `redactSecret` keeps 8 + 4 characters. That is too much of a `pk_` token for logs. Add a helper in `src/adapters/medusa-env.ts` (for example `redactPublishableKey`) used by seed and smoke. Unit tests: a realistic-length `pk_` value never appears in the returned string; empty and short inputs; the helper must not throw. Never write the token into README examples (placeholder only).
 
-### Stripe (task 4)
+### Stripe + German admin (task 4)
 
-Do not edit tracked fork files. Investigate, in this order, with evidence (CLI help, framework source file:line, or a live boot log):
+Stripe follows the config overlay above and `MEDUSA_STRIPE=1`. Smoke with the switch **off** still passes on `pp_system_default`. With the switch **on**, seed enables `pp_stripe_stripe` on the Europe region when `STRIPE_API_KEY` is set in harness `.env` (test keys only in `.env.example` comments).
 
-1. Medusa CLI `--config` / `MEDUSA_CONFIG` pointing at a **harness-owned** file that imports the fork `defineConfig` and adds the Stripe payment module.
-2. An untracked override file the official loader merges (only if the loader documents it).
-3. Env-driven module registration with no config file change.
-
-If a method works without touching tracked files, use it. Forward `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, and `NEXT_PUBLIC_STRIPE_KEY` from the harness `.env` into gitignored product env. Enable `pp_stripe_stripe` on the region only when the secret key is set. Smoke without those vars still passes on `pp_system_default`.
-
-If none works, **stop task 4** and report the three options with the evidence. Do not invent a fourth path.
-
-German admin is README-only (probe already proved Deutsch is in the combobox).
+German admin: README-only (probe §3.4 — Deutsch in dashboard language combobox; starter `src/admin/i18n` exports `{}`).
 
 ### Env contract (`.env.example`)
 
@@ -263,7 +294,8 @@ German admin is README-only (probe already proved Deutsch is in the combobox).
 - `MEDUSA_ADMIN_EMAIL` / `MEDUSA_ADMIN_PASSWORD` (required for authenticate; empty in the example)
 - `MEDUSA_PUBLISHABLE_API_KEY` (optional override; empty in the example)
 - `MEDUSA_SKIP_WEB_START`, `MEDUSA_SKIP_STOREFRONT`, wait/build timeouts
-- Stripe vars optional and commented. No real keys.
+- `MEDUSA_REDIS=1`, `MEDUSA_STRIPE=1` (opt-in; default unset/off)
+- `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_KEY` optional and commented. No real keys in the repo.
 
 Bootstrap gitignored `apps/backend/.env` from the template and overwrite `DATABASE_URL` (and `REDIS_URL` if Redis is actually wired). Storefront: gitignored `apps/storefront/.env.local`. Never commit those files. Never log secrets.
 
@@ -301,49 +333,42 @@ Live cycles after that measurement (adapter `up` / `down`, volumes):
 - Fresh: `docker compose ... down -v`, then `node scripts/up.mjs medusa` exit 0 in **124.830 s** (124830 ms). That run rebuilt because a hand-written build marker had a BOM; migrate **29.1 s**, build **70.6 s**, spawn to HTTP 200 **10.8 s**. `GET /health` after the CLI exited was HTTP 200, body `OK`.
 - `down` of that process exited 1 in 16.111 s. The recorded pid was a cmd wrapper (`shell: true`), and `taskkill /T` left the node listener on port 9000. Fixed by spawning `node.exe` with `shell: false` and `detached: true`. The leftover listener was the harness server and was killed before the retry.
 - Kept volumes, after the fix: `up` exit 0 in **36.398 s**, `GET /health` after the CLI exited HTTP 200; `down` exit 0 in **1.909 s**, port 9000 free, volume `qa-harness-medusa_medusa_harness_pg` still present; `up` again exit 0 in **40.260 s**, `GET /health` after the CLI exited HTTP 200. Build skipped (marker matched `f677db4`).
+- Build marker moved to `apps/backend/.medusa/server/harness-build.json` (**14587db**). Fresh-volume pid proof: `down -v`, `up` **97.216 s** (build **40.0 s** after absent marker), `down` **2.902 s** port free, `up` **35.956 s** with build skipped.
 
 ## 6 Task breakdown
 
-### Task 2: adapter up/down
+### Task 2: adapter up/down — **done**
 
-Rewrite `src/adapters/medusa.adapter.ts`. Add `src/adapters/medusa-env.ts` and `medusa-env.test.ts` (health 200 helper, URL 127.0.0.1, env builder, redaction helper tests can start here). Pid helper, same idea as Documenso. Rewrite `docker/medusa.compose.yml`. Change `src/config.ts` default product dir and `MEDUSA_BASE_URL`. Update `.env.example`.
+Commits on branch through **`14587db`**: compose Postgres only; env bootstrap; migrate in `up()`; production start from `.medusa/server`; health 200; pid `down`; ADR 0001; harness-build skip marker.
 
-`up()`: Node and pnpm gate; env bootstrap; compose `--wait`; pnpm rebuild of proven packages; measure build + start; spawn backend; `waitHealthy`. Storefront spawn can wait for task 5 if that keeps the diff small, as long as two live up/health/down cycles still run.
+### Task 3: full seed
 
-`down()`: stop pid trees, then composeDown.
+Implement `seed()` per section 4 (German Warehouse + inventory + channel link, collection, `QA10`, customer, US region). Unit tests for presence predicates and idempotency helpers. `npm run check`. Two live `npm run smoke -- medusa` cycles (fresh `down -v` then kept volumes). Paste API timings into this plan.
 
-Prove Redis: set `REDIS_URL`, boot, grep logs for `redisUrl not found` vs a real connection. Start `redis:7` only if wired. Otherwise ADR + README limitation.
+### Task 4: Redis + Stripe switches + German admin docs
 
-Fill section 5 of this plan with the measured times.
-
-### Task 3: seed
-
-`seed()`: migrate; skip existing admin; collection via admin API; German Warehouse with inventory levels and sales-channel link; presence checks; capture and redact publishable key. Paste measured durations for the extra location calls into this plan. Full `npm run smoke -- medusa` twice.
-
-### Task 4: Stripe overlay + German README
-
-Investigate overlay (section 4). Stop if none is possible without tracked-file edits. README: Deutsch path from the probe. No live Stripe charge in harness CI.
+Wire `MEDUSA_REDIS=1` / `MEDUSA_STRIPE=1` (default off). Compose Redis only when Redis switch on. Generated gitignored `.medusa/server/medusa-config.js` per section 4; prove clean product `git status` after `up`. Unit tests for switch parsing, env builder, generated module list. README: Deutsch admin path; **Which project turns on what**; Stripe CLI webhook URL. Update `.env.example`. Revise ADR 0001 or add ADR note that real Redis is opt-in. Stop with evidence if config overlay fails.
 
 ### Task 5: storefront
 
-Spawn storefront on 8000. Write `.env.local` with backend URL and publishable key (not logged). Wait `GET /dk` 200. Optional `MEDUSA_SKIP_STOREFRONT=1`. README: P1 future smoke URL `/dk/products/t-shirt`.
+Spawn storefront on 8000. Gitignored `.env.local` (backend URL, publishable key, Stripe publishable when switch on). `GET /dk` 200. `MEDUSA_SKIP_STOREFRONT=1`. Two smoke cycles.
 
-### Task 6: proveAuth, docs, version
+### Task 6: proveAuth, smoke matrix, release
 
-`proveAuth()`: `GET /admin/users/me`, email matches. CHANGELOG, README, `package.json` and lock **0.2.9**. Two smokes. Push the branch. Prepare tag commands. Jayami tags after merge.
+`proveAuth()`: `GET /admin/users/me`, email matches. Run `npm run smoke -- medusa` with switches **off**, then **Redis on**, then **Redis + Stripe on** (and off again if needed for regression). CHANGELOG; README polish; `package.json` **0.2.9**. Two fresh/kept volume smokes for the default (off) path. Prepare tag commands; Jayami tags after merge. Push branch when asked.
 
-## 7 Files to touch (across 2-6)
+## 7 Files to touch (tasks 3–6)
 
-- `docs/plans/2026-10-15-harness-medusa-adapter.md` (this file, commit 1)
-- `docker/medusa.compose.yml` (rewrite)
-- `src/adapters/medusa.adapter.ts` (rewrite)
-- `src/adapters/medusa-env.ts`, `medusa-env.test.ts` (new)
-- pid helper if not folded into the env module
+- `src/adapters/medusa.adapter.ts`, `medusa-env.ts`, `medusa-env.test.ts`, pid helper
+- `docker/medusa.compose.yml` (+ optional Redis service when switch on)
+- `docker/medusa.harness-config.mjs` (or `.ts`) — **tracked** template for generated gitignored server config
 - `src/config.ts`, `.env.example`
-- ADR for fake Redis if Redis stays unwired (task 2)
-- `README.md`, `CHANGELOG.md`, `package.json`, lockfile version (task 6)
+- `README.md` (storefront, switches, **Which project turns on what**, German admin)
+- `docs/adr/0001-medusa-fake-redis.md` (opt-in Redis note) or follow-up ADR
+- `CHANGELOG.md`, `package.json`, lockfile (task 6)
+- This plan (timings after task 3)
 
-No changes: Cal, Documenso, Twenty adapters; `src/wait/health.ts` defaults (Medusa passes `isOk`); `products/medusa`; tracked files under `products/medusa-dtc-starter`.
+No changes: Cal, Documenso, Twenty adapters; tracked files under `products/medusa-dtc-starter`.
 
 ## 8 Risks
 
@@ -351,7 +376,8 @@ No changes: Cal, Documenso, Twenty adapters; `src/wait/health.ts` defaults (Medu
 - `medusa user` is not idempotent (exit 1). Skip when the email exists.
 - Home has no products without a collection. Seed creates one via admin API. P1 still uses `/dk/products/t-shirt`.
 - Stripe may be impossible without editing `medusa-config.ts`. Task 4 stops and reports.
-- Fake Redis: webhook and subscriber tests will not see a real bus until the fork or an overlay wires `redisUrl`.
+- Fake Redis is the default; P2/P6 must set `MEDUSA_REDIS=1` or webhook tests stay in-process.
+- Generated `.medusa/server/medusa-config.js` must be rewritten whenever switches change; if start still reads stale config, force rebuild or document order of operations.
 - Next.js prints the publishable key. Harness must still redact its own logs. Unit-test the helper.
 - After the rewrite, `MEDUSA_PRODUCT_DIR` pointing at `../products/medusa` must fail clearly.
 - Production boot times are unknown until task 2. The 10 minute rule decides the mode.
@@ -369,14 +395,15 @@ This repo has no ESLint or Prettier. Mirror CI with `npm run check`.
 
 ## 10 Commit plan
 
-1. `docs(plan): harness v0.2.9 Medusa adapter` (this file only)
-2. Task 2 commits (compose, up/down, env, Redis decision, boot numbers)
-3. Task 3 seed
-4. Task 4 Stripe overlay or a stop report
-5. Task 5 storefront
-6. `chore(release): v0.2.9`
+1. `docs(plan): harness v0.2.9 Medusa adapter` — done (`632d9e9`)
+2. Task 2 — done (`cef2965`, `f99f94d`, `14587db`)
+3. `docs(plan): full Medusa v0.2.9 switches and task order` (this revision)
+4. Task 3 seed
+5. Task 4 switches + overlay + README
+6. Task 5 storefront
+7. Task 6 smoke matrix + `chore(release): v0.2.9`
 
-No commit on `main`. Auth and production-mode defaults wait for task 2 measurements.
+No commit on `main`.
 
 ## 11 Will not do
 
@@ -384,4 +411,5 @@ Fork edits (dtc-starter and engine). Default `down -v`. Harness CI Docker live s
 
 ## 12 Open questions
 
-None that block this plan commit. Task 2 still has to fill section 5 and the Redis/ADR fork. Task 4 still has to prove or reject a Stripe overlay.
+- Task 4 must confirm the **gitignored `.medusa/server/medusa-config.js`** overlay at runtime (see section 4 table). If it fails, stop and report; do not edit tracked `medusa-config.ts`.
+- Exact Medusa 2.21.2 `modules` `resolve` strings for Redis event bus, cache, and workflow engine (copy from official docs or package exports during task 4).
