@@ -4,6 +4,7 @@ import net from "node:net";
 import { platform } from "node:os";
 import path from "node:path";
 import type { MedusaConfig } from "../config.js";
+import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
 import { run } from "../internal/run.js";
 import { resolvePnpm, spawnLogged } from "../internal/spawn-detached.js";
@@ -30,6 +31,7 @@ import {
   buildMedusaStorefrontEnvLocal,
   classifyMedusaProbe,
   decideMedusaBuildSkip,
+  decideMedusaStorefrontBuildSkip,
   isMedusaHealthyStatus,
   medusaBackendStartArgs,
   medusaBuiltServerConfigPath,
@@ -43,9 +45,10 @@ import {
   redactMedusaText,
   renderServerMedusaConfigJs,
   serializeMedusaHarnessBuildRecord,
+  serializeMedusaStorefrontBuildRecord,
   type MedusaProbeVerdict,
 } from "./medusa-env.js";
-import { readPublishableKeyFromDatabase, runMedusaSeed } from "./medusa-seed.js";
+import { ensureMedusaAdminUser, readPublishableKeyFromDatabase, runMedusaSeed } from "./medusa-seed.js";
 
 const COMPOSE_PROJECT = "qa-harness-medusa";
 const DEFAULT_BUILD_MS = 10 * 60_000;
@@ -310,26 +313,47 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     fs.writeFileSync(target, renderServerMedusaConfigJs(this.harnessSwitches()), "utf8");
   }
 
+  private async medusaStoreDataFingerprint(): Promise<string> {
+    const pool = createPgClient(this.cfg.dbUrl);
+    try {
+      const result = await pool.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM product_collection`,
+      );
+      const collections = result.rows[0]?.n ?? 0;
+      return `collections:${collections}`;
+    } finally {
+      await pool.end();
+    }
+  }
+
   private async ensureStorefrontBuild(publishableKey: string): Promise<void> {
+    this.writeStorefrontEnv(publishableKey);
     const nextDir = path.join(this.storefrontDir(), ".next");
     const marker = path.join(nextDir, "harness-build.json");
     const head = this.productGitSha();
-    if (
-      process.env.MEDUSA_WEB_REBUILD !== "1" &&
-      fs.existsSync(path.join(nextDir, "required-server-files.json")) &&
-      head !== undefined &&
-      fs.existsSync(marker) &&
-      fs.readFileSync(marker, "utf8").includes(head)
-    ) {
-      console.log(`Medusa storefront .next matches HEAD ${head}; skipping next build.`);
+    const storeDataFingerprint = await this.medusaStoreDataFingerprint();
+    const markerText = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : undefined;
+    const skip = decideMedusaStorefrontBuildSkip({
+      forceRebuild: process.env.MEDUSA_WEB_REBUILD === "1",
+      nextBuildOutputExists: fs.existsSync(path.join(nextDir, "required-server-files.json")),
+      markerFileText: markerText,
+      headGitSha: head,
+      publishableKey,
+      storeDataFingerprint,
+    });
+    if (skip.skip) {
+      console.log(`Medusa storefront .next matches HEAD ${head} and publishable key; skipping next build.`);
       return;
     }
-    this.writeStorefrontEnv(publishableKey);
     console.log(`Building Medusa storefront (up to ${String(this.buildTimeoutMs())} ms)…`);
     await this.runPnpm(["next", "build"], this.storefrontDir(), this.buildTimeoutMs());
     if (head !== undefined) {
       fs.mkdirSync(nextDir, { recursive: true });
-      fs.writeFileSync(marker, serializeMedusaHarnessBuildRecord(head), "utf8");
+      fs.writeFileSync(
+        marker,
+        serializeMedusaStorefrontBuildRecord(head, publishableKey, storeDataFingerprint),
+        "utf8",
+      );
     }
   }
 
@@ -383,8 +407,13 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     const logFile = this.storefrontLogFile();
     const cwd = this.storefrontDir();
     const { port } = medusaListen(this.cfg.storefrontUrl);
+    const nextCli = path.join(cwd, "node_modules", "next", "dist", "bin", "next");
+    if (!fs.existsSync(nextCli)) {
+      throw new Error(`Medusa storefront Next.js CLI missing at ${nextCli}. Run pnpm install in the DTC starter.`);
+    }
     console.log(`Starting Medusa storefront on port ${port} (logs: ${logFile})`);
-    this.storefrontProcess = spawnLogged(resolvePnpm(), ["next", "start", "-p", port], {
+    // node.exe + next CLI (shell:false) — pnpm.cmd with shell:false throws EINVAL on Windows.
+    this.storefrontProcess = spawnLogged(process.execPath, [nextCli, "start", "-p", String(port)], {
       cwd,
       logFile,
       env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
@@ -623,6 +652,17 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     const bootSeconds = ((Date.now() - bootStarted) / 1000).toFixed(1);
     console.log(`Medusa backend is up at ${this.cfg.baseUrl} (${MEDUSA_HTTP_MODE}, ${bootSeconds} s from spawn to HTTP 200).`);
 
+    await this.maybeStartStorefront();
+  }
+
+  /**
+   * Build and start the storefront after seed() so Next.js force-cache sees collections (smoke path).
+   */
+  async startStorefrontAfterSeed(): Promise<void> {
+    await this.maybeStartStorefront();
+  }
+
+  private async maybeStartStorefront(): Promise<void> {
     if (process.env.MEDUSA_SKIP_STOREFRONT === "1") {
       console.log("MEDUSA_SKIP_STOREFRONT=1; storefront not started.");
       return;
@@ -653,7 +693,17 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     await this.stopStorefront();
     const { host, port } = medusaListen(this.cfg.baseUrl);
     await this.stopBackend(host, port);
-    await composeDown(this.composeOpts());
+    const opts = this.composeOpts();
+    if (process.env.MEDUSA_DOWN_VOLUMES === "1") {
+      await run(
+        "docker",
+        ["compose", "-p", opts.projectName, ...opts.files.flatMap((f) => ["-f", f]), "down", "-v"],
+        { cwd: opts.cwd },
+      );
+      console.log("Medusa backend stopped and compose stack torn down (volumes removed).");
+      return;
+    }
+    await composeDown(opts);
     console.log("Medusa backend stopped and compose stack torn down (volumes kept).");
   }
 
@@ -669,6 +719,12 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     if (this.seedResult) {
       return this.seedResult;
     }
+    const email = this.cfg.adminEmail;
+    const password = this.cfg.adminPassword;
+    if (!email || !password) {
+      throw new Error("Medusa seed() needs MEDUSA_ADMIN_EMAIL and MEDUSA_ADMIN_PASSWORD in the harness .env.");
+    }
+    await ensureMedusaAdminUser(this.backendDir(), email, password, this.backendProcessEnv());
     const session = await this.authenticate();
     this.seedResult = await runMedusaSeed({
       cfg: this.cfg,

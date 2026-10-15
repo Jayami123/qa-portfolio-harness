@@ -341,9 +341,21 @@ Live cycles after that measurement (adapter `up` / `down`, volumes):
 
 Commits on branch through **`14587db`**: compose Postgres only; env bootstrap; migrate in `up()`; production start from `.medusa/server`; health 200; pid `down`; ADR 0001; harness-build skip marker.
 
-### Task 3: full seed
+### Task 3: full seed — **done** (live verification 2026-10-15)
 
-Implement `seed()` per section 4 (German Warehouse + inventory + channel link, collection, `QA10`, customer, US region). Unit tests for presence predicates and idempotency helpers. `npm run check`. Two live `npm run smoke -- medusa` cycles (fresh `down -v` then kept volumes). Paste API timings into this plan.
+`seed()` idempotent; smoke defers storefront until after seed (Next `force-cache` on collections). Live matrix on this PC (Node v24.21.0, switches default off unless noted):
+
+| Cycle | Wall `npm run smoke -- medusa` | `seed()` total | Notes |
+|---|---|---|---|
+| Fresh (`MEDUSA_DOWN_VOLUMES=1` down, then smoke) | **372.440 s** | **5.508 s** | migrate **70.3 s**; backend spawn→`/health` 200 **30.9 s**; admin API steps: publishable key **252 ms**, German Warehouse **3406 ms**, Featured collection **1274 ms**, promo QA10 **371 ms**, customer **60 ms**, US region **141 ms** |
+| Kept volumes (`down` then smoke) | **135.918 s** | **0.395 s** (all steps skip) | `seed notes: Medusa seed already complete; no changes.` |
+| `MEDUSA_REDIS=1` fresh | **385.223 s** | (same shape as off fresh) | Compose Redis **127.0.0.1:6380**; runtime boot log: `Connection to Redis in module 'event-bus-redis' established` (no `Local Event Bus` on server start). Migrate CLI still logs fake Redis (tracked `medusa-config.ts`). |
+| `MEDUSA_REDIS=1` kept | **100.561 s** | skip | storefront build skipped (marker + fingerprint) |
+| `MEDUSA_STRIPE=1` | — | — | **NOT VERIFIED (no Stripe test keys in harness `.env`)** |
+
+Storefront oracles in smoke: `GET /health` **200** `OK`; `GET /store/collections` **Featured** + 4 products; `GET /dk` **200**; `GET /dk/products/t-shirt` **200** with product title in HTML. **PRODUCT BUG (starter):** `/dk` HTML omits Featured rail while store API lists Featured (`apps/storefront/src/lib/data/collections.ts` uses `cache: "force-cache"`). Harness documents store API oracle; P1 may still use `/dk/products/t-shirt`.
+
+After each `up` during matrix: `git -C ../products/medusa-dtc-starter status --short` **empty** (verified).
 
 ### Task 4: Redis + Stripe switches + German admin docs
 

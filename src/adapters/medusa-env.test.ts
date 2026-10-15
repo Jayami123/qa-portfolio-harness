@@ -7,7 +7,9 @@ import {
   buildMedusaBackendEnvFile,
   classifyMedusaProbe,
   decideMedusaBuildSkip,
+  decideMedusaStorefrontBuildSkip,
   isMedusaHealthyStatus,
+  medusaPublishableKeyFingerprint,
   medusaBackendConfigPath,
   medusaBackendStartArgs,
   medusaComposeFileNames,
@@ -21,6 +23,7 @@ import {
   redactPublishableKey,
   renderServerMedusaConfigJs,
   serializeMedusaHarnessBuildRecord,
+  serializeMedusaStorefrontBuildRecord,
   shouldEnableStripeOnRegion,
 } from "./medusa-env.js";
 
@@ -296,6 +299,55 @@ describe("decideMedusaBuildSkip", () => {
     assert.equal(
       medusaHarnessBuildMarkerPath(backend),
       "D:\\products\\medusa-dtc-starter\\apps\\backend\\.medusa\\server\\harness-build.json",
+    );
+  });
+});
+
+describe("decideMedusaStorefrontBuildSkip", () => {
+  const head = "abc123def456";
+  const pk = "pk_test_fixture_publishable_key_0123456789abcdef";
+  const marker = serializeMedusaStorefrontBuildRecord(head, pk, "collections:1");
+
+  it("skips when HEAD and publishable key fingerprint match", () => {
+    assert.deepEqual(
+      decideMedusaStorefrontBuildSkip({
+        forceRebuild: false,
+        nextBuildOutputExists: true,
+        markerFileText: marker,
+        headGitSha: head,
+        publishableKey: pk,
+        storeDataFingerprint: "collections:1",
+      }),
+      { skip: true, reason: "skip_matches_head" },
+    );
+  });
+
+  it("rebuilds when the publishable key changes", () => {
+    assert.equal(
+      decideMedusaStorefrontBuildSkip({
+        forceRebuild: false,
+        nextBuildOutputExists: true,
+        markerFileText: marker,
+        headGitSha: head,
+        publishableKey: "pk_other_key",
+        storeDataFingerprint: "collections:1",
+      }).reason,
+      "rebuild_publishable_key_mismatch",
+    );
+    assert.notEqual(medusaPublishableKeyFingerprint(pk), medusaPublishableKeyFingerprint("pk_other_key"));
+  });
+
+  it("rebuilds when the marker only records gitSha (legacy)", () => {
+    assert.equal(
+      decideMedusaStorefrontBuildSkip({
+        forceRebuild: false,
+        nextBuildOutputExists: true,
+        markerFileText: serializeMedusaHarnessBuildRecord(head),
+        headGitSha: head,
+        publishableKey: pk,
+        storeDataFingerprint: "collections:1",
+      }).reason,
+      "rebuild_bad_marker",
     );
   });
 });

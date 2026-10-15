@@ -1,5 +1,6 @@
 /** Medusa helpers. Parsers and env rendering are pure (no I/O). File existence is injected so tests stay offline. */
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -383,6 +384,61 @@ export function serializeMedusaHarnessBuildRecord(gitSha: string): string {
   return `${JSON.stringify(record)}\n`;
 }
 
+export function medusaPublishableKeyFingerprint(publishableKey: string): string {
+  const normalized = publishableKey.trim();
+  if (normalized === "") {
+    return "";
+  }
+  return createHash("sha256").update(normalized, "utf8").digest("hex").slice(0, 16);
+}
+
+export interface MedusaStorefrontBuildRecord extends MedusaHarnessBuildRecord {
+  readonly publishableKeyFingerprint: string;
+  /** e.g. collections:1 — rebuild when harness seed adds collections on a fresh DB. */
+  readonly storeDataFingerprint: string;
+}
+
+export function serializeMedusaStorefrontBuildRecord(
+  gitSha: string,
+  publishableKey: string,
+  storeDataFingerprint: string,
+): string {
+  const record: MedusaStorefrontBuildRecord = {
+    gitSha,
+    publishableKeyFingerprint: medusaPublishableKeyFingerprint(publishableKey),
+    storeDataFingerprint,
+  };
+  return `${JSON.stringify(record)}\n`;
+}
+
+export function parseMedusaStorefrontBuildRecord(fileText: string): MedusaStorefrontBuildRecord | undefined {
+  try {
+    const parsed = JSON.parse(fileText) as MedusaStorefrontBuildRecord;
+    if (typeof parsed.gitSha !== "string" || parsed.gitSha.trim() === "") {
+      return undefined;
+    }
+    if (
+      typeof parsed.publishableKeyFingerprint !== "string" ||
+      parsed.publishableKeyFingerprint.trim() === ""
+    ) {
+      return undefined;
+    }
+    if (
+      typeof parsed.storeDataFingerprint !== "string" ||
+      parsed.storeDataFingerprint.trim() === ""
+    ) {
+      return undefined;
+    }
+    return {
+      gitSha: parsed.gitSha.trim(),
+      publishableKeyFingerprint: parsed.publishableKeyFingerprint.trim(),
+      storeDataFingerprint: parsed.storeDataFingerprint.trim(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export function parseMedusaHarnessBuildGitSha(fileText: string): string | undefined {
   try {
     const parsed: unknown = JSON.parse(fileText);
@@ -409,7 +465,8 @@ export type MedusaBuildSkipReason =
   | "rebuild_missing_marker"
   | "rebuild_bad_marker"
   | "rebuild_head_unknown"
-  | "rebuild_sha_mismatch";
+  | "rebuild_sha_mismatch"
+  | "rebuild_publishable_key_mismatch";
 
 export interface MedusaBuildSkipInput {
   readonly httpMode: MedusaHttpMode;
@@ -447,6 +504,49 @@ export function decideMedusaBuildSkip(input: MedusaBuildSkipInput): MedusaBuildS
     return { skip: false, reason: "rebuild_head_unknown" };
   }
   if (recorded !== current) {
+    return { skip: false, reason: "rebuild_sha_mismatch" };
+  }
+  return { skip: true, reason: "skip_matches_head" };
+}
+
+export interface MedusaStorefrontBuildSkipInput {
+  readonly forceRebuild: boolean;
+  readonly nextBuildOutputExists: boolean;
+  /** `undefined` when the marker file is absent. */
+  readonly markerFileText: string | undefined;
+  readonly headGitSha: string | undefined;
+  readonly publishableKey: string;
+  readonly storeDataFingerprint: string;
+}
+
+export function decideMedusaStorefrontBuildSkip(
+  input: MedusaStorefrontBuildSkipInput,
+): MedusaBuildSkipDecision {
+  if (input.forceRebuild) {
+    return { skip: false, reason: "rebuild_forced" };
+  }
+  if (!input.nextBuildOutputExists) {
+    return { skip: false, reason: "rebuild_missing_output" };
+  }
+  if (input.markerFileText === undefined) {
+    return { skip: false, reason: "rebuild_missing_marker" };
+  }
+  const recorded = parseMedusaStorefrontBuildRecord(input.markerFileText);
+  if (recorded === undefined) {
+    return { skip: false, reason: "rebuild_bad_marker" };
+  }
+  const current = input.headGitSha;
+  if (current === undefined) {
+    return { skip: false, reason: "rebuild_head_unknown" };
+  }
+  if (recorded.gitSha !== current) {
+    return { skip: false, reason: "rebuild_sha_mismatch" };
+  }
+  const fingerprint = medusaPublishableKeyFingerprint(input.publishableKey);
+  if (fingerprint === "" || recorded.publishableKeyFingerprint !== fingerprint) {
+    return { skip: false, reason: "rebuild_publishable_key_mismatch" };
+  }
+  if (recorded.storeDataFingerprint !== input.storeDataFingerprint) {
     return { skip: false, reason: "rebuild_sha_mismatch" };
   }
   return { skip: true, reason: "skip_matches_head" };

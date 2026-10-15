@@ -1,6 +1,6 @@
 import type { MedusaConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
-import { run } from "../internal/run.js";
+import { runCapture } from "../internal/run.js";
 import { resolvePnpm } from "../internal/spawn-detached.js";
 import type { SeedResult } from "../types.js";
 import {
@@ -66,16 +66,25 @@ export async function ensureMedusaAdminUser(
   password: string,
   env: Record<string, string>,
 ): Promise<void> {
+  const command = resolvePnpm();
+  const args = ["medusa", "user", "-e", email, "-p", password];
   try {
-    await run(resolvePnpm(), ["medusa", "user", "-e", email, "-p", password], {
+    const result = await runCapture(command, args, {
       cwd: backendDir,
       env,
       timeoutMs: USER_TIMEOUT_MS,
     });
-    console.log(`Medusa admin user created for ${email}.`);
+    const combined = `${result.stdout}\n${result.stderr}`;
+    if (combined.includes("User created successfully") || /created successfully/i.test(combined)) {
+      console.log(`Medusa admin user created for ${email}.`);
+      return;
+    }
+    throw new Error(`Medusa medusa user exited 0 but output was unexpected for ${email}.`);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    if (/already exists/i.test(detail)) {
+    const stdout = (error as { stdout?: string }).stdout ?? "";
+    const stderr = (error as { stderr?: string }).stderr ?? "";
+    const combined = `${stdout}\n${stderr}\n${error instanceof Error ? error.message : String(error)}`;
+    if (/already exists/i.test(combined)) {
       console.log(`Medusa admin user ${email} already exists; skipping medusa user.`);
       return;
     }
@@ -91,6 +100,13 @@ export interface MedusaSeedContext {
   readonly processEnv: Record<string, string>;
 }
 
+async function timedSeedStep(label: string, run: () => Promise<void>): Promise<void> {
+  const started = Date.now();
+  await run();
+  const ms = Date.now() - started;
+  console.log(`Medusa seed step ${label}: ${(ms / 1000).toFixed(3)} s (${ms} ms).`);
+}
+
 export async function runMedusaSeed(ctx: MedusaSeedContext): Promise<SeedResult> {
   const email = ctx.cfg.adminEmail;
   const password = ctx.cfg.adminPassword;
@@ -98,20 +114,24 @@ export async function runMedusaSeed(ctx: MedusaSeedContext): Promise<SeedResult>
     throw new Error("Medusa seed() needs MEDUSA_ADMIN_EMAIL and MEDUSA_ADMIN_PASSWORD in the harness .env.");
   }
 
-  await ensureMedusaAdminUser(ctx.backendDir, email, password, ctx.processEnv);
-
+  const seedStarted = Date.now();
   const notes: string[] = [];
-  const publishableKey = await resolvePublishableKey(ctx);
+  let publishableKey = "";
+  await timedSeedStep("publishable key", async () => {
+    publishableKey = await resolvePublishableKey(ctx);
+  });
   console.log(`Medusa publishable API key: ${redactPublishableKey(publishableKey)}`);
 
-  await ensureGermanWarehouse(ctx, notes);
-  await ensureFeaturedCollection(ctx, notes);
-  await ensurePromoCode(ctx, notes);
-  await ensureCustomer(ctx, notes);
-  await ensureUsRegion(ctx, notes);
+  await timedSeedStep("German Warehouse", () => ensureGermanWarehouse(ctx, notes));
+  await timedSeedStep("Featured collection", () => ensureFeaturedCollection(ctx, notes));
+  await timedSeedStep("promo QA10", () => ensurePromoCode(ctx, notes));
+  await timedSeedStep("customer", () => ensureCustomer(ctx, notes));
+  await timedSeedStep("US region", () => ensureUsRegion(ctx, notes));
   if (shouldEnableStripeOnRegion(ctx.switches, process.env.STRIPE_API_KEY)) {
-    await ensureStripeOnEurope(ctx, notes);
+    await timedSeedStep("Stripe on Europe", () => ensureStripeOnEurope(ctx, notes));
   }
+  const seedMs = Date.now() - seedStarted;
+  console.log(`Medusa seed total: ${(seedMs / 1000).toFixed(3)} s (${seedMs} ms).`);
 
   return {
     product: "medusa",
@@ -298,10 +318,13 @@ async function ensureUsRegion(ctx: MedusaSeedContext, notes: string[]): Promise<
   const create = await adminFetch(ctx.cfg.baseUrl, ctx.authorizationHeader, "POST", "/regions", {
     name: MEDUSA_US_REGION_NAME,
     currency_code: "usd",
-    countries: [{ iso_2: "us" }],
+    countries: ["us"],
   });
   if (!create.ok) {
-    throw new Error(`Medusa POST /admin/regions failed (HTTP ${create.status}).`);
+    const body = await readJson(create);
+    throw new Error(
+      `Medusa POST /admin/regions failed (HTTP ${create.status}). ${JSON.stringify(body?.message ?? body)}`,
+    );
   }
   notes.push(`${MEDUSA_US_REGION_NAME} region created.`);
 }
