@@ -104,7 +104,9 @@ export async function ensureMedusaAdminUser(
       );
       return;
     }
-    throw error;
+    const message =
+      error instanceof Error ? error.message : String(error);
+    throw new Error(message.split(password).join("(redacted)"));
   }
 }
 
