@@ -237,3 +237,96 @@ export function assertMedusaBackendPresent(
 export function medusaBackendStartArgs(mode: MedusaHttpMode): readonly string[] {
   return mode === "production" ? ["medusa", "start"] : ["medusa", "develop"];
 }
+
+/** Same filename as Cal `apps/web/.next/harness-build.json`. */
+export const MEDUSA_HARNESS_BUILD_MARKER = "harness-build.json";
+
+export function medusaBuiltServerDir(backendDir: string): string {
+  return path.join(backendDir, ".medusa", "server");
+}
+
+export function medusaBuiltServerPackagePath(backendDir: string): string {
+  return path.join(medusaBuiltServerDir(backendDir), "package.json");
+}
+
+export function medusaHarnessBuildMarkerPath(backendDir: string): string {
+  return path.join(medusaBuiltServerDir(backendDir), MEDUSA_HARNESS_BUILD_MARKER);
+}
+
+export interface MedusaHarnessBuildRecord {
+  readonly gitSha: string;
+}
+
+export function serializeMedusaHarnessBuildRecord(gitSha: string): string {
+  const record: MedusaHarnessBuildRecord = { gitSha };
+  return `${JSON.stringify(record)}\n`;
+}
+
+export function parseMedusaHarnessBuildGitSha(fileText: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(fileText);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "gitSha" in parsed &&
+      typeof parsed.gitSha === "string" &&
+      parsed.gitSha.trim().length > 0
+    ) {
+      return parsed.gitSha.trim();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export type MedusaBuildSkipReason =
+  | "skip_develop_mode"
+  | "skip_matches_head"
+  | "rebuild_forced"
+  | "rebuild_missing_output"
+  | "rebuild_missing_marker"
+  | "rebuild_bad_marker"
+  | "rebuild_head_unknown"
+  | "rebuild_sha_mismatch";
+
+export interface MedusaBuildSkipInput {
+  readonly httpMode: MedusaHttpMode;
+  readonly forceRebuild: boolean;
+  readonly builtServerPackageExists: boolean;
+  /** `undefined` when the marker file is absent. */
+  readonly markerFileText: string | undefined;
+  readonly headGitSha: string | undefined;
+}
+
+export interface MedusaBuildSkipDecision {
+  readonly skip: boolean;
+  readonly reason: MedusaBuildSkipReason;
+}
+
+export function decideMedusaBuildSkip(input: MedusaBuildSkipInput): MedusaBuildSkipDecision {
+  if (input.httpMode !== "production") {
+    return { skip: true, reason: "skip_develop_mode" };
+  }
+  if (input.forceRebuild) {
+    return { skip: false, reason: "rebuild_forced" };
+  }
+  if (!input.builtServerPackageExists) {
+    return { skip: false, reason: "rebuild_missing_output" };
+  }
+  if (input.markerFileText === undefined) {
+    return { skip: false, reason: "rebuild_missing_marker" };
+  }
+  const recorded = parseMedusaHarnessBuildGitSha(input.markerFileText);
+  if (recorded === undefined) {
+    return { skip: false, reason: "rebuild_bad_marker" };
+  }
+  const current = input.headGitSha;
+  if (current === undefined) {
+    return { skip: false, reason: "rebuild_head_unknown" };
+  }
+  if (recorded !== current) {
+    return { skip: false, reason: "rebuild_sha_mismatch" };
+  }
+  return { skip: true, reason: "skip_matches_head" };
+}

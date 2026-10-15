@@ -6,14 +6,18 @@ import {
   assertMedusaPnpmVersion,
   buildMedusaBackendEnvFile,
   classifyMedusaProbe,
+  decideMedusaBuildSkip,
   isMedusaHealthyStatus,
   medusaBackendConfigPath,
   medusaBackendStartArgs,
+  medusaHarnessBuildMarkerPath,
   medusaHealthUrl,
   medusaListen,
   parseMedusaEnvFile,
+  parseMedusaHarnessBuildGitSha,
   redactMedusaText,
   redactPublishableKey,
+  serializeMedusaHarnessBuildRecord,
 } from "./medusa-env.js";
 
 const TEMPLATE = [
@@ -155,5 +159,83 @@ describe("medusaBackendStartArgs", () => {
   it("uses medusa start in production and medusa develop otherwise", () => {
     assert.deepEqual(medusaBackendStartArgs("production"), ["medusa", "start"]);
     assert.deepEqual(medusaBackendStartArgs("develop"), ["medusa", "develop"]);
+  });
+});
+
+describe("parseMedusaHarnessBuildGitSha", () => {
+  it("reads gitSha from harness-build.json text", () => {
+    const sha = "f677db438f27294fc50e4c7c6612e71ff38eeff5";
+    assert.equal(parseMedusaHarnessBuildGitSha(serializeMedusaHarnessBuildRecord(sha)), sha);
+    assert.equal(parseMedusaHarnessBuildGitSha("{}\n"), undefined);
+    assert.equal(parseMedusaHarnessBuildGitSha("not-json"), undefined);
+  });
+});
+
+describe("decideMedusaBuildSkip", () => {
+  const head = "abc123def456";
+  const marker = serializeMedusaHarnessBuildRecord(head);
+
+  it("skips when the built server and harness-build.json match HEAD", () => {
+    assert.deepEqual(
+      decideMedusaBuildSkip({
+        httpMode: "production",
+        forceRebuild: false,
+        builtServerPackageExists: true,
+        markerFileText: marker,
+        headGitSha: head,
+      }),
+      { skip: true, reason: "skip_matches_head" },
+    );
+  });
+
+  it("rebuilds when output, marker, or HEAD disagree", () => {
+    assert.equal(
+      decideMedusaBuildSkip({
+        httpMode: "production",
+        forceRebuild: false,
+        builtServerPackageExists: false,
+        markerFileText: marker,
+        headGitSha: head,
+      }).reason,
+      "rebuild_missing_output",
+    );
+    assert.equal(
+      decideMedusaBuildSkip({
+        httpMode: "production",
+        forceRebuild: false,
+        builtServerPackageExists: true,
+        markerFileText: undefined,
+        headGitSha: head,
+      }).reason,
+      "rebuild_missing_marker",
+    );
+    assert.equal(
+      decideMedusaBuildSkip({
+        httpMode: "production",
+        forceRebuild: false,
+        builtServerPackageExists: true,
+        markerFileText: marker,
+        headGitSha: "other-sha",
+      }).reason,
+      "rebuild_sha_mismatch",
+    );
+    assert.equal(
+      decideMedusaBuildSkip({
+        httpMode: "production",
+        forceRebuild: true,
+        builtServerPackageExists: true,
+        markerFileText: marker,
+        headGitSha: head,
+      }).reason,
+      "rebuild_forced",
+    );
+  });
+
+  it("places harness-build.json under .medusa/server", () => {
+    const backend = "D:\\products\\medusa-dtc-starter\\apps\\backend";
+    assert.equal(
+      medusaHarnessBuildMarkerPath(backend),
+      "D:\\products\\medusa-dtc-starter\\apps\\backend\\.medusa\\server\\harness-build.json",
+    );
   });
 });

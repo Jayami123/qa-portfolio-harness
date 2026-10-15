@@ -22,17 +22,20 @@ import {
   assertMedusaPnpmVersion,
   buildMedusaBackendEnvFile,
   classifyMedusaProbe,
+  decideMedusaBuildSkip,
   isMedusaHealthyStatus,
   medusaBackendStartArgs,
+  medusaBuiltServerPackagePath,
+  medusaHarnessBuildMarkerPath,
   medusaHealthUrl,
   medusaListen,
   parseMedusaEnvFile,
   redactMedusaText,
+  serializeMedusaHarnessBuildRecord,
   type MedusaProbeVerdict,
 } from "./medusa-env.js";
 
 const COMPOSE_PROJECT = "qa-harness-medusa";
-const BUILD_MARKER = "medusa-backend-build.json";
 const DEFAULT_BUILD_MS = 10 * 60_000;
 const MIN_BUILD_MS = 120_000;
 const DEFAULT_WAIT_MS = 2 * 60_000;
@@ -41,10 +44,6 @@ const MIGRATE_TIMEOUT_MS = 10 * 60_000;
 const PROBE_REQUEST_MS = 10_000;
 const STOP_POLL_MS = 15_000;
 const STOP_POLL_INTERVAL_MS = 200;
-
-interface BuildMarker {
-  readonly gitSha: string;
-}
 
 interface MedusaProbe {
   verdict: MedusaProbeVerdict;
@@ -67,11 +66,11 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
   }
 
   private builtServerPackage(): string {
-    return path.join(this.backendDir(), ".medusa", "server", "package.json");
+    return medusaBuiltServerPackagePath(this.backendDir());
   }
 
   private buildMarkerPath(): string {
-    return path.join(HARNESS_ROOT, ".harness", BUILD_MARKER);
+    return medusaHarnessBuildMarkerPath(this.backendDir());
   }
 
   private logFile(): string {
@@ -169,48 +168,60 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     }
   }
 
-  private readBuildMarkerSha(): string | undefined {
+  private readBuildMarkerText(): string | undefined {
     const file = this.buildMarkerPath();
     if (!fs.existsSync(file)) {
       return undefined;
     }
-    try {
-      const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (
-        typeof parsed === "object" &&
-        parsed !== null &&
-        "gitSha" in parsed &&
-        typeof parsed.gitSha === "string" &&
-        parsed.gitSha.trim().length > 0
-      ) {
-        return parsed.gitSha.trim();
+    return fs.readFileSync(file, "utf8");
+  }
+
+  private logBuildSkipDecision(reason: ReturnType<typeof decideMedusaBuildSkip>["reason"]): void {
+    switch (reason) {
+      case "skip_matches_head": {
+        const head = this.productGitSha();
+        console.log(
+          `Medusa harness-build.json matches HEAD ${head ?? "(unknown)"}; skipping medusa build (set MEDUSA_WEB_REBUILD=1 to rebuild).`,
+        );
+        break;
       }
-      return undefined;
-    } catch {
-      return undefined;
+      case "rebuild_forced":
+        console.log("MEDUSA_WEB_REBUILD=1; rebuilding Medusa backend.");
+        break;
+      case "rebuild_missing_output":
+        console.log("Medusa build output missing; running medusa build.");
+        break;
+      case "rebuild_missing_marker":
+        console.log("Medusa harness-build.json is absent; running medusa build.");
+        break;
+      case "rebuild_bad_marker":
+        console.log("Medusa harness-build.json is unreadable or missing gitSha; running medusa build.");
+        break;
+      case "rebuild_head_unknown":
+        console.log("Medusa product git HEAD could not be read; running medusa build.");
+        break;
+      case "rebuild_sha_mismatch": {
+        const head = this.productGitSha();
+        console.log(`Medusa harness-build.json does not match HEAD ${head ?? "(unknown)"}; running medusa build.`);
+        break;
+      }
+      default:
+        break;
     }
   }
 
   private shouldSkipBuild(): boolean {
-    if (MEDUSA_HTTP_MODE !== "production") {
-      return true;
+    const decision = decideMedusaBuildSkip({
+      httpMode: MEDUSA_HTTP_MODE,
+      forceRebuild: process.env.MEDUSA_WEB_REBUILD === "1",
+      builtServerPackageExists: fs.existsSync(this.builtServerPackage()),
+      markerFileText: this.readBuildMarkerText(),
+      headGitSha: this.productGitSha(),
+    });
+    if (decision.reason !== "skip_develop_mode") {
+      this.logBuildSkipDecision(decision.reason);
     }
-    if (process.env.MEDUSA_WEB_REBUILD === "1") {
-      console.log("MEDUSA_WEB_REBUILD=1; rebuilding Medusa backend.");
-      return false;
-    }
-    if (!fs.existsSync(this.builtServerPackage())) {
-      console.log("Medusa build output missing; running medusa build.");
-      return false;
-    }
-    const recorded = this.readBuildMarkerSha();
-    const current = this.productGitSha();
-    if (recorded !== undefined && current !== undefined && recorded === current) {
-      console.log(`Medusa build matches HEAD ${current}; skipping medusa build.`);
-      return true;
-    }
-    console.log("Medusa build marker does not match product HEAD; running medusa build.");
-    return false;
+    return decision.skip;
   }
 
   private writeBuildMarker(): void {
@@ -218,9 +229,9 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     if (sha === undefined) {
       return;
     }
-    const record: BuildMarker = { gitSha: sha };
-    fs.mkdirSync(path.dirname(this.buildMarkerPath()), { recursive: true });
-    fs.writeFileSync(this.buildMarkerPath(), `${JSON.stringify(record)}\n`, "utf8");
+    const marker = this.buildMarkerPath();
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, serializeMedusaHarnessBuildRecord(sha), "utf8");
   }
 
   private async runPnpm(args: string[], cwd: string, timeoutMs: number): Promise<void> {
