@@ -846,6 +846,24 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       console.log("MEDUSA_SKIP_STOREFRONT=1; storefront not started.");
       return;
     }
+    const { host, port } = medusaListen(this.cfg.storefrontUrl);
+    if (
+      !(this.storefrontProcess && this.storefrontProcess.exitCode === null) &&
+      (await this.isPortOpen(host, port))
+    ) {
+      const res = await fetch(`${this.cfg.storefrontUrl}/dk`, {
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => undefined);
+      if (res?.status === 200) {
+        console.log(
+          `Medusa storefront already answering on ${host}:${port}; not rebuilding or respawning.`,
+        );
+        return;
+      }
+      throw new Error(
+        `Port ${port} on ${host} is in use, but /dk is not HTTP 200. The harness did not stop anything.`,
+      );
+    }
     const publishableKey = await this.resolvePublishableKeyForStorefront();
     if (publishableKey === undefined) {
       console.log(
