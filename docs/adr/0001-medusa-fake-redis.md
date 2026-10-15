@@ -36,6 +36,6 @@ The opt-in path is now implemented. The default is unchanged: fake Redis, and no
 
 - `MEDUSA_REDIS=1` starts Redis on `127.0.0.1:6380` and sets `REDIS_URL` in the gitignored backend `.env`.
 - The harness writes gitignored `apps/backend/.medusa/server/medusa-config.js`. It adds the `event-bus-redis`, `cache-redis`, and `workflow-engine-redis` modules, all reading `REDIS_URL`. `medusa-config.ts` in `medusa-dtc-starter` stays untouched.
-- The backend boot log should show the `event-bus-redis` connection instead of `Local Event Bus installed`. This is the expected boot-log signal. It was not re-verified in this update, because the live check ran with `MEDUSA_REDIS` unset.
+- With `MEDUSA_REDIS=1`, the backend boot log shows `Connection to Redis in module 'event-bus-redis' established` and no `Local Event Bus installed` (verified 2026-10-15). `medusa db:migrate` still logs fake Redis because it reads tracked `medusa-config.ts`.
 - `up()` records the compose file list in `.harness/medusa-compose.json`. `down()` reads it, falling back to the current env, passes `--remove-orphans`, and deletes the record after a successful teardown.
 - The "edit tracked `medusa-config.ts`" alternative above is still rejected for the same reason.
