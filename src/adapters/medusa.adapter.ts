@@ -61,6 +61,7 @@ import {
   classifyHarnessLauncher,
   collectDescendants,
   parseCommandLine,
+  parseWindowsCommandLine,
   parseLsofPids,
   parseNetstatListeningPids,
   type HarnessLauncherKind,
@@ -620,7 +621,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
           ],
           { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
         );
-        return parseCommandLine(out.trim());
+        return parseWindowsCommandLine(out.trim());
       } catch {
         return [];
       }

@@ -32,7 +32,7 @@ export function parseLsofPids(output: string): number[] {
   return [...pids];
 }
 
-/** Splits a command line into arguments. Double quotes group; backslashes stay literal (Windows paths). */
+/** Simple splitter for `ps` output: double quotes group, backslashes stay literal. Not for Windows command lines. */
 export function parseCommandLine(line: string): string[] {
   const args: string[] = [];
   let current = "";
@@ -52,6 +52,73 @@ export function parseCommandLine(line: string): string[] {
       current += char;
       started = true;
     }
+  }
+  if (started) {
+    args.push(current);
+  }
+  return args;
+}
+
+/**
+ * Splits a Windows command line the way CommandLineToArgvW does (the CIM `CommandLine` of a process):
+ *   - 2n backslashes then `"`: n backslashes, and the quote toggles quoting.
+ *   - 2n+1 backslashes then `"`: n backslashes and a literal `"`.
+ *   - backslashes not followed by `"` stay literal.
+ *   - `""` inside quotes is a literal `"`.
+ *   - whitespace outside quotes ends an argument.
+ */
+export function parseWindowsCommandLine(line: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let started = false;
+  let quoted = false;
+  let i = 0;
+  while (i < line.length) {
+    const char = line.charAt(i);
+    if (char === "\\") {
+      let count = 0;
+      while (line.charAt(i + count) === "\\") {
+        count += 1;
+      }
+      started = true;
+      if (line.charAt(i + count) === '"') {
+        current += "\\".repeat(Math.floor(count / 2));
+        if (count % 2 === 1) {
+          current += '"';
+          i += count + 1;
+        } else {
+          // The quote is handled on the next pass, as a toggle or a `""` pair.
+          i += count;
+        }
+      } else {
+        current += "\\".repeat(count);
+        i += count;
+      }
+      continue;
+    }
+    if (char === '"') {
+      started = true;
+      if (quoted && line.charAt(i + 1) === '"') {
+        current += '"';
+        i += 2;
+      } else {
+        quoted = !quoted;
+        i += 1;
+      }
+      continue;
+    }
+    if (!quoted && /\s/.test(char)) {
+      if (started) {
+        args.push(current);
+        current = "";
+        started = false;
+      }
+      i += 1;
+      continue;
+    }
+    current += char;
+    started = true;
+    i += 1;
   }
   if (started) {
     args.push(current);

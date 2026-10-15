@@ -6,6 +6,7 @@ import {
   parseCommandLine,
   parseLsofPids,
   parseNetstatListeningPids,
+  parseWindowsCommandLine,
 } from "./medusa-listeners.js";
 
 const NETSTAT = [
@@ -73,12 +74,55 @@ describe("parseCommandLine", () => {
   });
 });
 
+describe("parseWindowsCommandLine (CommandLineToArgvW rules)", () => {
+  it("treats 2n backslashes before a closing quote as n backslashes plus a toggle", () => {
+    assert.deepEqual(parseWindowsCommandLine('"D:\\p\\dir\\\\" start'), [
+      "D:\\p\\dir\\",
+      "start",
+    ]);
+  });
+
+  it("treats 2n+1 backslashes before a quote as n backslashes and a literal quote", () => {
+    assert.deepEqual(parseWindowsCommandLine('a\\\\\\"b'), ['a\\"b']);
+  });
+
+  it("treats a doubled quote inside quotes as one literal quote", () => {
+    assert.deepEqual(parseWindowsCommandLine('"a ""b"" c"'), ['a "b" c']);
+  });
+
+  it("keeps backslashes that are not followed by a quote", () => {
+    assert.deepEqual(parseWindowsCommandLine("node D:\\x\\next start"), [
+      "node",
+      "D:\\x\\next",
+      "start",
+    ]);
+  });
+
+  it("splits on any run of whitespace outside quotes, not inside", () => {
+    assert.deepEqual(parseWindowsCommandLine('a   b\t"c  d"'), [
+      "a",
+      "b",
+      "c  d",
+    ]);
+  });
+
+  it("keeps an empty quoted argument and returns nothing for an empty line", () => {
+    assert.deepEqual(parseWindowsCommandLine('a "" b'), ["a", "", "b"]);
+    assert.deepEqual(parseWindowsCommandLine(""), []);
+    assert.deepEqual(parseWindowsCommandLine("   "), []);
+  });
+
+  it("toggles quoting after an even run of backslashes in the middle of an argument", () => {
+    assert.deepEqual(parseWindowsCommandLine('a\\\\"b c"'), ["a\\b c"]);
+  });
+});
+
 describe("classifyHarnessLauncher", () => {
   const root = "D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter";
-  const backendSpawn = parseCommandLine(
+  const backendSpawn = parseWindowsCommandLine(
     "C:\\nvm4w\\nodejs\\node.exe D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\backend\\node_modules\\@medusajs\\cli\\cli.js start",
   );
-  const storefrontSpawn = parseCommandLine(
+  const storefrontSpawn = parseWindowsCommandLine(
     "C:\\nvm4w\\nodejs\\node.exe D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\storefront\\node_modules\\next\\dist\\bin\\next start -p 8000",
   );
 
@@ -90,8 +134,15 @@ describe("classifyHarnessLauncher", () => {
     assert.equal(classifyHarnessLauncher(storefrontSpawn, root), "storefront");
   });
 
+  it("matches a spawn line whose exe and script are quoted", () => {
+    const argv = parseWindowsCommandLine(
+      '"C:\\Program Files\\nodejs\\node.exe" "D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\storefront\\node_modules\\next\\dist\\bin\\next" start -p 8000',
+    );
+    assert.equal(classifyHarnessLauncher(argv, root), "storefront");
+  });
+
   it("matches the pnpm store layout of the medusa CLI", () => {
-    const argv = parseCommandLine(
+    const argv = parseWindowsCommandLine(
       "node D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\node_modules\\.pnpm\\@medusajs+cli@2.21.2\\node_modules\\@medusajs\\cli\\cli.js start",
     );
     assert.equal(classifyHarnessLauncher(argv, root), "backend");
@@ -121,7 +172,7 @@ describe("classifyHarnessLauncher", () => {
   });
 
   it("does not match when the product path is only in a later argument", () => {
-    const argv = parseCommandLine(
+    const argv = parseWindowsCommandLine(
       "node D:\\other\\server.js --config D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\x",
     );
     assert.equal(classifyHarnessLauncher(argv, root), undefined);
@@ -149,7 +200,7 @@ describe("classifyHarnessLauncher", () => {
   });
 
   it("does not match the same CLI without start (build, dev)", () => {
-    const argv = parseCommandLine(
+    const argv = parseWindowsCommandLine(
       "node D:\\Jayami\\Portfolio\\products\\medusa-dtc-starter\\apps\\storefront\\node_modules\\next\\dist\\bin\\next build",
     );
     assert.equal(classifyHarnessLauncher(argv, root), undefined);
@@ -184,7 +235,7 @@ describe("classifyHarnessLauncher", () => {
 
   it("does not match an empty command line or an empty root", () => {
     assert.equal(
-      classifyHarnessLauncher(parseCommandLine(""), root),
+      classifyHarnessLauncher(parseWindowsCommandLine(""), root),
       undefined,
     );
     assert.equal(classifyHarnessLauncher(backendSpawn, ""), undefined);
