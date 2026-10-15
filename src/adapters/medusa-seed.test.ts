@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { MedusaConfig } from "../config.js";
-import { ensureCustomer, type MedusaSeedContext } from "./medusa-seed.js";
+import {
+  ensureCustomer,
+  ensureFeaturedCollection,
+  ensureGermanWarehouse,
+  type MedusaSeedContext,
+} from "./medusa-seed.js";
 
 interface Call {
   url: string;
@@ -54,6 +59,189 @@ function mockFetch(responses: Array<() => Response>): Call[] {
   }) as typeof fetch;
   return calls;
 }
+
+function jwtWithActor(actorId: string): string {
+  const payload = Buffer.from(JSON.stringify({ actor_id: actorId })).toString(
+    "base64url",
+  );
+  return `header.${payload}.signature`;
+}
+
+function mockRouter(handler: (call: Call) => Response): Call[] {
+  const calls: Call[] = [];
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    const call: Call = {
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: {},
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+    };
+    calls.push(call);
+    return handler(call);
+  }) as typeof fetch;
+  return calls;
+}
+
+const BASE = "http://localhost:9000/admin";
+
+describe("ensureGermanWarehouse (existing warehouse)", () => {
+  const realFetch = globalThis.fetch;
+  const realLog = console.log;
+
+  beforeEach(() => {
+    console.log = () => {};
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    console.log = realLog;
+  });
+
+  function handler(
+    salesChannels: Array<{ id: string }>,
+    items: Array<Record<string, unknown>>,
+  ) {
+    return (call: Call): Response => {
+      if (call.url === `${BASE}/stock-locations?limit=50`) {
+        return jsonResponse(200, {
+          stock_locations: [{ id: "loc_1", name: "German Warehouse" }],
+        });
+      }
+      if (call.url === `${BASE}/sales-channels?limit=20`) {
+        return jsonResponse(200, { sales_channels: [{ id: "sc_1" }] });
+      }
+      if (call.url === `${BASE}/stock-locations/loc_1?fields=*sales_channels`) {
+        return jsonResponse(200, {
+          stock_location: { id: "loc_1", sales_channels: salesChannels },
+        });
+      }
+      if (call.url.startsWith(`${BASE}/inventory-items?`)) {
+        return jsonResponse(200, { inventory_items: items });
+      }
+      return jsonResponse(200, {});
+    };
+  }
+
+  it("attaches the missing sales-channel link and only the missing inventory levels", async () => {
+    const notes: string[] = [];
+    const calls = mockRouter(
+      handler(
+        [],
+        [
+          { id: "iitem_1", location_levels: [{ location_id: "loc_1" }] },
+          { id: "iitem_2", location_levels: [] },
+          { id: "iitem_3" },
+        ],
+      ),
+    );
+
+    await ensureGermanWarehouse(ctxFor(), notes);
+
+    const posts = calls.filter((call) => call.method === "POST");
+    assert.deepEqual(
+      posts.map((call) => call.url),
+      [
+        `${BASE}/stock-locations/loc_1/sales-channels`,
+        `${BASE}/inventory-items/iitem_2/location-levels`,
+        `${BASE}/inventory-items/iitem_3/location-levels`,
+      ],
+    );
+    assert.deepEqual(posts[0]?.body, { add: ["sc_1"] });
+    assert.deepEqual(posts[1]?.body, {
+      location_id: "loc_1",
+      stocked_quantity: 1_000_000,
+    });
+    assert.deepEqual(notes, [
+      "German Warehouse sales channel linked.",
+      "German Warehouse inventory levels linked.",
+    ]);
+  });
+
+  it("skips everything when the warehouse is already fully linked", async () => {
+    const notes: string[] = [];
+    const calls = mockRouter(
+      handler(
+        [{ id: "sc_1" }],
+        [{ id: "iitem_1", location_levels: [{ location_id: "loc_1" }] }],
+      ),
+    );
+
+    await ensureGermanWarehouse(ctxFor(), notes);
+
+    assert.deepEqual(
+      calls.filter((call) => call.method === "POST"),
+      [],
+    );
+    assert.deepEqual(notes, []);
+  });
+});
+
+describe("ensureFeaturedCollection (existing collection)", () => {
+  const realFetch = globalThis.fetch;
+  const realLog = console.log;
+  const seeded = ["prod_1", "prod_2", "prod_3", "prod_4"];
+
+  beforeEach(() => {
+    console.log = () => {};
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    console.log = realLog;
+  });
+
+  function handler(linked: string[]) {
+    return (call: Call): Response => {
+      if (call.url === `${BASE}/collections?limit=50`) {
+        return jsonResponse(200, {
+          collections: [{ id: "col_1", title: "Featured" }],
+        });
+      }
+      if (call.url === `${BASE}/products?limit=20`) {
+        return jsonResponse(200, { products: seeded.map((id) => ({ id })) });
+      }
+      if (call.url.startsWith(`${BASE}/products?collection_id=col_1`)) {
+        return jsonResponse(200, { products: linked.map((id) => ({ id })) });
+      }
+      return jsonResponse(200, {});
+    };
+  }
+
+  it("ends with all four products when the existing collection has none linked", async () => {
+    const notes: string[] = [];
+    const calls = mockRouter(handler([]));
+
+    await ensureFeaturedCollection(ctxFor(), notes);
+
+    const posts = calls.filter((call) => call.method === "POST");
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0]?.url, `${BASE}/collections/col_1/products`);
+    assert.deepEqual(posts[0]?.body, { add: seeded });
+    assert.deepEqual(notes, [
+      "Collection Featured linked 4 missing product(s).",
+    ]);
+  });
+
+  it("attaches only the products that are missing", async () => {
+    const calls = mockRouter(handler(["prod_1", "prod_3"]));
+
+    await ensureFeaturedCollection(ctxFor(), []);
+
+    const posts = calls.filter((call) => call.method === "POST");
+    assert.deepEqual(posts[0]?.body, { add: ["prod_2", "prod_4"] });
+  });
+
+  it("does nothing when all four are already linked", async () => {
+    const notes: string[] = [];
+    const calls = mockRouter(handler(seeded));
+
+    await ensureFeaturedCollection(ctxFor(), notes);
+
+    assert.equal(calls.filter((call) => call.method === "POST").length, 0);
+    assert.deepEqual(notes, []);
+  });
+});
 
 describe("ensureCustomer", () => {
   const realFetch = globalThis.fetch;
@@ -150,25 +338,76 @@ describe("ensureCustomer", () => {
     assert.deepEqual(notes, []);
   });
 
-  it("treats register 'already exists' as a skip and does not call the store customer route", async () => {
+  const alreadyExists = () =>
+    jsonResponse(400, {
+      type: "invalid_data",
+      message: "Identity with email already exists",
+    });
+
+  it("logs in when the identity already exists and skips when the customer profile exists", async () => {
     const notes: string[] = [];
     const calls = mockFetch([
       () => jsonResponse(200, { customers: [] }),
-      () =>
-        jsonResponse(400, {
-          type: "invalid_data",
-          message: "Identity with email already exists",
-        }),
+      alreadyExists,
+      () => jsonResponse(200, { token: jwtWithActor("cus_existing") }),
     ]);
 
     await ensureCustomer(ctxFor(), notes, PUBLISHABLE_KEY);
 
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
+    assert.equal(
+      calls[2]?.url,
+      "http://localhost:9000/auth/customer/emailpass",
+    );
+    assert.deepEqual(calls[2]?.body, {
+      email: "customer@test.com",
+      password: PASSWORD,
+    });
     assert.equal(
       calls.some((call) => call.url.endsWith("/store/customers")),
       false,
     );
     assert.deepEqual(notes, []);
+  });
+
+  it("creates the customer profile with the login token when the identity exists without one", async () => {
+    const notes: string[] = [];
+    const loginToken = jwtWithActor("");
+    const calls = mockFetch([
+      () => jsonResponse(200, { customers: [] }),
+      alreadyExists,
+      () => jsonResponse(200, { token: loginToken }),
+      () => jsonResponse(200, { customer: { id: "cus_1" } }),
+    ]);
+
+    await ensureCustomer(ctxFor(), notes, PUBLISHABLE_KEY);
+
+    assert.equal(calls.length, 4);
+    assert.equal(calls[3]?.url, "http://localhost:9000/store/customers");
+    assert.equal(calls[3]?.headers.Authorization, `Bearer ${loginToken}`);
+    assert.equal(calls[3]?.headers["x-publishable-api-key"], PUBLISHABLE_KEY);
+    assert.deepEqual(notes, ["Customer customer@test.com created."]);
+
+    const output = logs.join("\n");
+    assert.equal(output.includes(PASSWORD), false);
+    assert.equal(output.includes(loginToken), false);
+  });
+
+  it("fails clearly, without leaking the password, when the existing identity rejects the login", async () => {
+    mockFetch([
+      () => jsonResponse(200, { customers: [] }),
+      alreadyExists,
+      () => jsonResponse(401, { message: "Invalid email or password" }),
+    ]);
+
+    await assert.rejects(
+      ensureCustomer(ctxFor(), [], PUBLISHABLE_KEY),
+      (error: Error) => {
+        assert.match(error.message, /emailpass failed \(HTTP 401\)/);
+        assert.equal(error.message.includes(PASSWORD), false);
+        return true;
+      },
+    );
   });
 
   it("throws when register fails for a reason other than 'already exists'", async () => {

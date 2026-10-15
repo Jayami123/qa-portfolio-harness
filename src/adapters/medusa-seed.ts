@@ -213,20 +213,7 @@ async function resolvePublishableKey(ctx: MedusaSeedContext): Promise<string> {
   return token.trim();
 }
 
-async function ensureGermanWarehouse(
-  ctx: MedusaSeedContext,
-  notes: string[],
-): Promise<void> {
-  const locations = await listStockLocations(ctx);
-  const existing = locations.find(
-    (row) => row.name === MEDUSA_GERMAN_WAREHOUSE_NAME,
-  );
-  if (existing?.id !== undefined) {
-    console.log(
-      `${MEDUSA_GERMAN_WAREHOUSE_NAME} already present; skipping create.`,
-    );
-    return;
-  }
+async function createGermanWarehouse(ctx: MedusaSeedContext): Promise<string> {
   const create = await adminFetch(
     ctx.cfg.baseUrl,
     ctx.authorizationHeader,
@@ -252,9 +239,59 @@ async function ensureGermanWarehouse(
   if (typeof locationId !== "string") {
     throw new Error("Medusa German Warehouse create returned no id.");
   }
-  notes.push("German Warehouse created.");
+  return locationId;
+}
 
+export async function ensureGermanWarehouse(
+  ctx: MedusaSeedContext,
+  notes: string[],
+): Promise<void> {
+  const locations = await listStockLocations(ctx);
+  const existing = locations.find(
+    (row) => row.name === MEDUSA_GERMAN_WAREHOUSE_NAME,
+  );
+  let locationId: string;
+  if (typeof existing?.id === "string") {
+    locationId = existing.id;
+    console.log(
+      `${MEDUSA_GERMAN_WAREHOUSE_NAME} already present; checking its links.`,
+    );
+  } else {
+    locationId = await createGermanWarehouse(ctx);
+    notes.push("German Warehouse created.");
+  }
+  await ensureWarehouseSalesChannelLink(ctx, locationId, notes);
+  await ensureWarehouseInventoryLevels(ctx, locationId, notes);
+}
+
+async function ensureWarehouseSalesChannelLink(
+  ctx: MedusaSeedContext,
+  locationId: string,
+  notes: string[],
+): Promise<void> {
   const channelId = await defaultSalesChannelId(ctx);
+  const current = await adminFetch(
+    ctx.cfg.baseUrl,
+    ctx.authorizationHeader,
+    "GET",
+    `/stock-locations/${locationId}?fields=*sales_channels`,
+  );
+  const currentBody = await readJson(current);
+  if (!current.ok) {
+    throw new Error(
+      `Medusa GET /admin/stock-locations/${locationId} failed (HTTP ${current.status}).`,
+    );
+  }
+  const location = currentBody?.stock_location as JsonRecord | undefined;
+  const linkedChannels = Array.isArray(location?.sales_channels)
+    ? (location.sales_channels as JsonRecord[])
+    : [];
+  if (linkedChannels.some((channel) => channel.id === channelId)) {
+    console.log(
+      `${MEDUSA_GERMAN_WAREHOUSE_NAME} already linked to the default sales channel; skipping.`,
+    );
+    return;
+  }
   const link = await adminFetch(
     ctx.cfg.baseUrl,
     ctx.authorizationHeader,
@@ -262,16 +299,30 @@ async function ensureGermanWarehouse(
     `/stock-locations/${locationId}/sales-channels`,
     { add: [channelId] },
   );
-  if (!link.ok) {
+  if (!link.ok && link.status !== 409) {
     throw new Error(
       `Medusa link stock location to sales channel failed (HTTP ${link.status}).`,
     );
   }
+  notes.push("German Warehouse sales channel linked.");
+}
 
+async function ensureWarehouseInventoryLevels(
+  ctx: MedusaSeedContext,
+  locationId: string,
+  notes: string[],
+): Promise<void> {
   const inventoryItems = await listInventoryItems(ctx);
+  let linked = 0;
   for (const item of inventoryItems) {
     const itemId = item.id;
     if (typeof itemId !== "string") {
+      continue;
+    }
+    const levels = Array.isArray(item.location_levels)
+      ? (item.location_levels as JsonRecord[])
+      : [];
+    if (levels.some((level) => level.location_id === locationId)) {
       continue;
     }
     const level = await adminFetch(
@@ -286,11 +337,43 @@ async function ensureGermanWarehouse(
         `Medusa inventory level for ${itemId} failed (HTTP ${level.status}).`,
       );
     }
+    if (level.ok) {
+      linked += 1;
+    }
+  }
+  if (linked === 0) {
+    console.log(
+      `${MEDUSA_GERMAN_WAREHOUSE_NAME} inventory levels already linked; skipping.`,
+    );
+    return;
   }
   notes.push("German Warehouse inventory levels linked.");
 }
 
-async function ensureFeaturedCollection(
+async function collectionProductIds(
+  ctx: MedusaSeedContext,
+  collectionId: string,
+): Promise<Set<string>> {
+  const response = await adminFetch(
+    ctx.cfg.baseUrl,
+    ctx.authorizationHeader,
+    "GET",
+    `/products?collection_id=${collectionId}&limit=50&fields=id`,
+  );
+  const body = await readJson(response);
+  if (!response.ok) {
+    throw new Error(
+      `Medusa GET /admin/products?collection_id failed (HTTP ${response.status}).`,
+    );
+  }
+  return new Set(
+    listItems<JsonRecord>(body, "products")
+      .map((product) => product.id)
+      .filter((id): id is string => typeof id === "string"),
+  );
+}
+
+export async function ensureFeaturedCollection(
   ctx: MedusaSeedContext,
   notes: string[],
 ): Promise<void> {
@@ -298,44 +381,54 @@ async function ensureFeaturedCollection(
   const existing = collections.find(
     (row) => row.title === MEDUSA_SEED_COLLECTION_TITLE,
   );
-  if (existing?.id !== undefined) {
-    console.log(
-      `Collection ${MEDUSA_SEED_COLLECTION_TITLE} already present; skipping create.`,
-    );
-    return;
-  }
   const productIds = await seededProductIds(ctx);
   if (productIds.length === 0) {
     throw new Error(
       "Medusa seed expected four published products from migrate.",
     );
   }
-  const create = await adminFetch(
-    ctx.cfg.baseUrl,
-    ctx.authorizationHeader,
-    "POST",
-    "/collections",
-    {
-      title: MEDUSA_SEED_COLLECTION_TITLE,
-    },
-  );
-  const body = await readJson(create);
-  if (!create.ok) {
-    throw new Error(
-      `Medusa POST /admin/collections failed (HTTP ${create.status}).`,
+  let collectionId: string;
+  let linked = new Set<string>();
+  const created = typeof existing?.id !== "string";
+  if (typeof existing?.id === "string") {
+    collectionId = existing.id;
+    linked = await collectionProductIds(ctx, collectionId);
+  } else {
+    const create = await adminFetch(
+      ctx.cfg.baseUrl,
+      ctx.authorizationHeader,
+      "POST",
+      "/collections",
+      {
+        title: MEDUSA_SEED_COLLECTION_TITLE,
+      },
     );
+    const body = await readJson(create);
+    if (!create.ok) {
+      throw new Error(
+        `Medusa POST /admin/collections failed (HTTP ${create.status}).`,
+      );
+    }
+    const collection = body?.collection as JsonRecord | undefined;
+    const newId = collection?.id;
+    if (typeof newId !== "string") {
+      throw new Error("Medusa collection create returned no id.");
+    }
+    collectionId = newId;
   }
-  const collection = body?.collection as JsonRecord | undefined;
-  const collectionId = collection?.id;
-  if (typeof collectionId !== "string") {
-    throw new Error("Medusa collection create returned no id.");
+  const missing = productIds.filter((id) => !linked.has(id));
+  if (missing.length === 0) {
+    console.log(
+      `Collection ${MEDUSA_SEED_COLLECTION_TITLE} already has the seeded products; skipping.`,
+    );
+    return;
   }
   const attach = await adminFetch(
     ctx.cfg.baseUrl,
     ctx.authorizationHeader,
     "POST",
     `/collections/${collectionId}/products`,
-    { add: productIds },
+    { add: missing },
   );
   if (!attach.ok) {
     throw new Error(
@@ -343,7 +436,9 @@ async function ensureFeaturedCollection(
     );
   }
   notes.push(
-    `Collection ${MEDUSA_SEED_COLLECTION_TITLE} created with four products.`,
+    created
+      ? `Collection ${MEDUSA_SEED_COLLECTION_TITLE} created with four products.`
+      : `Collection ${MEDUSA_SEED_COLLECTION_TITLE} linked ${missing.length} missing product(s).`,
   );
 }
 
@@ -389,8 +484,8 @@ async function ensurePromoCode(
 
 /**
  * Creates the storefront customer through the store auth flow, so the password can log in.
- * Returns the register token, or undefined when the auth identity already exists (skip).
- * Never logs the password.
+ * Returns the register token, or undefined when the auth identity already exists.
+ * Never logs the password or the token.
  */
 async function registerStoreCustomer(
   ctx: MedusaSeedContext,
@@ -421,6 +516,47 @@ async function registerStoreCustomer(
   );
 }
 
+/** Logs in an existing customer identity. Never logs the password or the token. */
+async function loginStoreCustomer(
+  ctx: MedusaSeedContext,
+  email: string,
+  password: string,
+): Promise<string> {
+  const url = `${ctx.cfg.baseUrl.replace(/\/$/, "")}/auth/customer/emailpass`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = await readJson(response);
+  const token = body?.token;
+  if (!response.ok || typeof token !== "string" || token.trim() === "") {
+    throw new Error(
+      `Medusa POST /auth/customer/emailpass failed (HTTP ${response.status}). ` +
+        "The existing customer identity may use a different password than MEDUSA_SEED_CUSTOMER_PASSWORD.",
+    );
+  }
+  return token;
+}
+
+/** `actor_id` from the JWT payload. Empty when the identity has no customer profile yet. */
+export function customerActorId(token: string): string | undefined {
+  const payload = token.split(".")[1];
+  if (payload === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    ) as { actor_id?: unknown };
+    return typeof parsed.actor_id === "string" && parsed.actor_id !== ""
+      ? parsed.actor_id
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function ensureCustomer(
   ctx: MedusaSeedContext,
   notes: string[],
@@ -437,16 +573,18 @@ export async function ensureCustomer(
     console.log(`Customer ${customerEmail} already present; skipping create.`);
     return;
   }
-  const token = await registerStoreCustomer(
-    ctx,
-    customerEmail,
-    customerPassword,
-  );
+  let token = await registerStoreCustomer(ctx, customerEmail, customerPassword);
   if (token === undefined) {
+    token = await loginStoreCustomer(ctx, customerEmail, customerPassword);
+    if (customerActorId(token) !== undefined) {
+      console.log(
+        `Customer ${customerEmail} already registered with a profile; skipping create.`,
+      );
+      return;
+    }
     console.log(
-      `Customer ${customerEmail} already registered; skipping create.`,
+      `Customer ${customerEmail} identity exists without a profile; creating the profile.`,
     );
-    return;
   }
   const url = `${ctx.cfg.baseUrl.replace(/\/$/, "")}/store/customers`;
   const create = await fetch(url, {
@@ -597,7 +735,7 @@ async function listInventoryItems(
     ctx.cfg.baseUrl,
     ctx.authorizationHeader,
     "GET",
-    "/inventory-items?limit=100",
+    "/inventory-items?limit=100&fields=id,*location_levels",
   );
   const body = await readJson(response);
   if (!response.ok) {

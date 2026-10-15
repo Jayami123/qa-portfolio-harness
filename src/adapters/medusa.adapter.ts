@@ -951,6 +951,8 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       console.log("MEDUSA_SKIP_STOREFRONT=1; storefront not started.");
       return;
     }
+    // Validate the listen URL first, so a bad URL fails even when /dk answers 200.
+    const { host, port } = medusaListen(this.cfg.storefrontUrl);
     // Probe before any build or spawn: a running storefront keeps its pid file untouched.
     if (await this.storefrontAnswering()) {
       console.log(
@@ -958,7 +960,6 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       );
       return;
     }
-    const { host, port } = medusaListen(this.cfg.storefrontUrl);
     if (
       !(this.storefrontProcess && this.storefrontProcess.exitCode === null) &&
       (await this.isPortOpen(host, port))

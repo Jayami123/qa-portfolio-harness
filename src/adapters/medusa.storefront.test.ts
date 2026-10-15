@@ -11,10 +11,10 @@ describe("MedusaAdapter storefront probe", () => {
   const savedSkip = process.env.MEDUSA_SKIP_STOREFRONT;
   let logs: string[];
 
-  function adapterWithSpies() {
+  function adapterWithSpies(storefrontUrl = "http://127.0.0.1:8000") {
     const adapter = new MedusaAdapter({
       baseUrl: "http://127.0.0.1:9000",
-      storefrontUrl: "http://127.0.0.1:8000",
+      storefrontUrl,
     } as MedusaConfig);
     const calls = { build: 0, start: 0, key: 0, wait: 0 };
     const hooks = adapter as unknown as StorefrontProbe &
@@ -64,6 +64,24 @@ describe("MedusaAdapter storefront probe", () => {
     assert.equal(calls.key, 0);
     assert.equal(calls.wait, 0);
     assert.ok(logs.some((line) => line.includes("storefront already running")));
+  });
+
+  it("rejects an invalid storefront listen URL before probing, even if /dk would answer 200", async () => {
+    let fetched = 0;
+    globalThis.fetch = (async () => {
+      fetched += 1;
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+    const { adapter, calls } = adapterWithSpies("http://localhost:8000");
+
+    await assert.rejects(
+      (adapter as unknown as StorefrontProbe).maybeStartStorefront(),
+      /127\.0\.0\.1/,
+    );
+
+    assert.equal(fetched, 0);
+    assert.equal(calls.build, 0);
+    assert.equal(calls.start, 0);
   });
 
   it("builds and starts when /dk is not answering", async () => {
