@@ -1,9 +1,28 @@
-# Overlay for medusa/scripts/portfolio-validation/docker-compose.yml
-# Remap MinIO host ports so they do not collide with Documenso (9001/9002).
+# Harness-owned Medusa Postgres. Does not read the DTC starter or the engine fork.
+# Redis is not started: apps/backend/medusa-config.ts never sets projectConfig.redisUrl,
+# and the framework does not read REDIS_URL. See docs/adr/0001-medusa-fake-redis.md.
+#
+#   docker compose -p qa-harness-medusa -f docker/medusa.compose.yml up -d --wait
+#
+# Postgres listens on 127.0.0.1:5433. No MinIO.
 name: qa-harness-medusa
 
 services:
-  minio:
-    ports: !override
-      - "9011:9000"
-      - "9012:9001"
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: medusa
+      POSTGRES_PASSWORD: medusa
+      POSTGRES_DB: medusa
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - medusa_harness_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medusa -d medusa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  medusa_harness_pg:
