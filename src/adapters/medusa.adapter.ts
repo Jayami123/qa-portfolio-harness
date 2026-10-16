@@ -409,7 +409,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(
       target,
-      renderServerMedusaConfigJs(this.harnessSwitches()),
+      renderServerMedusaConfigJs(this.harnessSwitches(), this.cfg.baseUrl),
       "utf8",
     );
   }

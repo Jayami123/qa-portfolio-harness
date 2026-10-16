@@ -249,15 +249,25 @@ describe("medusaComposeFileNames", () => {
 
 describe("renderServerMedusaConfigJs", () => {
   it("includes redis modules and redisUrl when MEDUSA_REDIS=1", () => {
-    const source = renderServerMedusaConfigJs({ redis: true, stripe: false });
+    const source = renderServerMedusaConfigJs({ redis: true, stripe: false }, "http://127.0.0.1:9000");
     assert.equal(source.includes("redisUrl: process.env.REDIS_URL"), true);
     assert.equal(source.includes("@medusajs/medusa/event-bus-redis"), true);
     assert.equal(source.includes("payment-stripe"), false);
   });
 
   it("includes Stripe payment module when MEDUSA_STRIPE=1", () => {
-    const source = renderServerMedusaConfigJs({ redis: false, stripe: true });
+    const source = renderServerMedusaConfigJs({ redis: false, stripe: true }, "http://127.0.0.1:9000");
     assert.equal(source.includes("@medusajs/medusa/payment-stripe"), true);
+  });
+
+  it("drops Secure from the session cookie when MEDUSA_BASE_URL is http", () => {
+    const source = renderServerMedusaConfigJs({ redis: false, stripe: false }, "http://127.0.0.1:9000");
+    assert.equal(source.includes('cookieOptions: { secure: false, sameSite: "lax" },'), true);
+  });
+
+  it("keeps the Medusa cookie defaults when MEDUSA_BASE_URL is https", () => {
+    const source = renderServerMedusaConfigJs({ redis: false, stripe: false }, "https://127.0.0.1:9000");
+    assert.equal(source.includes("cookieOptions"), false);
   });
 });
 
