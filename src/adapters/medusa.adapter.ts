@@ -35,6 +35,7 @@ import {
   buildMedusaStorefrontEnvLocal,
   classifyMedusaProbe,
   decideMedusaBuildSkip,
+  MEDUSA_BUILD_NODE_ENV,
   decideMedusaStorefrontBuildSkip,
   isMedusaHealthyStatus,
   medusaBackendStartArgs,
@@ -305,6 +306,11 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
           "Medusa harness-build.json is unreadable or missing gitSha; running medusa build.",
         );
         break;
+      case "rebuild_mode_mismatch":
+        console.log(
+          "Medusa harness-build.json has no mode=production (cached development admin build); running medusa build.",
+        );
+        break;
       case "rebuild_head_unknown":
         console.log(
           "Medusa product git HEAD could not be read; running medusa build.",
@@ -350,11 +356,12 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     args: string[],
     cwd: string,
     timeoutMs: number,
+    extraEnv: Record<string, string> = {},
   ): Promise<void> {
     const started = Date.now();
     await run(resolvePnpm(), args, {
       cwd,
-      env: this.backendProcessEnv(),
+      env: { ...this.backendProcessEnv(), ...extraEnv },
       timeoutMs,
     });
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
@@ -395,6 +402,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       ["medusa", "build"],
       this.backendDir(),
       this.buildTimeoutMs(),
+      { NODE_ENV: MEDUSA_BUILD_NODE_ENV },
     );
     if (!fs.existsSync(this.builtServerPackage())) {
       throw new Error(

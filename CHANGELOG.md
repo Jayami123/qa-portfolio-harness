@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.11 — 2026-10-17
+
+- Medusa `up()` runs `medusa build` with `NODE_ENV=production`. Stock `medusa build` sets development, which shipped a development admin bundle (error boundary "Error Details (Development Mode)" with stack traces, dev React warnings).
+- `.medusa/server/harness-build.json` now records `"mode":"production"`. A cached build whose marker lacks it (every build made before v0.2.11) is rebuilt once on the next `up()`.
+
 ## v0.2.9 — 2026-10-15
 
 - Medusa adapter targets `medusa-dtc-starter`: harness Postgres (and opt-in Redis), production backend on **127.0.0.1:9000**, storefront on **127.0.0.1:8000**, `seed()` (German Warehouse, Featured collection, `QA10`, US region, customer), `proveAuth()`, and gitignored runtime `medusa-config.js` when `MEDUSA_REDIS=1` or `MEDUSA_STRIPE=1` (default off). Stripe CLI webhook path: `/hooks/payment/stripe_stripe`.

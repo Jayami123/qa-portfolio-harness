@@ -8,6 +8,8 @@ import {
   buildMedusaBackendEnvFile,
   classifyMedusaProbe,
   decideMedusaBuildSkip,
+  MEDUSA_BUILD_NODE_ENV,
+  parseMedusaHarnessBuildMode,
   decideMedusaStorefrontBuildSkip,
   isMedusaHealthyStatus,
   medusaPublishableKeyFingerprint,
@@ -346,6 +348,31 @@ describe("decideMedusaBuildSkip", () => {
       }).reason,
       "rebuild_forced",
     );
+  });
+
+  it("rebuilds a cached build whose marker lacks mode=production", () => {
+    for (const markerFileText of [
+      JSON.stringify({ gitSha: head }),
+      JSON.stringify({ gitSha: head, mode: "development" }),
+    ]) {
+      assert.deepEqual(
+        decideMedusaBuildSkip({
+          httpMode: "production",
+          forceRebuild: false,
+          builtServerPackageExists: true,
+          markerFileText,
+          headGitSha: head,
+        }),
+        { skip: false, reason: "rebuild_mode_mismatch" },
+      );
+    }
+  });
+
+  it("records mode=production in the marker", () => {
+    assert.equal(MEDUSA_BUILD_NODE_ENV, "production");
+    assert.equal(parseMedusaHarnessBuildMode(marker), "production");
+    assert.equal(parseMedusaHarnessBuildMode('{"gitSha":"x"}'), undefined);
+    assert.equal(parseMedusaHarnessBuildMode("not-json"), undefined);
   });
 
   it("places harness-build.json under .medusa/server", () => {
