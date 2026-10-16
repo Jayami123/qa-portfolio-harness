@@ -383,9 +383,38 @@ export interface MedusaHarnessBuildRecord {
   readonly gitSha: string;
 }
 
+/**
+ * `medusa build` forces NODE_ENV=development unless the caller sets it, which ships a
+ * development admin bundle (error boundary "Error Details (Development Mode)").
+ */
+export const MEDUSA_BUILD_NODE_ENV = "production";
+
+export interface MedusaBackendBuildRecord extends MedusaHarnessBuildRecord {
+  /** NODE_ENV the build ran with; a missing or different value forces a rebuild. */
+  readonly mode: string;
+}
+
 export function serializeMedusaHarnessBuildRecord(gitSha: string): string {
-  const record: MedusaHarnessBuildRecord = { gitSha };
+  const record: MedusaBackendBuildRecord = { gitSha, mode: MEDUSA_BUILD_NODE_ENV };
   return `${JSON.stringify(record)}\n`;
+}
+
+export function parseMedusaHarnessBuildMode(fileText: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(fileText);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "mode" in parsed &&
+      typeof parsed.mode === "string" &&
+      parsed.mode.trim().length > 0
+    ) {
+      return parsed.mode.trim();
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function medusaPublishableKeyFingerprint(publishableKey: string): string {
@@ -468,6 +497,7 @@ export type MedusaBuildSkipReason =
   | "rebuild_missing_output"
   | "rebuild_missing_marker"
   | "rebuild_bad_marker"
+  | "rebuild_mode_mismatch"
   | "rebuild_head_unknown"
   | "rebuild_sha_mismatch"
   | "rebuild_publishable_key_mismatch";
@@ -502,6 +532,9 @@ export function decideMedusaBuildSkip(input: MedusaBuildSkipInput): MedusaBuildS
   const recorded = parseMedusaHarnessBuildGitSha(input.markerFileText);
   if (recorded === undefined) {
     return { skip: false, reason: "rebuild_bad_marker" };
+  }
+  if (parseMedusaHarnessBuildMode(input.markerFileText) !== MEDUSA_BUILD_NODE_ENV) {
+    return { skip: false, reason: "rebuild_mode_mismatch" };
   }
   const current = input.headGitSha;
   if (current === undefined) {
