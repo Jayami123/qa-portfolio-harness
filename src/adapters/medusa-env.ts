@@ -229,8 +229,10 @@ export function medusaBuiltServerConfigPath(backendDir: string): string {
 /**
  * Gitignored runtime config written under `apps/backend/.medusa/server` before `medusa start`.
  * Paths match `@medusajs/utils` `TEMPORARY_REDIS_MODULE_PACKAGE_NAMES` for 2.21.2.
+ * On an http base URL the session cookie drops `Secure`: `medusa start` forces it in production,
+ * and browsers never send a Secure cookie over http, so admin login could not hold a session.
  */
-export function renderServerMedusaConfigJs(switches: MedusaHarnessSwitches): string {
+export function renderServerMedusaConfigJs(switches: MedusaHarnessSwitches, baseUrl: string): string {
   const modules: string[] = [];
   if (switches.redis) {
     modules.push(
@@ -271,6 +273,8 @@ export function renderServerMedusaConfigJs(switches: MedusaHarnessSwitches): str
     );
   }
   const redisUrlLine = switches.redis ? "    redisUrl: process.env.REDIS_URL,\n" : "";
+  const cookieOptionsLine =
+    new URL(baseUrl).protocol === "http:" ? '    cookieOptions: { secure: false, sameSite: "lax" },\n' : "";
   const modulesBlock =
     modules.length === 0
       ? ""
@@ -284,7 +288,7 @@ utils.loadEnv(process.env.NODE_ENV || "development", process.cwd());
 module.exports = utils.defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
-${redisUrlLine}    http: {
+${redisUrlLine}${cookieOptionsLine}    http: {
       storeCors: process.env.STORE_CORS,
       adminCors: process.env.ADMIN_CORS,
       authCors: process.env.AUTH_CORS,
