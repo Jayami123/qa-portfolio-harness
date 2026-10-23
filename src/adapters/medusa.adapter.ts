@@ -1122,7 +1122,13 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     // Second backend starts only after the primary has passed health.
     if (this.cfg.secondBaseUrl !== undefined) {
       await this.startSecondBackend();
-      await this.waitSecondReady(this.cfg.secondBaseUrl, this.webWaitMs());
+      try {
+        await this.waitSecondReady(this.cfg.secondBaseUrl, this.webWaitMs());
+      } catch (error) {
+        // Stop the half-started second backend, so the next up() can start it again.
+        await this.stopSecondBackend();
+        throw error;
+      }
     }
 
     await this.maybeStartStorefront();
@@ -1212,8 +1218,12 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
   async down(): Promise<void> {
     await this.stopStorefront();
     const { host, port } = medusaListen(this.cfg.baseUrl);
-    await this.stopBackend(host, port);
-    await this.stopSecondBackend();
+    try {
+      await this.stopBackend(host, port);
+    } finally {
+      // Runs even if the primary stop throws, so the second backend never outlives down().
+      await this.stopSecondBackend();
+    }
     const opts = this.composeOpts(
       resolveMedusaComposeFiles(
         this.readComposeRecordText(),

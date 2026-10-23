@@ -119,7 +119,14 @@ export function medusaListen(baseUrl: string): MedusaListen {
  */
 export function assertMedusaSecondBaseUrl(primaryBaseUrl: string, secondBaseUrl: string): void {
   const primary = medusaListen(primaryBaseUrl);
-  const second = medusaListen(secondBaseUrl);
+  let second: MedusaListen;
+  try {
+    second = medusaListen(secondBaseUrl);
+  } catch (error) {
+    // medusaListen names MEDUSA_BASE_URL; point the message at the variable the user actually set.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(detail.replace("MEDUSA_BASE_URL", "MEDUSA_SECOND_BASE_URL"), { cause: error });
+  }
   if (primary.port === second.port) {
     throw new Error(
       `MEDUSA_SECOND_BASE_URL must use a different port from MEDUSA_BASE_URL (both are ${second.port}).`,

@@ -503,3 +503,15 @@ describe("MEDUSA_LOCK blank values", () => {
     assert.equal(parseMedusaHarnessSwitches({ MEDUSA_LOCK: "   " }).lock, "memory");
   });
 });
+
+describe("assertMedusaSecondBaseUrl error names the second variable", () => {
+  it("names MEDUSA_SECOND_BASE_URL when the second URL is not on 127.0.0.1", () => {
+    assert.throws(
+      () => assertMedusaSecondBaseUrl("http://127.0.0.1:9000", "http://localhost:9001"),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("MEDUSA_SECOND_BASE_URL must use 127.0.0.1") &&
+        !error.message.includes("MEDUSA_BASE_URL must"),
+    );
+  });
+});
