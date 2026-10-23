@@ -47,7 +47,7 @@ const envSchema = z.object({
 
   MEDUSA_BASE_URL: z.string().trim().url().default("http://127.0.0.1:9000"),
   /** Optional second Medusa backend on the same database. Unset means none. */
-  MEDUSA_SECOND_BASE_URL: z.string().trim().url().optional(),
+  MEDUSA_SECOND_BASE_URL: z.preprocess(emptyToUndefined, z.string().trim().url().optional()),
   MEDUSA_DB_URL: z
     .string()
     .trim()

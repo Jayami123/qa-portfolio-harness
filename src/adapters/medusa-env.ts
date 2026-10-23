@@ -164,7 +164,8 @@ export interface MedusaHarnessSwitches {
 
 export function parseMedusaHarnessSwitches(env: Record<string, string | undefined>): MedusaHarnessSwitches {
   const redis = env.MEDUSA_REDIS === "1";
-  const rawLock = env.MEDUSA_LOCK ?? "memory";
+  // A blank MEDUSA_LOCK (for example `MEDUSA_LOCK=` in .env) means the default.
+  const rawLock = env.MEDUSA_LOCK === undefined || env.MEDUSA_LOCK.trim() === "" ? "memory" : env.MEDUSA_LOCK;
   if (rawLock !== "memory" && rawLock !== "redis") {
     throw new Error(`MEDUSA_LOCK must be "memory" or "redis" (got "${rawLock}").`);
   }

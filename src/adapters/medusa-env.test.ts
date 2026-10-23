@@ -493,3 +493,13 @@ describe("assertMedusaSecondBaseUrl", () => {
     assert.throws(() => assertMedusaSecondBaseUrl("http://127.0.0.1:9000", "http://localhost:9001"), /must use 127\.0\.0\.1/);
   });
 });
+
+describe("MEDUSA_LOCK blank values", () => {
+  it("treats an empty MEDUSA_LOCK as memory", () => {
+    assert.equal(parseMedusaHarnessSwitches({ MEDUSA_LOCK: "" }).lock, "memory");
+  });
+
+  it("treats a whitespace-only MEDUSA_LOCK as memory", () => {
+    assert.equal(parseMedusaHarnessSwitches({ MEDUSA_LOCK: "   " }).lock, "memory");
+  });
+});
