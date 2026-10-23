@@ -165,3 +165,45 @@ describe("MedusaAdapter stopSecondBackend", () => {
     assert.deepEqual(calls.reaped, ["9001"]);
   });
 });
+
+describe("MedusaAdapter already-healthy with a second backend configured", () => {
+  const realLog = console.log;
+  const realWarn = console.warn;
+
+  beforeEach(() => {
+    console.log = () => undefined;
+    console.warn = () => undefined;
+  });
+
+  afterEach(() => {
+    console.log = realLog;
+    console.warn = realWarn;
+  });
+
+  it("throws and does not start the storefront when MEDUSA_SECOND_BASE_URL is set", async () => {
+    const adapter = new MedusaAdapter({
+      baseUrl: "http://127.0.0.1:9000",
+      secondBaseUrl: "http://127.0.0.1:9001",
+    } as MedusaConfig);
+    let storefrontStarts = 0;
+    (adapter as unknown as { maybeStartStorefront: () => Promise<void> }).maybeStartStorefront = async () => {
+      storefrontStarts += 1;
+    };
+
+    await assert.rejects(
+      (
+        adapter as unknown as {
+          onAlreadyHealthy: (probe: {
+            verdict: "healthy";
+            status: { ok: true; url: string };
+          }) => Promise<void>;
+        }
+      ).onAlreadyHealthy({
+        verdict: "healthy",
+        status: { ok: true, url: "http://127.0.0.1:9000/health" },
+      }),
+      /Run down first; the second backend was not started/,
+    );
+    assert.equal(storefrontStarts, 0);
+  });
+});

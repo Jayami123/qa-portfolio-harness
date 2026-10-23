@@ -1121,6 +1121,12 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
    * The storefront still needs to come up.
    */
   private async onAlreadyHealthy(already: MedusaProbe): Promise<void> {
+    if (this.cfg.secondBaseUrl !== undefined) {
+      // The second backend is only started alongside a primary this run starts, so it would be skipped silently here.
+      throw new Error(
+        `Medusa is already healthy at ${already.status.url}. Run down first; the second backend was not started (MEDUSA_SECOND_BASE_URL=${this.cfg.secondBaseUrl}).`,
+      );
+    }
     console.log(`Medusa already healthy at ${already.status.url} (HTTP 200).`);
     console.warn(
       "Medusa already running; MEDUSA_REDIS/MEDUSA_STRIPE changes need `npm run down -- medusa` first.",
