@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.12 — 2026-10-23
+
+- Package entry re-exports `TWENTY_DEFAULT_ADMIN_EMAIL` and `TWENTY_DEV_SEED_PASSWORD`, so consumers can import the Twenty dev-seeder login. These are the fork's public dev-seeder values, not production secrets.
+
 ## v0.2.11 — 2026-10-17
 
 - Medusa `up()` runs `medusa build` with `NODE_ENV=production`. Stock `medusa build` sets development, which shipped a development admin bundle (error boundary "Error Details (Development Mode)" with stack traces, dev React warnings).
