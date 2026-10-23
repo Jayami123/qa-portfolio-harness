@@ -282,3 +282,65 @@ describe("MedusaAdapter startSecondBackend on a busy second port", () => {
     );
   });
 });
+
+describe("MedusaAdapter startAndAwaitSecondBackend cleanup", () => {
+  const realLog = console.log;
+  const realWarn = console.warn;
+
+  beforeEach(() => {
+    console.log = () => undefined;
+    console.warn = () => undefined;
+  });
+
+  afterEach(() => {
+    console.log = realLog;
+    console.warn = realWarn;
+  });
+
+  function cleanupAdapter(launched: boolean, readyError?: Error) {
+    const adapter = new MedusaAdapter({
+      baseUrl: "http://127.0.0.1:9000",
+      secondBaseUrl: "http://127.0.0.1:9001",
+    } as MedusaConfig);
+    const internals = adapter as unknown as {
+      startSecondBackend: () => Promise<boolean>;
+      waitSecondReady: (url: string, timeoutMs: number) => Promise<void>;
+      stopSecondBackend: () => Promise<void>;
+    };
+    const calls = { stopped: 0 };
+    internals.startSecondBackend = async () => launched;
+    internals.waitSecondReady = async () => {
+      if (readyError !== undefined) {
+        throw readyError;
+      }
+    };
+    internals.stopSecondBackend = async () => {
+      calls.stopped += 1;
+    };
+    return { adapter, calls };
+  }
+
+  it("stops the second backend on a readiness failure when this call launched it", async () => {
+    const { adapter, calls } = cleanupAdapter(true, new Error("not ready"));
+    await assert.rejects(
+      (adapter as unknown as { startAndAwaitSecondBackend: () => Promise<void> }).startAndAwaitSecondBackend(),
+      /not ready/,
+    );
+    assert.equal(calls.stopped, 1);
+  });
+
+  it("does not stop an adopted second backend on a readiness failure", async () => {
+    const { adapter, calls } = cleanupAdapter(false, new Error("not ready"));
+    await assert.rejects(
+      (adapter as unknown as { startAndAwaitSecondBackend: () => Promise<void> }).startAndAwaitSecondBackend(),
+      /not ready/,
+    );
+    assert.equal(calls.stopped, 0);
+  });
+
+  it("does not stop anything when the second backend becomes ready", async () => {
+    const { adapter, calls } = cleanupAdapter(true);
+    await (adapter as unknown as { startAndAwaitSecondBackend: () => Promise<void> }).startAndAwaitSecondBackend();
+    assert.equal(calls.stopped, 0);
+  });
+});

@@ -17,6 +17,7 @@ import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import {
+  defaultKillProcessTree,
   readMedusaBackend2Record,
   stopMedusaBackend2FromPidFile,
   stopMedusaBackendFromPidFile,
@@ -975,10 +976,11 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
    * Starts the optional second backend on the same database. Called only after the primary is healthy.
    * PORT is set explicitly so an inherited PORT cannot move the primary backend.
    */
-  private async startSecondBackend(): Promise<void> {
+  /** Resolves true only when this call launched a process; false when it adopted a healthy one or had no URL. */
+  private async startSecondBackend(): Promise<boolean> {
     const url = this.cfg.secondBaseUrl;
     if (url === undefined) {
-      return;
+      return false;
     }
     const { host, port } = medusaListen(url);
     if (await this.isPortOpen(host, port)) {
@@ -1003,7 +1005,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
         );
       }
       console.log(`Second Medusa backend already healthy at ${url} (recorded pid ${String(record.pid)}); not started again.`);
-      return;
+      return false;
     }
     const logFile = this.secondLogFile();
     const cwd = this.backendStartCwd();
@@ -1021,9 +1023,38 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       shell: false,
     });
     if (child.pid !== undefined) {
-      writeMedusaBackend2Pid(child.pid, url);
+      try {
+        writeMedusaBackend2Pid(child.pid, url);
+      } catch (error) {
+        // Without a record, down() cannot find this launcher by pid, so kill it now and keep the original error.
+        try {
+          defaultKillProcessTree(child.pid);
+        } catch {
+          // The launcher may already be gone; the original error is what matters.
+        }
+        throw error;
+      }
     }
     child.unref();
+    return true;
+  }
+
+  /** Starts the second backend when needed and waits for /health. Stops it on a readiness failure only if this call launched it. */
+  private async startAndAwaitSecondBackend(): Promise<void> {
+    const url = this.cfg.secondBaseUrl;
+    if (url === undefined) {
+      return;
+    }
+    const launched = await this.startSecondBackend();
+    try {
+      await this.waitSecondReady(url, this.webWaitMs());
+    } catch (error) {
+      if (launched) {
+        // Stop the half-started second backend, so the next up() can start it again.
+        await this.stopSecondBackend();
+      }
+      throw error;
+    }
   }
 
   private async waitSecondReady(url: string, timeoutMs: number): Promise<void> {
@@ -1120,16 +1151,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     );
 
     // Second backend starts only after the primary has passed health.
-    if (this.cfg.secondBaseUrl !== undefined) {
-      await this.startSecondBackend();
-      try {
-        await this.waitSecondReady(this.cfg.secondBaseUrl, this.webWaitMs());
-      } catch (error) {
-        // Stop the half-started second backend, so the next up() can start it again.
-        await this.stopSecondBackend();
-        throw error;
-      }
-    }
+    await this.startAndAwaitSecondBackend();
 
     await this.maybeStartStorefront();
   }
