@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- security: upgrade zod to 4.x (GHSA-mrhx-c7xc-m3w5). `npm audit --audit-level=high` now passes. Config validation uses `z.url()` and `z.email()` with an explicit trim. Behaviour is unchanged except one edge case: a blank `TWENTY_EMAIL` now loads as the default admin email (zod 3 loaded it as undefined).
 - `MEDUSA_SECOND_BASE_URL` (optional, unset = none) starts a second Medusa backend on the same database after the primary is healthy. It must be `127.0.0.1` on a different port. Its pid record stores `baseUrl`, so `down()` stops it even if the env var is removed. If the primary is already healthy while the variable is set, `up()` throws and asks you to run `down` first. A listener already answering on the second port is accepted only when `medusa-backend-2.pid` records a live pid for that URL.
 - `MEDUSA_LOCK` (`memory` default, or `redis`) adds the Redis locking provider to the runtime Medusa config. `redis` requires `MEDUSA_REDIS=1`. A blank value means `memory`. The `memory` output is unchanged.
 

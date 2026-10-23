@@ -30,13 +30,13 @@ const envSchema = z.object({
   MEDUSA_PRODUCT_DIR: optionalString,
   TWENTY_PRODUCT_DIR: optionalString,
 
-  CAL_BASE_URL: z.string().trim().url().default("http://127.0.0.1:3000"),
-  CAL_API_BASE_URL: z.string().trim().url().default("http://127.0.0.1:5555"),
+  CAL_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3000"),
+  CAL_API_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:5555"),
   CAL_DB_URL: z.string().trim().min(1).default("postgresql://postgres:@localhost:5450/calendso"),
   CAL_WEBHOOK_SECRET: optionalString,
   CAL_API_KEY: optionalString,
 
-  DOCUMENSO_BASE_URL: z.string().trim().url().default("http://127.0.0.1:3001"),
+  DOCUMENSO_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3001"),
   DOCUMENSO_DB_URL: z
     .string()
     .trim()
@@ -45,15 +45,15 @@ const envSchema = z.object({
   DOCUMENSO_PUBLIC_URL: optionalString,
   DOCUMENSO_API_TOKEN: optionalString,
 
-  MEDUSA_BASE_URL: z.string().trim().url().default("http://127.0.0.1:9000"),
+  MEDUSA_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:9000"),
   /** Optional second Medusa backend on the same database. Unset means none. */
-  MEDUSA_SECOND_BASE_URL: z.preprocess(emptyToUndefined, z.string().trim().url().optional()),
+  MEDUSA_SECOND_BASE_URL: z.preprocess(emptyToUndefined, z.string().trim().pipe(z.url()).optional()),
   MEDUSA_DB_URL: z
     .string()
     .trim()
     .min(1)
     .default("postgres://medusa:medusa@127.0.0.1:5433/medusa"),
-  MEDUSA_STOREFRONT_URL: z.string().trim().url().default("http://127.0.0.1:8000"),
+  MEDUSA_STOREFRONT_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8000"),
   MEDUSA_ADMIN_EMAIL: optionalString,
   MEDUSA_ADMIN_PASSWORD: optionalString,
   MEDUSA_PUBLISHABLE_API_KEY: optionalString,
@@ -63,13 +63,13 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: optionalString,
   NEXT_PUBLIC_STRIPE_KEY: optionalString,
 
-  TWENTY_BASE_URL: z.string().trim().url().default("http://127.0.0.1:3002"),
+  TWENTY_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3002"),
   TWENTY_DB_URL: z
     .string()
     .trim()
     .min(1)
     .default("postgres://postgres:postgres@127.0.0.1:5434/default"),
-  TWENTY_EMAIL: z.preprocess(emptyToUndefined, z.string().trim().email().optional()).default(TWENTY_DEFAULT_ADMIN_EMAIL),
+  TWENTY_EMAIL: z.preprocess(emptyToUndefined, z.string().trim().pipe(z.email()).optional()).default(TWENTY_DEFAULT_ADMIN_EMAIL),
   TWENTY_PASSWORD: z
     .preprocess(emptyToUndefined, z.string().trim().min(1).optional())
     .default(TWENTY_DEV_SEED_PASSWORD),
