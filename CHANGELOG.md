@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `MEDUSA_SECOND_BASE_URL` (optional, unset = none) starts a second Medusa backend on the same database after the primary is healthy. It must be `127.0.0.1` on a different port. Its pid record stores `baseUrl`, so `down()` stops it even if the env var is removed. If the primary is already healthy while the variable is set, `up()` throws and asks you to run `down` first. A listener already answering on the second port is accepted only when `medusa-backend-2.pid` records a live pid for that URL.
+- `MEDUSA_LOCK` (`memory` default, or `redis`) adds the Redis locking provider to the runtime Medusa config. `redis` requires `MEDUSA_REDIS=1`. A blank value means `memory`. The `memory` output is unchanged.
+
 ## v0.2.12 — 2026-10-23
 
 - Package entry re-exports `TWENTY_DEFAULT_ADMIN_EMAIL` and `TWENTY_DEV_SEED_PASSWORD`, so consumers can import the Twenty dev-seeder login. These are the fork's public dev-seeder values, not production secrets.
