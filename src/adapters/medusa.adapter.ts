@@ -11,7 +11,7 @@ import {
   harnessComposeFile,
 } from "../internal/compose.js";
 import { run } from "../internal/run.js";
-import { resolvePnpm, spawnLogged } from "../internal/spawn-detached.js";
+import { isPidRunning, resolvePnpm, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
@@ -136,6 +136,10 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
 
   private stopSecondPidFile(): void {
     stopMedusaBackend2FromPidFile(HARNESS_ROOT);
+  }
+
+  private secondPidRunning(pid: number): boolean {
+    return isPidRunning(pid);
   }
 
   private storefrontLogFile(): string {
@@ -984,14 +988,22 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
         isOk: isMedusaHealthyStatus,
         alternateLoopback: false,
       });
-      if (probe.ok) {
-        console.log(`Second Medusa backend already healthy at ${url} (HTTP 200); not started by the harness.`);
-        return;
+      if (!probe.ok) {
+        throw new Error(
+          `Port ${port} on 127.0.0.1 is in use, but /health is not HTTP 200. The harness did not stop anything. ` +
+            `Stop that process yourself, or change MEDUSA_SECOND_BASE_URL, then retry.`,
+        );
       }
-      throw new Error(
-        `Port ${port} on 127.0.0.1 is in use, but /health is not HTTP 200. The harness did not stop anything. ` +
-          `Stop that process yourself, or change MEDUSA_SECOND_BASE_URL, then retry.`,
-      );
+      // A healthy listener is accepted only when the harness pid record for this baseUrl is still live.
+      const record = this.readSecondRecord();
+      if (record === undefined || record.baseUrl !== url || !this.secondPidRunning(record.pid)) {
+        throw new Error(
+          `Port ${port} on 127.0.0.1 answers /health with HTTP 200, but medusa-backend-2.pid does not record a live pid for ${url}. ` +
+            `The harness did not adopt it and did not stop anything. Stop that process yourself, then retry.`,
+        );
+      }
+      console.log(`Second Medusa backend already healthy at ${url} (recorded pid ${String(record.pid)}); not started again.`);
+      return;
     }
     const logFile = this.secondLogFile();
     const cwd = this.backendStartCwd();

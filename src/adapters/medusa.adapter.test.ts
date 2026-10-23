@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { MedusaConfig } from "../config.js";
 import { MedusaAdapter } from "./medusa.adapter.js";
@@ -205,5 +207,78 @@ describe("MedusaAdapter already-healthy with a second backend configured", () =>
       /Run down first; the second backend was not started/,
     );
     assert.equal(storefrontStarts, 0);
+  });
+});
+
+describe("MedusaAdapter startSecondBackend on a busy second port", () => {
+  const realLog = console.log;
+  const realWarn = console.warn;
+  let server: http.Server;
+  let port = 0;
+
+  beforeEach(async () => {
+    console.log = () => undefined;
+    console.warn = () => undefined;
+    server = http.createServer((req, res) => {
+      res.statusCode = req.url === "/health" ? 200 : 404;
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    console.log = realLog;
+    console.warn = realWarn;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  function busySecondAdapter(record: { pid: number; baseUrl?: string } | undefined, pidLive: boolean) {
+    const adapter = new MedusaAdapter({
+      baseUrl: "http://127.0.0.1:9000",
+      productRoot: "/products/medusa-dtc-starter",
+      secondBaseUrl: `http://127.0.0.1:${String(port)}`,
+    } as MedusaConfig);
+    const internals = adapter as unknown as {
+      readSecondRecord: () => { pid: number; baseUrl?: string } | undefined;
+      secondPidRunning: (pid: number) => boolean;
+    };
+    internals.readSecondRecord = () => record;
+    internals.secondPidRunning = () => pidLive;
+    return adapter;
+  }
+
+  it("accepts a healthy listener when medusa-backend-2.pid records a live pid for this baseUrl", async () => {
+    const adapter = busySecondAdapter(
+      { pid: 77, baseUrl: `http://127.0.0.1:${String(port)}` },
+      true,
+    );
+    await assert.doesNotReject(
+      (adapter as unknown as { startSecondBackend: () => Promise<void> }).startSecondBackend(),
+    );
+  });
+
+  it("throws without adopting when there is no pid record", async () => {
+    const adapter = busySecondAdapter(undefined, false);
+    await assert.rejects(
+      (adapter as unknown as { startSecondBackend: () => Promise<void> }).startSecondBackend(),
+      /does not record a live pid .* did not adopt it and did not stop anything/,
+    );
+  });
+
+  it("throws when the recorded pid is not live", async () => {
+    const adapter = busySecondAdapter({ pid: 77, baseUrl: `http://127.0.0.1:${String(port)}` }, false);
+    await assert.rejects(
+      (adapter as unknown as { startSecondBackend: () => Promise<void> }).startSecondBackend(),
+      /does not record a live pid/,
+    );
+  });
+
+  it("throws when the recorded baseUrl is for a different URL", async () => {
+    const adapter = busySecondAdapter({ pid: 77, baseUrl: "http://127.0.0.1:9999" }, true);
+    await assert.rejects(
+      (adapter as unknown as { startSecondBackend: () => Promise<void> }).startSecondBackend(),
+      /does not record a live pid/,
+    );
   });
 });
