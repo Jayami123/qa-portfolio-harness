@@ -7,11 +7,14 @@ import { HARNESS_ROOT } from "../paths.js";
 
 export const MEDUSA_BACKEND_PID_BASENAME = "medusa-backend.pid";
 export const MEDUSA_STOREFRONT_PID_BASENAME = "medusa-storefront.pid";
+export const MEDUSA_BACKEND_2_PID_BASENAME = "medusa-backend-2.pid";
 
 export interface MedusaBackendPidRecord {
   readonly pid: number;
   /** Opaque OS start marker. When set, down() checks it before signaling a live pid. */
   readonly startMark?: string;
+  /** Base URL the backend was started on. Written for the second backend so stop does not depend on env. */
+  readonly baseUrl?: string;
 }
 
 export class MedusaBackendStopError extends Error {
@@ -53,7 +56,7 @@ export function parseMedusaBackendPidFileText(text: string): MedusaBackendPidRec
     return { pid: legacyPid };
   }
   try {
-    const parsed = JSON.parse(trimmed) as { pid?: unknown; startMark?: unknown };
+    const parsed = JSON.parse(trimmed) as { pid?: unknown; startMark?: unknown; baseUrl?: unknown };
     if (typeof parsed.pid !== "number" || !Number.isSafeInteger(parsed.pid) || parsed.pid <= 0) {
       return undefined;
     }
@@ -61,7 +64,13 @@ export function parseMedusaBackendPidFileText(text: string): MedusaBackendPidRec
       typeof parsed.startMark === "string" && parsed.startMark.trim() !== ""
         ? parsed.startMark.trim()
         : undefined;
-    return startMark === undefined ? { pid: parsed.pid } : { pid: parsed.pid, startMark };
+    const baseUrl =
+      typeof parsed.baseUrl === "string" && parsed.baseUrl.trim() !== "" ? parsed.baseUrl.trim() : undefined;
+    return {
+      pid: parsed.pid,
+      ...(startMark === undefined ? {} : { startMark }),
+      ...(baseUrl === undefined ? {} : { baseUrl }),
+    };
   } catch {
     return undefined;
   }
@@ -98,16 +107,25 @@ export function writeMedusaPid(
   basename: string,
   pid: number,
   harnessRoot: string = HARNESS_ROOT,
+  extra?: { baseUrl?: string },
 ): void {
   const file = medusaHarnessPidFile(basename, harnessRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const startMark = captureProcessStartMark(pid);
-  const record: MedusaBackendPidRecord = startMark === undefined ? { pid } : { pid, startMark };
+  const record: MedusaBackendPidRecord = {
+    pid,
+    ...(startMark === undefined ? {} : { startMark }),
+    ...(extra?.baseUrl === undefined ? {} : { baseUrl: extra.baseUrl }),
+  };
   fs.writeFileSync(file, `${JSON.stringify(record)}\n`, "utf8");
 }
 
 export function writeMedusaBackendPid(pid: number, harnessRoot: string = HARNESS_ROOT): void {
   writeMedusaPid(MEDUSA_BACKEND_PID_BASENAME, pid, harnessRoot);
+}
+
+export function writeMedusaBackend2Pid(pid: number, baseUrl: string, harnessRoot: string = HARNESS_ROOT): void {
+  writeMedusaPid(MEDUSA_BACKEND_2_PID_BASENAME, pid, harnessRoot, { baseUrl });
 }
 
 export function writeMedusaStorefrontPid(pid: number, harnessRoot: string = HARNESS_ROOT): void {
@@ -129,6 +147,12 @@ export function readMedusaBackendPidRecord(
   harnessRoot: string = HARNESS_ROOT,
 ): MedusaBackendPidRecord | undefined {
   return readMedusaPidRecord(MEDUSA_BACKEND_PID_BASENAME, harnessRoot);
+}
+
+export function readMedusaBackend2Record(
+  harnessRoot: string = HARNESS_ROOT,
+): (MedusaBackendPidRecord & { baseUrl?: string }) | undefined {
+  return readMedusaPidRecord(MEDUSA_BACKEND_2_PID_BASENAME, harnessRoot);
 }
 
 export function defaultKillProcessTree(pid: number): void {
@@ -214,6 +238,13 @@ export function stopMedusaBackendFromPidFile(
   deps?: Partial<StopMedusaBackendFromPidFileDeps>,
 ): void {
   stopMedusaPidFile(MEDUSA_BACKEND_PID_BASENAME, harnessRoot, deps);
+}
+
+export function stopMedusaBackend2FromPidFile(
+  harnessRoot: string = HARNESS_ROOT,
+  deps?: Partial<StopMedusaBackendFromPidFileDeps>,
+): void {
+  stopMedusaPidFile(MEDUSA_BACKEND_2_PID_BASENAME, harnessRoot, deps);
 }
 
 export function stopMedusaStorefrontFromPidFile(

@@ -113,6 +113,20 @@ export function medusaListen(baseUrl: string): MedusaListen {
   return { host: parsed.hostname, port: parsed.port || MEDUSA_DEFAULT_PORT };
 }
 
+/**
+ * The optional second backend (`MEDUSA_SECOND_BASE_URL`) gets its own listen port, so it must
+ * be a valid 127.0.0.1 URL and must not share a port with the primary backend.
+ */
+export function assertMedusaSecondBaseUrl(primaryBaseUrl: string, secondBaseUrl: string): void {
+  const primary = medusaListen(primaryBaseUrl);
+  const second = medusaListen(secondBaseUrl);
+  if (primary.port === second.port) {
+    throw new Error(
+      `MEDUSA_SECOND_BASE_URL must use a different port from MEDUSA_BASE_URL (both are ${second.port}).`,
+    );
+  }
+}
+
 export function medusaHealthUrl(baseUrl: string): string {
   const parsed = new URL(baseUrl);
   const { host, port } = medusaListen(baseUrl);
@@ -138,15 +152,29 @@ export function classifyMedusaProbe(strictOk: boolean, localhostOk: boolean): Me
   return localhostOk ? "environment" : "unhealthy";
 }
 
+/** `memory` keeps Medusa's in-process locks. `redis` adds the Redis locking provider (needs MEDUSA_REDIS=1). */
+export type MedusaLockProvider = "memory" | "redis";
+
 export interface MedusaHarnessSwitches {
   readonly redis: boolean;
   readonly stripe: boolean;
+  /** Absent in hand-built switches; treated as `memory`. */
+  readonly lock?: MedusaLockProvider;
 }
 
 export function parseMedusaHarnessSwitches(env: Record<string, string | undefined>): MedusaHarnessSwitches {
+  const redis = env.MEDUSA_REDIS === "1";
+  const rawLock = env.MEDUSA_LOCK ?? "memory";
+  if (rawLock !== "memory" && rawLock !== "redis") {
+    throw new Error(`MEDUSA_LOCK must be "memory" or "redis" (got "${rawLock}").`);
+  }
+  if (rawLock === "redis" && !redis) {
+    throw new Error("MEDUSA_LOCK=redis needs MEDUSA_REDIS=1, because the Redis locking provider uses the harness Redis.");
+  }
   return {
-    redis: env.MEDUSA_REDIS === "1",
+    redis,
     stripe: env.MEDUSA_STRIPE === "1",
+    lock: rawLock,
   };
 }
 
@@ -250,6 +278,23 @@ export function renderServerMedusaConfigJs(switches: MedusaHarnessSwitches, base
       `    {
       resolve: "@medusajs/medusa/workflow-engine-redis",
       options: { redis: { url: process.env.REDIS_URL } },
+    }`,
+    );
+  }
+  if (switches.lock === "redis") {
+    modules.push(
+      `    {
+      resolve: "@medusajs/medusa/locking",
+      options: {
+        providers: [
+          {
+            resolve: "@medusajs/medusa/locking-redis",
+            id: "locking-redis",
+            is_default: true,
+            options: { redisUrl: process.env.REDIS_URL },
+          },
+        ],
+      },
     }`,
     );
   }

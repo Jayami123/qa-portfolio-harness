@@ -17,8 +17,11 @@ import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import {
+  readMedusaBackend2Record,
+  stopMedusaBackend2FromPidFile,
   stopMedusaBackendFromPidFile,
   stopMedusaStorefrontFromPidFile,
+  writeMedusaBackend2Pid,
   writeMedusaBackendPid,
   writeMedusaStorefrontPid,
 } from "./medusa-backend-pid.js";
@@ -120,6 +123,19 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
 
   private logFile(): string {
     return path.join(HARNESS_ROOT, ".harness", "medusa-backend.log");
+  }
+
+  private secondLogFile(): string {
+    return path.join(HARNESS_ROOT, ".harness", "medusa-backend-2.log");
+  }
+
+  /** Seams for stopSecondBackend tests: the real record and pid file live under HARNESS_ROOT. */
+  private readSecondRecord() {
+    return readMedusaBackend2Record(HARNESS_ROOT);
+  }
+
+  private stopSecondPidFile(): void {
+    stopMedusaBackend2FromPidFile(HARNESS_ROOT);
   }
 
   private storefrontLogFile(): string {
@@ -951,6 +967,90 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     );
   }
 
+  /**
+   * Starts the optional second backend on the same database. Called only after the primary is healthy.
+   * PORT is set explicitly so an inherited PORT cannot move the primary backend.
+   */
+  private async startSecondBackend(): Promise<void> {
+    const url = this.cfg.secondBaseUrl;
+    if (url === undefined) {
+      return;
+    }
+    const { host, port } = medusaListen(url);
+    if (await this.isPortOpen(host, port)) {
+      const probe = await pollHealth(medusaHealthUrl(url), {
+        timeoutMs: 0,
+        requestTimeoutMs: PROBE_REQUEST_MS,
+        isOk: isMedusaHealthyStatus,
+        alternateLoopback: false,
+      });
+      if (probe.ok) {
+        console.log(`Second Medusa backend already healthy at ${url} (HTTP 200); not started by the harness.`);
+        return;
+      }
+      throw new Error(
+        `Port ${port} on 127.0.0.1 is in use, but /health is not HTTP 200. The harness did not stop anything. ` +
+          `Stop that process yourself, or change MEDUSA_SECOND_BASE_URL, then retry.`,
+      );
+    }
+    const logFile = this.secondLogFile();
+    const cwd = this.backendStartCwd();
+    if (!fs.existsSync(cwd)) {
+      throw new Error(`Medusa backend start directory missing at ${cwd}.`);
+    }
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    const cli = path.join(this.backendDir(), "node_modules", "@medusajs", "cli", "cli.js");
+    console.log(`Starting second Medusa backend on ${url} in ${cwd} (logs: ${logFile})`);
+    const child = spawnLogged(process.execPath, [cli, "start"], {
+      cwd,
+      logFile,
+      env: { ...this.backendProcessEnv(), PORT: port },
+      detached: true,
+      shell: false,
+    });
+    if (child.pid !== undefined) {
+      writeMedusaBackend2Pid(child.pid, url);
+    }
+    child.unref();
+  }
+
+  private async waitSecondReady(url: string, timeoutMs: number): Promise<void> {
+    const status = await pollHealth(medusaHealthUrl(url), {
+      timeoutMs,
+      requestTimeoutMs: PROBE_REQUEST_MS,
+      isOk: isMedusaHealthyStatus,
+      alternateLoopback: false,
+    });
+    if (!status.ok) {
+      throw new Error(
+        `Second Medusa backend did not return HTTP 200 from ${medusaHealthUrl(url)} within ${String(timeoutMs)} ms. ` +
+          `Log: ${this.secondLogFile()}`,
+      );
+    }
+    console.log(`Second Medusa backend GET /health returned HTTP 200 (${status.url}).`);
+  }
+
+  /**
+   * The recorded baseUrl wins over the current env, so a second backend started earlier is still stopped
+   * after MEDUSA_SECOND_BASE_URL is unset. With neither set this is a no-op.
+   * A stop error from the pid file propagates; nothing is reaped after it.
+   */
+  private async stopSecondBackend(): Promise<void> {
+    const record = this.readSecondRecord();
+    const url = record?.baseUrl ?? this.cfg.secondBaseUrl;
+    if (url === undefined) {
+      return;
+    }
+    const { host, port } = medusaListen(url);
+    this.stopSecondPidFile();
+    // Second backend uses the same launcher shape as the primary, so reap it as "backend" on its own port.
+    await this.reapProductListeners(port, "backend");
+    const closed = await this.waitForPortClosed(host, port, STOP_POLL_MS);
+    if (!closed) {
+      throw new Error(`Second Medusa backend still listening on ${host}:${port}; not killed.`);
+    }
+  }
+
   async up(): Promise<void> {
     this.assertToolchain();
     const { host, port } = medusaListen(this.cfg.baseUrl);
@@ -1006,6 +1106,12 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     console.log(
       `Medusa backend is up at ${this.cfg.baseUrl} (${MEDUSA_HTTP_MODE}, ${bootSeconds} s from spawn to HTTP 200).`,
     );
+
+    // Second backend starts only after the primary has passed health.
+    if (this.cfg.secondBaseUrl !== undefined) {
+      await this.startSecondBackend();
+      await this.waitSecondReady(this.cfg.secondBaseUrl, this.webWaitMs());
+    }
 
     await this.maybeStartStorefront();
   }
@@ -1089,6 +1195,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     await this.stopStorefront();
     const { host, port } = medusaListen(this.cfg.baseUrl);
     await this.stopBackend(host, port);
+    await this.stopSecondBackend();
     const opts = this.composeOpts(
       resolveMedusaComposeFiles(
         this.readComposeRecordText(),

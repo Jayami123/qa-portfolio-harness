@@ -3,6 +3,7 @@ import path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-env.js";
+import { assertMedusaSecondBaseUrl } from "./adapters/medusa-env.js";
 import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
 import { HARNESS_ROOT } from "./paths.js";
 import type { ProductId } from "./types.js";
@@ -10,6 +11,15 @@ import type { ProductId } from "./types.js";
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
 
 const emptyToUndefined = (value: unknown) => (value === "" || value === undefined ? undefined : value);
+
+function medusaSecondBaseUrl(primaryBaseUrl: string, secondBaseUrl: string | undefined): string | undefined {
+  if (secondBaseUrl === undefined) {
+    return undefined;
+  }
+  const clean = secondBaseUrl.replace(/\/$/, "");
+  assertMedusaSecondBaseUrl(primaryBaseUrl, clean);
+  return clean;
+}
 
 const optionalString = z.preprocess(emptyToUndefined, z.string().trim().min(1).optional());
 
@@ -36,6 +46,8 @@ const envSchema = z.object({
   DOCUMENSO_API_TOKEN: optionalString,
 
   MEDUSA_BASE_URL: z.string().trim().url().default("http://127.0.0.1:9000"),
+  /** Optional second Medusa backend on the same database. Unset means none. */
+  MEDUSA_SECOND_BASE_URL: z.string().trim().url().optional(),
   MEDUSA_DB_URL: z
     .string()
     .trim()
@@ -95,6 +107,8 @@ export interface MedusaConfig extends ProductConfig {
   stripeApiKey?: string;
   stripeWebhookSecret?: string;
   stripePublishableKey?: string;
+  /** Second backend base URL, validated against the primary. Undefined when MEDUSA_SECOND_BASE_URL is unset. */
+  secondBaseUrl?: string;
 }
 
 export interface TwentyConfig extends ProductConfig {
@@ -170,6 +184,10 @@ export function loadConfig(): HarnessConfig {
         parsed.MEDUSA_PRODUCT_DIR ?? path.join(productsRoot, "medusa-dtc-starter"),
       ),
       baseUrl: parsed.MEDUSA_BASE_URL.replace(/\/$/, ""),
+      secondBaseUrl: medusaSecondBaseUrl(
+        parsed.MEDUSA_BASE_URL.replace(/\/$/, ""),
+        parsed.MEDUSA_SECOND_BASE_URL,
+      ),
       storefrontUrl: parsed.MEDUSA_STOREFRONT_URL.replace(/\/$/, ""),
       dbUrl: parsed.MEDUSA_DB_URL,
       adminEmail: parsed.MEDUSA_ADMIN_EMAIL,

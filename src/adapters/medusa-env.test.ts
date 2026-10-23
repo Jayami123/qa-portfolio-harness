@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   assertMedusaBackendPresent,
+  assertMedusaSecondBaseUrl,
   assertMedusaNodeVersion,
   assertMedusaPnpmVersion,
   buildMedusaBackendEnvFile,
@@ -219,10 +220,12 @@ describe("parseMedusaHarnessSwitches", () => {
     assert.deepEqual(parseMedusaHarnessSwitches({}), {
       redis: false,
       stripe: false,
+      lock: "memory",
     });
     assert.deepEqual(parseMedusaHarnessSwitches({ MEDUSA_REDIS: "0" }), {
       redis: false,
       stripe: false,
+      lock: "memory",
     });
   });
 
@@ -232,6 +235,7 @@ describe("parseMedusaHarnessSwitches", () => {
       {
         redis: true,
         stripe: true,
+        lock: "memory",
       },
     );
   });
@@ -437,5 +441,55 @@ describe("decideMedusaStorefrontBuildSkip", () => {
       }).reason,
       "rebuild_bad_marker",
     );
+  });
+});
+
+describe("MEDUSA_LOCK switch", () => {
+  it("defaults to memory", () => {
+    assert.equal(parseMedusaHarnessSwitches({}).lock, "memory");
+  });
+
+  it("accepts redis only together with MEDUSA_REDIS=1", () => {
+    assert.throws(() => parseMedusaHarnessSwitches({ MEDUSA_LOCK: "redis" }), /MEDUSA_LOCK=redis needs MEDUSA_REDIS=1/);
+    assert.equal(parseMedusaHarnessSwitches({ MEDUSA_LOCK: "redis", MEDUSA_REDIS: "1" }).lock, "redis");
+  });
+
+  it("rejects any other value", () => {
+    assert.throws(() => parseMedusaHarnessSwitches({ MEDUSA_LOCK: "bogus" }), /MEDUSA_LOCK must be "memory" or "redis"/);
+  });
+
+  it("adds the Redis locking provider only when lock is redis", () => {
+    const redis = renderServerMedusaConfigJs({ redis: true, stripe: false, lock: "redis" }, "http://127.0.0.1:9000");
+    assert.equal(redis.includes('"@medusajs/medusa/locking-redis"'), true);
+    assert.equal(redis.includes("is_default: true"), true);
+    const memory = renderServerMedusaConfigJs({ redis: true, stripe: false, lock: "memory" }, "http://127.0.0.1:9000");
+    assert.equal(memory.includes("locking"), false);
+    assert.equal(memory.includes("is_default"), false);
+  });
+
+  it("renders byte-identical output for memory and for switches without a lock field", () => {
+    const withoutLock = renderServerMedusaConfigJs({ redis: true, stripe: true }, "http://127.0.0.1:9000");
+    const withMemory = renderServerMedusaConfigJs(
+      { redis: true, stripe: true, lock: "memory" },
+      "http://127.0.0.1:9000",
+    );
+    assert.equal(withMemory, withoutLock);
+  });
+});
+
+describe("assertMedusaSecondBaseUrl", () => {
+  it("accepts a second 127.0.0.1 URL on a different port", () => {
+    assert.doesNotThrow(() => assertMedusaSecondBaseUrl("http://127.0.0.1:9000", "http://127.0.0.1:9001"));
+  });
+
+  it("rejects the same port as MEDUSA_BASE_URL", () => {
+    assert.throws(
+      () => assertMedusaSecondBaseUrl("http://127.0.0.1:9000", "http://127.0.0.1:9000"),
+      /must use a different port from MEDUSA_BASE_URL/,
+    );
+  });
+
+  it("rejects localhost, as the primary does", () => {
+    assert.throws(() => assertMedusaSecondBaseUrl("http://127.0.0.1:9000", "http://localhost:9001"), /must use 127\.0\.0\.1/);
   });
 });

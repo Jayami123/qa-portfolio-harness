@@ -61,3 +61,107 @@ describe("MedusaAdapter already-healthy branch", () => {
     );
   });
 });
+
+interface SecondStopInternals {
+  stopSecondBackend: () => Promise<void>;
+  readSecondRecord: () => { pid: number; baseUrl?: string } | undefined;
+  stopSecondPidFile: () => void;
+  reapProductListeners: (port: string, kind: string) => Promise<void>;
+  waitForPortClosed: (host: string, port: string, deadlineMs: number) => Promise<boolean>;
+  listeningPids: (port: string) => number[];
+  processArgv: (pid: number) => string[];
+  processCwd: (pid: number) => string | undefined;
+  killProcessTree: (pid: number) => Promise<void>;
+}
+
+function secondStopAdapter(
+  secondBaseUrl: string | undefined,
+  record: { pid: number; baseUrl?: string } | undefined,
+  options: { stopThrows?: Error; portClosed?: boolean; stubReap?: boolean },
+) {
+  const adapter = new MedusaAdapter({
+    baseUrl: "http://127.0.0.1:9000",
+    productRoot: "/products/medusa-dtc-starter",
+    secondBaseUrl,
+  } as MedusaConfig);
+  const internals = adapter as unknown as SecondStopInternals;
+  const calls = { pidStop: 0, reaped: [] as string[], killed: [] as number[] };
+  internals.readSecondRecord = () => record;
+  internals.stopSecondPidFile = () => {
+    calls.pidStop += 1;
+    if (options.stopThrows !== undefined) {
+      throw options.stopThrows;
+    }
+  };
+  internals.waitForPortClosed = async () => options.portClosed ?? true;
+  if (options.stubReap === false) {
+    // Let the real reap run against a foreign listener: it must refuse to kill it.
+    internals.listeningPids = () => [555];
+    internals.processArgv = () => ["node", "/somewhere/else/cli.js", "start"];
+    internals.processCwd = () => "/somewhere/else";
+    internals.killProcessTree = async (pid) => {
+      calls.killed.push(pid);
+    };
+  } else {
+    internals.reapProductListeners = async (port) => {
+      calls.reaped.push(port);
+    };
+  }
+  return { adapter, calls };
+}
+
+describe("MedusaAdapter stopSecondBackend", () => {
+  const realLog = console.log;
+  const realWarn = console.warn;
+
+  beforeEach(() => {
+    console.log = () => undefined;
+    console.warn = () => undefined;
+  });
+
+  afterEach(() => {
+    console.log = realLog;
+    console.warn = realWarn;
+  });
+
+  it("is a no-op when no record exists and the env is unset", async () => {
+    const { adapter, calls } = secondStopAdapter(undefined, undefined, {});
+    await (adapter as unknown as SecondStopInternals).stopSecondBackend();
+    assert.equal(calls.pidStop, 0);
+    assert.deepEqual(calls.reaped, []);
+  });
+
+  it("still stops the recorded pid and waits on the recorded port when the env is now unset", async () => {
+    const { adapter, calls } = secondStopAdapter(undefined, { pid: 1234, baseUrl: "http://127.0.0.1:9001" }, {});
+    await (adapter as unknown as SecondStopInternals).stopSecondBackend();
+    assert.equal(calls.pidStop, 1);
+    assert.deepEqual(calls.reaped, ["9001"]);
+  });
+
+  it("refuses a foreign listener on the port when no record exists: throws and kills nothing", async () => {
+    const { adapter, calls } = secondStopAdapter("http://127.0.0.1:9001", undefined, {
+      portClosed: false,
+      stubReap: false,
+    });
+    await assert.rejects(
+      (adapter as unknown as SecondStopInternals).stopSecondBackend(),
+      /Second Medusa backend still listening on 127\.0\.0\.1:9001; not killed\./,
+    );
+    assert.deepEqual(calls.killed, []);
+  });
+
+  it("does not reap when the pid-file stop throws, and propagates the error", async () => {
+    const { adapter, calls } = secondStopAdapter(undefined, { pid: 1234, baseUrl: "http://127.0.0.1:9001" }, {
+      stopThrows: new Error("boom"),
+    });
+    await assert.rejects((adapter as unknown as SecondStopInternals).stopSecondBackend(), /boom/);
+    assert.deepEqual(calls.reaped, []);
+  });
+
+  it("succeeds once the port closes", async () => {
+    const { adapter, calls } = secondStopAdapter("http://127.0.0.1:9001", undefined, { portClosed: true });
+    await (adapter as unknown as SecondStopInternals).stopSecondBackend();
+    assert.equal(calls.pidStop, 1);
+    assert.deepEqual(calls.reaped, ["9001"]);
+  });
+});
