@@ -344,3 +344,60 @@ describe("MedusaAdapter startAndAwaitSecondBackend cleanup", () => {
     assert.equal(calls.stopped, 0);
   });
 });
+
+describe("MedusaAdapter startSecondBackend and an existing pid record", () => {
+  const realLog = console.log;
+  const realWarn = console.warn;
+
+  beforeEach(() => {
+    console.log = () => undefined;
+    console.warn = () => undefined;
+  });
+
+  afterEach(() => {
+    console.log = realLog;
+    console.warn = realWarn;
+  });
+
+  async function freeSecondUrl(): Promise<string> {
+    const probe = http.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", () => resolve()));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    return `http://127.0.0.1:${String(port)}`;
+  }
+
+  function adapterWithRecord(secondBaseUrl: string, record: { pid: number; baseUrl?: string }, pidLive: boolean) {
+    const adapter = new MedusaAdapter({
+      baseUrl: "http://127.0.0.1:9000",
+      productRoot: "/products/medusa-dtc-starter",
+      secondBaseUrl,
+    } as MedusaConfig);
+    const internals = adapter as unknown as {
+      readSecondRecord: () => { pid: number; baseUrl?: string } | undefined;
+      secondPidRunning: (pid: number) => boolean;
+    };
+    internals.readSecondRecord = () => record;
+    internals.secondPidRunning = () => pidLive;
+    return adapter;
+  }
+
+  it("refuses to overwrite a record whose pid is still live at a different URL", async () => {
+    const url = await freeSecondUrl();
+    const adapter = adapterWithRecord(url, { pid: 77, baseUrl: "http://127.0.0.1:9999" }, true);
+    await assert.rejects(
+      (adapter as unknown as { startSecondBackend: () => Promise<boolean> }).startSecondBackend(),
+      /still records live pid 77 at http:\/\/127\.0\.0\.1:9999\. Run down first/,
+    );
+  });
+
+  it("does not block on a stale record whose pid is no longer running", async () => {
+    const url = await freeSecondUrl();
+    const adapter = adapterWithRecord(url, { pid: 77, baseUrl: "http://127.0.0.1:9999" }, false);
+    // Passes the record guard and stops at the missing start directory, so no process is spawned.
+    await assert.rejects(
+      (adapter as unknown as { startSecondBackend: () => Promise<boolean> }).startSecondBackend(),
+      /start directory missing/,
+    );
+  });
+});

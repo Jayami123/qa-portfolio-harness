@@ -1007,6 +1007,15 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
       console.log(`Second Medusa backend already healthy at ${url} (recorded pid ${String(record.pid)}); not started again.`);
       return false;
     }
+    // A live pid record means an earlier second backend is still running. Overwriting the record would
+    // orphan it, because down() only stops the recorded pid. Reject instead; nothing is killed.
+    const previous = this.readSecondRecord();
+    if (previous !== undefined && this.secondPidRunning(previous.pid)) {
+      throw new Error(
+        `medusa-backend-2.pid still records live pid ${String(previous.pid)}${previous.baseUrl === undefined ? "" : ` at ${previous.baseUrl}`}. ` +
+          `Run down first; the record was not overwritten and nothing was stopped.`,
+      );
+    }
     const logFile = this.secondLogFile();
     const cwd = this.backendStartCwd();
     if (!fs.existsSync(cwd)) {
