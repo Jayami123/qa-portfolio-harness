@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- security: upgrade zod to 4.x (GHSA-mrhx-c7xc-m3w5). `npm audit --audit-level=high` now passes. Config validation uses `z.url()` and `z.email()` with an explicit trim. Behaviour is unchanged except one edge case: a blank `TWENTY_EMAIL` now loads as the default admin email (zod 3 loaded it as undefined).
+
 ## v0.2.12 — 2026-10-23
 
 - Package entry re-exports `TWENTY_DEFAULT_ADMIN_EMAIL` and `TWENTY_DEV_SEED_PASSWORD`, so consumers can import the Twenty dev-seeder login. These are the fork's public dev-seeder values, not production secrets.
