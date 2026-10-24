@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Cal `up()` returns once Cal is healthy: the web server is started detached, its pid is recorded in `.harness/cal-web.pid`, and the process is unref'd. A second `up()` while the recorded process is still starting waits for it.
+- Cal `down()` stops the recorded web process group, waits for the port to close, then removes the database container. It never kills a listener it did not start.
+- Cal's seed presence check reads the `users` table (the fork maps `model User` to `users`); before, it failed on every `up` and re-ran `yarn db-seed`.
+- The seeded API key is no longer printed in the `up` log (`Created seeded API Key: ***`).
+
 ## v0.2.13 — 2026-10-24
 
 - security: upgrade zod to 4.x (GHSA-mrhx-c7xc-m3w5). `npm audit --audit-level=high` now passes. Config validation uses `z.url()` and `z.email()` with an explicit trim. Behaviour is unchanged except one edge case: a blank `TWENTY_EMAIL` now loads as the default admin email (zod 3 loaded it as undefined).
