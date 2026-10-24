@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Cal `up()` returns once Cal is healthy. The web server starts with no shell: on Windows node runs yarn's JS entry, on POSIX it is a detached process group. Its real root pid and start mark are recorded in `.harness/cal-web.pid`, and the process is unref'd. A second `up()` while the recorded process is still starting waits for it.
-- Cal `down()` stops the recorded tree: the process group on POSIX, `taskkill /T` on Windows. If the recorded root has already exited, it stops only live descendants whose parent pid and start mark match the record. It keeps `.harness/cal-web.pid` while the port is still held, and throws (saying whether the listener matches the record) without killing an unmatched listener. It removes the database container only after the port is free.
+- Cal `up()` returns once Cal is healthy. The web server is the Next.js server itself: node runs the fork's `next` bin from `apps/web` with the arguments of the fork's `start` script, with no shell and no yarn in between. It is detached on every platform, and its pid and start mark are recorded in `.harness/cal-web.pid`. After Cal is healthy, `up()` fails unless the port-3000 listener is the recorded pid.
+- Cal `down()` stops the recorded pid when its start mark matches: `taskkill /T` on Windows, the process group on POSIX. It keeps `.harness/cal-web.pid` while the port is still held, and throws naming the recorded pid and start mark when the listener does not match. It never signals a pid whose start mark differs, and it removes the database container only after the port is free.
 - Cal's seed presence check reads the `users` table (the fork maps `model User` to `users`); before, it failed on every `up` and re-ran `yarn db-seed`.
 - The seeded API key is no longer printed in the `up` log (`Created seeded API Key: ***`).
 
