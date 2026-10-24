@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Cal `up()` returns once Cal is healthy: the web server is started detached, its pid is recorded in `.harness/cal-web.pid`, and the process is unref'd. A second `up()` while the recorded process is still starting waits for it.
-- Cal `down()` stops the recorded web process group, waits for the port to close, then removes the database container. It never kills a listener it did not start.
+- Cal `up()` returns once Cal is healthy. The web server starts with no shell: on Windows node runs yarn's JS entry, on POSIX it is a detached process group. Its real root pid and start mark are recorded in `.harness/cal-web.pid`, and the process is unref'd. A second `up()` while the recorded process is still starting waits for it.
+- Cal `down()` stops the recorded tree: the process group on POSIX, `taskkill /T` on Windows. If the recorded root has already exited, it stops only live descendants whose parent pid and start mark match the record. It keeps `.harness/cal-web.pid` while the port is still held, and throws (saying whether the listener matches the record) without killing an unmatched listener. It removes the database container only after the port is free.
 - Cal's seed presence check reads the `users` table (the fork maps `model User` to `users`); before, it failed on every `up` and re-ran `yarn db-seed`.
 - The seeded API key is no longer printed in the `up` log (`Created seeded API Key: ***`).
 
