@@ -14,7 +14,14 @@ import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
-import { readCalWebPidRecord, stopCalWebFromPidFile, writeCalWebPid } from "./cal-web-pid.js";
+import {
+  calWebSpawnSpec,
+  readCalWebPidRecord,
+  settleCalWebStop,
+  stopCalWebTree,
+  writeCalWebPid,
+} from "./cal-web-pid.js";
+import { calWebStopDeps, listenerPids, resolveYarnScript } from "./cal-web-process.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 const CAL_WEB_STOP_WAIT_MS = 30_000;
@@ -439,11 +446,19 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       console.log(`Starting Cal web (${mode}): ${yarn} ${label} (logs: ${logFile})`);
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.writeFileSync(logFile, "");
-      this.webProcess = spawnLogged(yarn, args, {
+      const spec = calWebSpawnSpec({
+        platform: platform(),
+        execPath: process.execPath,
+        yarn,
+        yarnScript: resolveYarnScript(),
+        args,
+      });
+      this.webProcess = spawnLogged(spec.command, spec.args, {
         cwd: this.productRoot,
         logFile,
         env: this.nodeHeapEnv(),
-        detached: platform() !== "win32",
+        detached: spec.detached,
+        shell: spec.shell,
       });
       if (this.webProcess.pid !== undefined) {
         writeCalWebPid(this.webProcess.pid);
@@ -470,22 +485,26 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     console.log("Cal web stopped and compose stack torn down.");
   }
 
-  /** Stops the recorded web process group; success means the port closed, not that the pid is gone (zombies answer kill 0). */
+  /**
+   * Signals the recorded web tree, waits for the port to close, and removes the pid file only when the
+   * port is free. A held port keeps the file and throws, saying whether the listener matches the record.
+   */
   private async stopWeb(): Promise<void> {
+    const deps = calWebStopDeps(HARNESS_ROOT);
+    const tree = stopCalWebTree(deps);
     const { host, port } = this.webListen();
-    let stopError: Error | undefined;
-    try {
-      stopCalWebFromPidFile(HARNESS_ROOT);
-    } catch (error) {
-      stopError = error instanceof Error ? error : new Error(String(error));
-    }
     const deadline = Date.now() + CAL_WEB_STOP_WAIT_MS;
     while (Date.now() < deadline && (await this.isWebPortOpen())) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    if (await this.isWebPortOpen()) {
-      throw stopError ?? new Error(`Cal web still listening on ${host}:${port}; not killed (not started by this harness).`);
-    }
+    const portHeld = await this.isWebPortOpen();
+    settleCalWebStop({
+      address: `${host}:${port}`,
+      portHeld,
+      listeners: portHeld ? listenerPids(Number(port)) : [],
+      tree,
+      removePidFile: deps.removePidFile,
+    });
   }
 
   async health(): Promise<HealthStatus> {
