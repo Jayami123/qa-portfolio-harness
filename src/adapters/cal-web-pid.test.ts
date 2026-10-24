@@ -12,6 +12,7 @@ import {
   calWebSpawnSpec,
   parseCalWebPidFileText,
   readCalWebPidRecord,
+  recordedWebState,
   settleCalWebStop,
   stopRecordedCalWeb,
   writeCalWebPid,
@@ -91,10 +92,10 @@ describe("cal web pid file", () => {
 
   it("stop with a dead recorded pid does not signal it, and the settle removes the file", () => {
     const deps = fakeDeps({ readRecord: () => ({ pid: 999_999_999 }) });
-    const record = stopRecordedCalWeb(deps);
-    assert.deepEqual(record, { pid: 999_999_999 });
+    const stopped = stopRecordedCalWeb(deps);
+    assert.deepEqual(stopped, { record: { pid: 999_999_999 }, state: "dead" });
     assert.equal(deps.rootSignaled.length, 0);
-    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], record, removePidFile: deps.removePidFile });
+    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], record: stopped?.record, removePidFile: deps.removePidFile });
     assert.equal(deps.removed, 1);
   });
 
@@ -104,9 +105,10 @@ describe("cal web pid file", () => {
       isPidRunning: (pid) => pid === 1234,
       captureStartMark: () => "mark",
     });
-    const record = stopRecordedCalWeb(deps);
+    const stopped = stopRecordedCalWeb(deps);
     assert.deepEqual(deps.rootSignaled, [{ pid: 1234, signal: "SIGTERM" }]);
-    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], record, removePidFile: deps.removePidFile });
+    assert.equal(stopped?.state, "live");
+    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], record: stopped?.record, removePidFile: deps.removePidFile });
     assert.equal(deps.removed, 1);
   });
 
@@ -131,20 +133,37 @@ describe("cal web pid file", () => {
     assert.equal(deps.removed, 0);
   });
 
-  it("stop skips signaling when start mark mismatches a live pid", () => {
+  it("stop with a reused pid (start mark mismatch) signals nothing and reports the record as stale", () => {
     const deps = fakeDeps({
       readRecord: () => ({ pid: 1234, startMark: "recorded" }),
       isPidRunning: () => true,
       captureStartMark: () => "current",
     });
-    assert.throws(() => stopRecordedCalWeb(deps), (error: unknown) => {
-      assert.ok(error instanceof CalWebStopError);
-      assert.match(error.message, /recorded pid 1234, start mark recorded/);
-      assert.match(error.message, /current start mark current/);
-      return true;
-    });
+    const stopped = stopRecordedCalWeb(deps);
+    assert.deepEqual(stopped, { record: { pid: 1234, startMark: "recorded" }, state: "stale" });
     assert.equal(deps.rootSignaled.length, 0);
     assert.equal(deps.removed, 0);
+  });
+
+  it("recordedWebState: a live pid with a matching start mark is live, otherwise dead or stale", () => {
+    const record = { pid: 1234, startMark: "mark" };
+    assert.equal(recordedWebState(record, { isPidRunning: () => true, captureStartMark: () => "mark" }), "live");
+    assert.equal(recordedWebState(record, { isPidRunning: () => true, captureStartMark: () => "other" }), "stale");
+    assert.equal(recordedWebState({ pid: 1234 }, { isPidRunning: () => true, captureStartMark: () => "mark" }), "stale");
+    assert.equal(recordedWebState(record, { isPidRunning: () => false, captureStartMark: () => "mark" }), "dead");
+  });
+
+  it("atomic write: the record appears whole, no temp file is left, and a failed write leaves none", () => {
+    const root = freshHarnessRoot();
+    writeCalWebPid(4242, root);
+    assert.deepEqual(fs.readdirSync(path.join(root, ".harness")), ["cal-web.pid"]);
+    assert.equal(readCalWebPidRecord(root)?.pid, 4242);
+
+    // A directory where the record should be makes the rename fail; the temp file must be removed.
+    fs.rmSync(calWebPidFile(root));
+    fs.mkdirSync(calWebPidFile(root));
+    assert.throws(() => writeCalWebPid(4243, root));
+    assert.deepEqual(fs.readdirSync(path.join(root, ".harness")), ["cal-web.pid"]);
   });
 
   it("stop with corrupt pid file removes the file without throwing", () => {
@@ -190,14 +209,14 @@ describe("calWebSpawnSpec (node runs the Next.js bin, no shell)", () => {
 describe("listener on the web port", () => {
   it("dead recorded pid with an unrelated listener is refused, and the message names the record", () => {
     const deps = fakeDeps({ readRecord: () => ({ pid: 100, startMark: "1000" }) });
-    const record = stopRecordedCalWeb(deps);
+    const stopped = stopRecordedCalWeb(deps);
     assert.throws(
       () =>
         settleCalWebStop({
           address: "127.0.0.1:3000",
           portHeld: true,
           listeners: [555],
-          record,
+          record: stopped?.record,
           removePidFile: deps.removePidFile,
         }),
       (error: unknown) => {

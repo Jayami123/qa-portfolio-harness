@@ -8,7 +8,7 @@ import type { CalConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
 import { detectPackageManager, run, runCapture } from "../internal/run.js";
-import { isPidRunning, resolveYarn, spawnLogged } from "../internal/spawn-detached.js";
+import { resolveYarn, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
@@ -18,6 +18,7 @@ import {
   assertListenerIsRecorded,
   calWebSpawnSpec,
   readCalWebPidRecord,
+  recordedWebState,
   settleCalWebStop,
   stopRecordedCalWeb,
   writeCalWebPid,
@@ -396,7 +397,13 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     }
 
     const recorded = readCalWebPidRecord();
-    if (recorded !== undefined && isPidRunning(recorded.pid) && !(await this.isWebPortOpen())) {
+    const recordedState = recorded === undefined ? undefined : recordedWebState(recorded, calWebStopDeps(HARNESS_ROOT));
+    if (recordedState === "stale") {
+      console.log(
+        `Cal pid file is stale: pid ${String(recorded?.pid)} is not the recorded process (start mark ${recorded?.startMark ?? "none"} does not match). Ignoring it and checking the port.`,
+      );
+    }
+    if (recorded !== undefined && recordedState === "live" && !(await this.isWebPortOpen())) {
       console.log(
         `Cal web (pid ${String(recorded.pid)}) is still starting; waiting for it instead of starting another.`,
       );
@@ -501,7 +508,12 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
    */
   private async stopWeb(): Promise<void> {
     const deps = calWebStopDeps(HARNESS_ROOT);
-    const record = stopRecordedCalWeb(deps);
+    const stopped = stopRecordedCalWeb(deps);
+    if (stopped?.state === "stale") {
+      console.log(
+        `Cal pid file is stale: pid ${String(stopped.record.pid)} is not the recorded process (start mark ${stopped.record.startMark ?? "none"} does not match). Not signaling it.`,
+      );
+    }
     const { host, port } = this.webListen();
     const deadline = Date.now() + CAL_WEB_STOP_WAIT_MS;
     while (Date.now() < deadline && (await this.isWebPortOpen())) {
@@ -512,7 +524,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       address: `${host}:${port}`,
       portHeld,
       listeners: portHeld ? listenerPids(Number(port)) : [],
-      record,
+      record: stopped?.record,
       removePidFile: deps.removePidFile,
     });
   }

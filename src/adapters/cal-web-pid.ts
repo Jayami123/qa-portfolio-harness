@@ -72,12 +72,20 @@ export function parseCalWebPidFileText(text: string): CalWebPidRecord | undefine
   }
 }
 
+/** Writes the record to a temp file in the same directory, then renames it over the record, so a reader never sees a partial file. */
 export function writeCalWebPid(pid: number, harnessRoot: string = HARNESS_ROOT): void {
   const file = calWebPidFile(harnessRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const startMark = captureProcessStartMark(pid);
   const record: CalWebPidRecord = startMark === undefined ? { pid } : { pid, startMark };
-  fs.writeFileSync(file, `${JSON.stringify(record)}\n`, "utf8");
+  const temp = `${file}.${String(process.pid)}.tmp`;
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(record)}\n`, "utf8");
+    fs.renameSync(temp, file);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
+  }
 }
 
 export function readCalWebPidRecord(harnessRoot: string = HARNESS_ROOT): CalWebPidRecord | undefined {
@@ -114,11 +122,35 @@ export interface CalWebStopDeps {
 }
 
 /**
- * Signals the recorded pid when it is alive and its start mark matches. A dead recorded pid has
- * nothing to signal: the port decides what is left. A corrupt pid file is removed. Never signals a
- * pid whose start mark differs. Leaves the pid file alone; see {@link settleCalWebStop}.
+ * `dead`: the recorded pid is gone. `stale`: a live pid whose start mark differs (or none was
+ * recorded), so the pid was reused and must not be signaled. `live`: the recorded process itself.
  */
-export function stopRecordedCalWeb(deps: CalWebStopDeps, signal: CalWebSignal = "SIGTERM"): CalWebPidRecord | undefined {
+export type CalWebRecordState = "dead" | "stale" | "live";
+
+export function recordedWebState(
+  record: CalWebPidRecord,
+  deps: Pick<CalWebStopDeps, "isPidRunning" | "captureStartMark">,
+): CalWebRecordState {
+  if (!deps.isPidRunning(record.pid)) {
+    return "dead";
+  }
+  if (record.startMark === undefined) {
+    return "stale";
+  }
+  return deps.captureStartMark(record.pid) === record.startMark ? "live" : "stale";
+}
+
+export interface StoppedCalWeb {
+  readonly record: CalWebPidRecord;
+  readonly state: CalWebRecordState;
+}
+
+/**
+ * Signals the recorded pid only when it is `live`. A `dead` or `stale` record signals nothing: the
+ * port decides what is left, and a stale record is reported. A corrupt pid file is removed. Leaves
+ * the pid file alone; see {@link settleCalWebStop}.
+ */
+export function stopRecordedCalWeb(deps: CalWebStopDeps, signal: CalWebSignal = "SIGTERM"): StoppedCalWeb | undefined {
   const record = deps.readRecord();
   if (record === undefined) {
     if (deps.hasPidFile()) {
@@ -126,20 +158,9 @@ export function stopRecordedCalWeb(deps: CalWebStopDeps, signal: CalWebSignal = 
     }
     return undefined;
   }
-  if (!deps.isPidRunning(record.pid)) {
-    return record;
-  }
-  if (record.startMark === undefined) {
-    throw new CalWebStopError(
-      `Cal web pid ${String(record.pid)} is alive but its pid file has no start mark (${describeCalWebRecord(record)}); not signaling.`,
-    );
-  }
-  const currentMark = deps.captureStartMark(record.pid);
-  if (currentMark !== record.startMark) {
-    throw new CalWebStopError(
-      `Cal web pid ${String(record.pid)} is alive but its start mark does not match the record ` +
-        `(${describeCalWebRecord(record)}, current start mark ${currentMark ?? "unknown"}); not signaling.`,
-    );
+  const state = recordedWebState(record, deps);
+  if (state !== "live") {
+    return { record, state };
   }
   try {
     deps.killRootTree(record.pid, signal);
@@ -152,7 +173,7 @@ export function stopRecordedCalWeb(deps: CalWebStopDeps, signal: CalWebSignal = 
       );
     }
   }
-  return record;
+  return { record, state };
 }
 
 /**
