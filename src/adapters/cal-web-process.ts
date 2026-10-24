@@ -11,6 +11,12 @@ import {
   readCalWebPidRecord,
 } from "./cal-web-pid.js";
 import { captureProcessStartMark } from "./documenso-web-pid.js";
+import {
+  type ProcFs,
+  ProcNetUnavailableError,
+  readLinuxListenerPids,
+  realProcFs,
+} from "./proc-net-listeners.js";
 
 /**
  * The fork's `start` script (apps/web/package.json), split into arguments after `next`. The harness
@@ -38,11 +44,30 @@ export function resolveNextBin(webDir: string): string {
   return path.join(path.dirname(nextPackage), "dist", "bin", "next");
 }
 
-/** Pids listening on the web port. Empty when the lookup tool is missing or finds nothing. */
-export function listenerPids(port: number, platform: NodeJS.Platform = process.platform): number[] {
-  try {
-    if (platform === "win32") {
-      const out = execFileSync("netstat", ["-ano"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+export interface ListenerDeps {
+  readonly procFs: ProcFs;
+  readonly execFile: (command: string, args: string[]) => string;
+}
+
+const defaultListenerDeps: ListenerDeps = {
+  procFs: realProcFs,
+  execFile: (command, args) => execFileSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }),
+};
+
+/**
+ * Pids listening on the web port. Empty when the lookup finds nothing or fails (the caller fails closed).
+ * Linux reads /proc/net/tcp{,6} and /proc/<pid>/fd, because lsof skips a process whose name has an
+ * unbalanced parenthesis, such as `next-server (v16.x)`. lsof is the fallback when /proc/net/tcp cannot
+ * be read, and the lookup on macOS. Windows parses `netstat -ano`.
+ */
+export function listenerPids(
+  port: number,
+  platform: NodeJS.Platform = process.platform,
+  deps: ListenerDeps = defaultListenerDeps,
+): number[] {
+  if (platform === "win32") {
+    try {
+      const out = deps.execFile("netstat", ["-ano"]);
       const pids = new Set<number>();
       for (const line of out.split(/\r?\n/)) {
         if (!line.includes(`:${String(port)} `) || !/LISTENING/i.test(line)) {
@@ -54,11 +79,21 @@ export function listenerPids(port: number, platform: NodeJS.Platform = process.p
         }
       }
       return [...pids];
+    } catch {
+      return [];
     }
-    const out = execFileSync("lsof", ["-nP", "-t", `-iTCP:${String(port)}`, "-sTCP:LISTEN"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+  }
+  if (platform === "linux") {
+    try {
+      return readLinuxListenerPids(port, deps.procFs);
+    } catch (error) {
+      if (!(error instanceof ProcNetUnavailableError)) {
+        throw error;
+      }
+    }
+  }
+  try {
+    const out = deps.execFile("lsof", ["-nP", "-t", `-iTCP:${String(port)}`, "-sTCP:LISTEN"]);
     return out
       .split(/\r?\n/)
       .map((line) => Number(line.trim()))
