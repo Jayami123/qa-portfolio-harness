@@ -8,13 +8,13 @@ import type { CalConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
 import { detectPackageManager, run, runCapture } from "../internal/run.js";
-import { resolveYarn, spawnLogged } from "../internal/spawn-detached.js";
+import { isPidRunning, resolveYarn, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
-import { stopCalWebFromPidFile, writeCalWebPid } from "./cal-web-pid.js";
+import { readCalWebPidRecord, stopCalWebFromPidFile, writeCalWebPid } from "./cal-web-pid.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 const CAL_WEB_STOP_WAIT_MS = 30_000;
@@ -387,6 +387,16 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       );
     }
 
+    const recorded = readCalWebPidRecord();
+    if (recorded !== undefined && isPidRunning(recorded.pid) && !(await this.isWebPortOpen())) {
+      console.log(
+        `Cal web (pid ${String(recorded.pid)}) is still starting; waiting for it instead of starting another.`,
+      );
+      await this.waitForWeb(logFile, timeoutMs);
+      console.log(`Cal web is up at ${this.webRootUrl()}`);
+      return;
+    }
+
     if (await this.isWebPortOpen()) {
       const bound = await pollHealth(this.webRootUrl(), { timeoutMs: 0, requestTimeoutMs: 30_000 });
       if (bound.ok) {
@@ -433,10 +443,13 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
         cwd: this.productRoot,
         logFile,
         env: this.nodeHeapEnv(),
+        detached: platform() !== "win32",
       });
       if (this.webProcess.pid !== undefined) {
         writeCalWebPid(this.webProcess.pid);
       }
+      // Keep the web server running after this CLI exits. `down` stops it from the pid record.
+      this.webProcess.unref();
       await new Promise((resolve) => setTimeout(resolve, 8000));
       if (this.webProcess.exitCode !== null) {
         throw new Error(
