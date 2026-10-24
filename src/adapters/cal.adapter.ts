@@ -83,7 +83,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     return fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").slice(-max) : "(no log)";
   }
 
-  /** Cal's `yarn dev` uses Turbopack, which crashes on this fork/Windows with a bogus instrumentation.ts miss. */
+  /** Turbopack dev crashes on this fork/Windows with a bogus instrumentation.ts miss, so webpack is the Windows default. */
   private bundler(): "webpack" | "turbopack" {
     const raw = (process.env.CAL_WEB_BUNDLER ?? "").trim().toLowerCase();
     if (raw === "webpack" || raw === "turbopack") {
@@ -425,7 +425,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     const { host, port } = this.webListen();
 
     if (!this.webProcess || this.webProcess.exitCode !== null) {
-      // The server is node running the fork's Next.js bin, from apps/web (yarn's workspace cwd).
+      // The server is node running the fork's Next.js bin, from apps/web (the cwd yarn's workspace used).
       const webDir = path.join(this.productRoot, "apps", "web");
       let nextArgs: string[];
       if (mode === "prod") {
@@ -496,8 +496,8 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   }
 
   /**
-   * Signals the recorded web tree, waits for the port to close, and removes the pid file only when the
-   * port is free. A held port keeps the file and throws, saying whether the listener matches the record.
+   * Signals the recorded pid, waits for the port to close, and removes the pid file only when the port is
+   * free. A held port keeps the file and throws, saying whether the listener matches the record.
    */
   private async stopWeb(): Promise<void> {
     const deps = calWebStopDeps(HARNESS_ROOT);

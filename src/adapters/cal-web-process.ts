@@ -13,8 +13,8 @@ import {
 import { captureProcessStartMark } from "./documenso-web-pid.js";
 
 /**
- * The fork's `start` script (apps/web/package.json), split into arguments after `next`. Yarn ran this
- * as `yarn workspace @calcom/web exec next start -H … -p …`, so the same script is the source of truth.
+ * The fork's `start` script (apps/web/package.json), split into arguments after `next`. The harness
+ * appends `-H <host> -p <port>`; the fork's script stays the source of truth for the rest.
  */
 export function readWebStartArgs(webDir: string): string[] {
   const pkg = JSON.parse(fs.readFileSync(path.join(webDir, "package.json"), "utf8")) as {
@@ -31,7 +31,7 @@ export function readWebStartArgs(webDir: string): string[] {
   return tokens.slice(1);
 }
 
-/** The Next.js bin that yarn's workspace resolves for apps/web (node_modules/next/dist/bin/next). */
+/** The Next.js bin for apps/web, resolved from that package the way yarn's workspace resolves it. */
 export function resolveNextBin(webDir: string): string {
   const require = createRequire(path.join(webDir, "package.json"));
   const nextPackage = require.resolve("next/package.json");
