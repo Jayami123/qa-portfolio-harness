@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Cal `up()` and `down()` read the port listener on Linux from `/proc/net/tcp`, `/proc/net/tcp6` and `/proc/<pid>/fd`. lsof skipped the Next.js server because its name `next-server (v16.x)` has an unbalanced parenthesis, so `up()` failed with "no listener pid could be read" on Linux. lsof stays as the fallback and the macOS lookup; Windows is unchanged.
+
 ## v0.2.14 — 2026-10-24
 
 - Cal `up()` returns once Cal is healthy. The web server is the Next.js server itself: node runs the fork's `next` bin from `apps/web` with the arguments of the fork's `start` script, with no shell and no yarn in between. It is detached on every platform, and its pid and start mark are recorded in `.harness/cal-web.pid`. After Cal is healthy, `up()` fails unless the port-3000 listener is the recorded pid.
