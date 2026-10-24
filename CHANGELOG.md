@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.14 — 2026-10-24
+
 - Cal `up()` returns once Cal is healthy. The web server is the Next.js server itself: node runs the fork's `next` bin from `apps/web` with the arguments of the fork's `start` script, with no shell and no yarn in between. It is detached on every platform, and its pid and start mark are recorded in `.harness/cal-web.pid`. After Cal is healthy, `up()` fails unless the port-3000 listener is the recorded pid.
 - Cal `down()` stops the recorded pid when its start mark matches: `taskkill /T` on Windows, the process group on POSIX. It keeps `.harness/cal-web.pid` while the port is still held, and throws naming the recorded pid and start mark when the listener does not match. It never signals a pid whose start mark differs, and it removes the database container only after the port is free.
 - Cal's seed presence check reads the `users` table (the fork maps `model User` to `users`); before, it failed on every `up` and re-ran `yarn db-seed`.
