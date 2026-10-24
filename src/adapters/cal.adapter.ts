@@ -14,8 +14,10 @@ import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
+import { stopCalWebFromPidFile, writeCalWebPid } from "./cal-web-pid.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
+const CAL_WEB_STOP_WAIT_MS = 30_000;
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
 const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_NEXT_BUILD_TIMEOUT_MS = 45 * 60_000;
@@ -432,6 +434,9 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
         logFile,
         env: this.nodeHeapEnv(),
       });
+      if (this.webProcess.pid !== undefined) {
+        writeCalWebPid(this.webProcess.pid);
+      }
       await new Promise((resolve) => setTimeout(resolve, 8000));
       if (this.webProcess.exitCode !== null) {
         throw new Error(
@@ -447,7 +452,27 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   }
 
   async down(): Promise<void> {
+    await this.stopWeb();
     await composeDown(this.composeOpts());
+    console.log("Cal web stopped and compose stack torn down.");
+  }
+
+  /** Stops the recorded web process group; success means the port closed, not that the pid is gone (zombies answer kill 0). */
+  private async stopWeb(): Promise<void> {
+    const { host, port } = this.webListen();
+    let stopError: Error | undefined;
+    try {
+      stopCalWebFromPidFile(HARNESS_ROOT);
+    } catch (error) {
+      stopError = error instanceof Error ? error : new Error(String(error));
+    }
+    const deadline = Date.now() + CAL_WEB_STOP_WAIT_MS;
+    while (Date.now() < deadline && (await this.isWebPortOpen())) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (await this.isWebPortOpen()) {
+      throw stopError ?? new Error(`Cal web still listening on ${host}:${port}; not killed (not started by this harness).`);
+    }
   }
 
   async health(): Promise<HealthStatus> {
