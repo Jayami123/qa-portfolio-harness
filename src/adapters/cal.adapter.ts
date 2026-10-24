@@ -13,8 +13,20 @@ import { HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
+import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
+import {
+  assertListenerIsRecorded,
+  calWebSpawnSpec,
+  readCalWebPidRecord,
+  recordedWebState,
+  settleCalWebStop,
+  stopRecordedCalWeb,
+  writeCalWebPid,
+} from "./cal-web-pid.js";
+import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
+const CAL_WEB_STOP_WAIT_MS = 30_000;
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
 const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_NEXT_BUILD_TIMEOUT_MS = 45 * 60_000;
@@ -72,7 +84,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     return fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").slice(-max) : "(no log)";
   }
 
-  /** Cal's `yarn dev` uses Turbopack, which crashes on this fork/Windows with a bogus instrumentation.ts miss. */
+  /** Turbopack dev crashes on this fork/Windows with a bogus instrumentation.ts miss, so webpack is the Windows default. */
   private bundler(): "webpack" | "turbopack" {
     const raw = (process.env.CAL_WEB_BUNDLER ?? "").trim().toLowerCase();
     if (raw === "webpack" || raw === "turbopack") {
@@ -384,6 +396,23 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       );
     }
 
+    const recorded = readCalWebPidRecord();
+    const recordedState = recorded === undefined ? undefined : recordedWebState(recorded, calWebStopDeps(HARNESS_ROOT));
+    if (recordedState === "stale") {
+      console.log(
+        `Cal pid file is stale: pid ${String(recorded?.pid)} is not the recorded process (start mark ${recorded?.startMark ?? "none"} does not match). Ignoring it and checking the port.`,
+      );
+    }
+    if (recorded !== undefined && recordedState === "live" && !(await this.isWebPortOpen())) {
+      console.log(
+        `Cal web (pid ${String(recorded.pid)}) is still starting; waiting for it instead of starting another.`,
+      );
+      await this.waitForWeb(logFile, timeoutMs);
+      this.verifyListenerIsRecorded();
+      console.log(`Cal web is up at ${this.webRootUrl()}`);
+      return;
+    }
+
     if (await this.isWebPortOpen()) {
       const bound = await pollHealth(this.webRootUrl(), { timeoutMs: 0, requestTimeoutMs: 30_000 });
       if (bound.ok) {
@@ -403,34 +432,45 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     const { host, port } = this.webListen();
 
     if (!this.webProcess || this.webProcess.exitCode !== null) {
-      let args: string[];
-      let label: string;
+      // The server is node running the fork's Next.js bin, from apps/web (the cwd yarn's workspace used).
+      const webDir = path.join(this.productRoot, "apps", "web");
+      let nextArgs: string[];
       if (mode === "prod") {
         await this.ensureProdBuild(yarn);
-        args = ["workspace", "@calcom/web", "exec", "next", "start", "-H", host, "-p", port];
-        label = `next start -H ${host} -p ${port}`;
-      } else if (bundler === "webpack") {
-        console.log("Preparing Cal static assets (copy-app-store-static)…");
-        await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
-          cwd: this.productRoot,
-          timeoutMs: 3 * 60_000,
-          env: this.nodeHeapEnv(),
-        });
-        args = ["workspace", "@calcom/web", "exec", "next", "dev", "--webpack", "-H", host, "-p", port];
-        label = `next dev --webpack -H ${host} -p ${port}`;
+        nextArgs = [...readWebStartArgs(webDir), "-H", host, "-p", port];
       } else {
-        args = ["dev"];
-        label = "yarn dev";
+        if (bundler === "webpack") {
+          console.log("Preparing Cal static assets (copy-app-store-static)…");
+          await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
+            cwd: this.productRoot,
+            timeoutMs: 3 * 60_000,
+            env: this.nodeHeapEnv(),
+          });
+        }
+        nextArgs = ["dev", ...(bundler === "webpack" ? ["--webpack"] : []), "-H", host, "-p", port];
       }
+      const spec = calWebSpawnSpec({
+        platform: platform(),
+        execPath: process.execPath,
+        nextBin: resolveNextBin(webDir),
+        args: nextArgs,
+      });
 
-      console.log(`Starting Cal web (${mode}): ${yarn} ${label} (logs: ${logFile})`);
+      console.log(`Starting Cal web (${mode}): ${spec.command} ${spec.args.join(" ")} (cwd ${webDir}; logs: ${logFile})`);
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.writeFileSync(logFile, "");
-      this.webProcess = spawnLogged(yarn, args, {
-        cwd: this.productRoot,
+      this.webProcess = spawnLogged(spec.command, spec.args, {
+        cwd: webDir,
         logFile,
         env: this.nodeHeapEnv(),
+        detached: spec.detached,
+        shell: spec.shell,
       });
+      if (this.webProcess.pid !== undefined) {
+        writeCalWebPid(this.webProcess.pid);
+      }
+      // Keep the web server running after this CLI exits. `down` stops it from the pid record.
+      this.webProcess.unref();
       await new Promise((resolve) => setTimeout(resolve, 8000));
       if (this.webProcess.exitCode !== null) {
         throw new Error(
@@ -442,11 +482,51 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     }
 
     await this.waitForWeb(logFile, timeoutMs);
+    this.verifyListenerIsRecorded();
     console.log(`Cal web is up at ${this.webRootUrl()}`);
   }
 
+  /** After Cal answers, the port listener must be the recorded pid. Otherwise up fails and does not guess. */
+  private verifyListenerIsRecorded(): void {
+    const { host, port } = this.webListen();
+    assertListenerIsRecorded({
+      address: `${host}:${port}`,
+      listeners: listenerPids(Number(port)),
+      record: readCalWebPidRecord(),
+    });
+  }
+
   async down(): Promise<void> {
+    await this.stopWeb();
     await composeDown(this.composeOpts());
+    console.log("Cal web stopped and compose stack torn down.");
+  }
+
+  /**
+   * Signals the recorded pid, waits for the port to close, and removes the pid file only when the port is
+   * free. A held port keeps the file and throws, saying whether the listener matches the record.
+   */
+  private async stopWeb(): Promise<void> {
+    const deps = calWebStopDeps(HARNESS_ROOT);
+    const stopped = stopRecordedCalWeb(deps);
+    if (stopped?.state === "stale") {
+      console.log(
+        `Cal pid file is stale: pid ${String(stopped.record.pid)} is not the recorded process (start mark ${stopped.record.startMark ?? "none"} does not match). Not signaling it.`,
+      );
+    }
+    const { host, port } = this.webListen();
+    const deadline = Date.now() + CAL_WEB_STOP_WAIT_MS;
+    while (Date.now() < deadline && (await this.isWebPortOpen())) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const portHeld = await this.isWebPortOpen();
+    settleCalWebStop({
+      address: `${host}:${port}`,
+      portHeld,
+      listeners: portHeld ? listenerPids(Number(port)) : [],
+      record: stopped?.record,
+      removePidFile: deps.removePidFile,
+    });
   }
 
   async health(): Promise<HealthStatus> {
@@ -498,7 +578,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   private async seedAlreadyPresent(): Promise<boolean> {
     const pool = createPgClient(this.cfg.dbUrl);
     try {
-      const users = await pool.query(`SELECT 1 AS ok FROM "User" WHERE email = 'free@example.com' LIMIT 1`);
+      const users = await pool.query(CAL_SEED_USER_SQL);
       if ((users.rowCount ?? users.rows.length) < 1) {
         return false;
       }
@@ -569,6 +649,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
         const captured = await runCapture(resolveYarn(), ["db-seed"], {
           cwd: this.productRoot,
           timeoutMs: 10 * 60 * 1000,
+          redactLine: redactSeedOutput,
         });
         output = `${captured.stdout}\n${captured.stderr}`;
         lastError = undefined;

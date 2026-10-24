@@ -12,6 +12,12 @@ export interface RunOptions {
 export interface RunCaptureOptions extends RunOptions {
   /** Secret values replaced with `***` in thrown error messages and captured output. */
   redact?: string[];
+  /**
+   * Line-aware redaction for what is printed while the child runs. Gets each chunk and the
+   * incomplete last line held back from the previous chunk (`carry`); returns the text to print
+   * and the new carry. Captured stdout and stderr stay unredacted.
+   */
+  redactLine?: (chunk: string, carry: string) => { text: string; carry: string };
 }
 
 export interface RunCaptureResult {
@@ -88,6 +94,7 @@ export function runCapture(
   options: RunCaptureOptions,
 ): Promise<RunCaptureResult> {
   const redact = options.redact ?? [];
+  const redactLine = options.redactLine;
   const commandLine = redactSecrets(`${command} ${args.join(" ")}`, redact);
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -98,16 +105,35 @@ export function runCapture(
     });
     let stdout = "";
     let stderr = "";
+    const outCarry = { value: "" };
+    const errCarry = { value: "" };
+    const printable = (text: string, carry: { value: string }): string => {
+      if (redactLine === undefined) {
+        return redactSecrets(text, redact);
+      }
+      const next = redactLine(text, carry.value);
+      carry.value = next.carry;
+      return redactSecrets(next.text, redact);
+    };
     child.stdout?.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
       stdout += text;
-      process.stdout.write(redactSecrets(text, redact));
+      process.stdout.write(printable(text, outCarry));
     });
     child.stderr?.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
       stderr += text;
-      process.stderr.write(redactSecrets(text, redact));
+      process.stderr.write(printable(text, errCarry));
     });
+    // Print a last line that never got its newline. Appending one and dropping it again
+    // makes redactLine release the held-back text.
+    const flush = (carry: { value: string }, write: (text: string) => void): void => {
+      if (redactLine === undefined || carry.value === "") {
+        return;
+      }
+      write(redactSecrets(redactLine("\n", carry.value).text.slice(0, -1), redact));
+      carry.value = "";
+    };
 
     const timeout = options.timeoutMs
       ? setTimeout(() => {
@@ -125,6 +151,9 @@ export function runCapture(
 
     child.on("exit", (code) => {
       if (timeout) clearTimeout(timeout);
+      // Flush before settling, so the held-back text is printed before the caller continues.
+      flush(outCarry, (text) => process.stdout.write(text));
+      flush(errCarry, (text) => process.stderr.write(text));
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
