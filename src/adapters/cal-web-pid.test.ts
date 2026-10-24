@@ -7,20 +7,18 @@ import {
   CalWebStopError,
   type CalWebStopDeps,
   type CalWebSignal,
-  type ProcessRow,
+  assertListenerIsRecorded,
   calWebPidFile,
   calWebSpawnSpec,
-  matchCalWebTree,
   parseCalWebPidFileText,
   readCalWebPidRecord,
   settleCalWebStop,
-  stopCalWebTree,
+  stopRecordedCalWeb,
   writeCalWebPid,
 } from "./cal-web-pid.js";
 import { parsePositiveSafeInteger } from "./documenso-web-pid.js";
 
 interface Recorder {
-  signaled: Array<{ pid: number; signal: CalWebSignal }>;
   rootSignaled: Array<{ pid: number; signal: CalWebSignal }>;
   removed: number;
 }
@@ -35,14 +33,9 @@ function fakeDeps(overrides: Partial<CalWebStopDeps>, platform: NodeJS.Platform 
     },
     isPidRunning: () => false,
     captureStartMark: () => undefined,
-    listProcesses: () => [],
     killRootTree: (pid, signal) => {
       deps.rootSignaled.push({ pid, signal });
     },
-    killProcess: (pid, signal) => {
-      deps.signaled.push({ pid, signal });
-    },
-    signaled: [],
     rootSignaled: [],
     removed: 0,
     ...overrides,
@@ -92,30 +85,28 @@ describe("cal web pid file", () => {
 
   it("stop with missing pid file does not throw", () => {
     const deps = fakeDeps({});
-    assert.equal(stopCalWebTree(deps).size, 0);
-    assert.deepEqual(deps.signaled, []);
+    assert.equal(stopRecordedCalWeb(deps), undefined);
     assert.equal(deps.rootSignaled.length, 0);
   });
 
-  it("stop with a dead root does not signal the stale pid, and the settle removes the file", () => {
+  it("stop with a dead recorded pid does not signal it, and the settle removes the file", () => {
     const deps = fakeDeps({ readRecord: () => ({ pid: 999_999_999 }) });
-    const tree = stopCalWebTree(deps);
-    assert.equal(tree.size, 0);
+    const record = stopRecordedCalWeb(deps);
+    assert.deepEqual(record, { pid: 999_999_999 });
     assert.equal(deps.rootSignaled.length, 0);
-    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], tree, removePidFile: deps.removePidFile });
+    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], record, removePidFile: deps.removePidFile });
     assert.equal(deps.removed, 1);
   });
 
-  it("stop with a running pid kills the tree and removes the file", () => {
+  it("stop with a running pid kills its tree and removes the file", () => {
     const deps = fakeDeps({
       readRecord: () => ({ pid: 1234, startMark: "mark" }),
       isPidRunning: (pid) => pid === 1234,
       captureStartMark: () => "mark",
     });
-    const tree = stopCalWebTree(deps);
+    const record = stopRecordedCalWeb(deps);
     assert.deepEqual(deps.rootSignaled, [{ pid: 1234, signal: "SIGTERM" }]);
-    assert.deepEqual([...tree], [1234]);
-    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], tree, removePidFile: deps.removePidFile });
+    settleCalWebStop({ address: "127.0.0.1:3000", portHeld: false, listeners: [], record, removePidFile: deps.removePidFile });
     assert.equal(deps.removed, 1);
   });
 
@@ -129,10 +120,11 @@ describe("cal web pid file", () => {
       },
     });
     assert.throws(
-      () => stopCalWebTree(deps),
+      () => stopRecordedCalWeb(deps),
       (error: unknown) => {
         assert.ok(error instanceof CalWebStopError);
         assert.match(error.message, /taskkill failed/);
+        assert.match(error.message, /recorded pid 1234, start mark mark/);
         return true;
       },
     );
@@ -145,119 +137,87 @@ describe("cal web pid file", () => {
       isPidRunning: () => true,
       captureStartMark: () => "current",
     });
-    assert.throws(() => stopCalWebTree(deps), CalWebStopError);
+    assert.throws(() => stopRecordedCalWeb(deps), (error: unknown) => {
+      assert.ok(error instanceof CalWebStopError);
+      assert.match(error.message, /recorded pid 1234, start mark recorded/);
+      assert.match(error.message, /current start mark current/);
+      return true;
+    });
     assert.equal(deps.rootSignaled.length, 0);
     assert.equal(deps.removed, 0);
   });
 
   it("stop with corrupt pid file removes the file without throwing", () => {
     const deps = fakeDeps({ hasPidFile: () => true });
-    const tree = stopCalWebTree(deps);
-    assert.equal(tree.size, 0);
+    assert.equal(stopRecordedCalWeb(deps), undefined);
     assert.equal(deps.removed, 1);
-    assert.deepEqual(deps.signaled, []);
+    assert.equal(deps.rootSignaled.length, 0);
   });
 });
 
-describe("calWebSpawnSpec (no shell)", () => {
-  it("starts yarn directly on POSIX, detached so the web leads its own process group", () => {
+describe("calWebSpawnSpec (node runs the Next.js bin, no shell)", () => {
+  const args = ["start", "-H", "127.0.0.1", "-p", "3000"];
+
+  it("runs node on the next bin, detached on POSIX so the server leads its process group", () => {
     const spec = calWebSpawnSpec({
       platform: "linux",
       execPath: "/usr/bin/node",
-      yarn: "yarn",
-      args: ["workspace", "@calcom/web", "exec", "next", "start"],
+      nextBin: "/products/cal/node_modules/next/dist/bin/next",
+      args,
     });
     assert.deepEqual(spec, {
-      command: "yarn",
-      args: ["workspace", "@calcom/web", "exec", "next", "start"],
+      command: "/usr/bin/node",
+      args: ["/products/cal/node_modules/next/dist/bin/next", ...args],
       shell: false,
       detached: true,
     });
   });
 
-  it("runs yarn's JS entry under node on Windows with no shell, and refuses without that entry", () => {
+  it("runs node on the next bin on Windows with no shell, detached so it outlives up", () => {
     const spec = calWebSpawnSpec({
       platform: "win32",
       execPath: "C:\\nvm4w\\nodejs\\node.exe",
-      yarn: "C:\\nvm4w\\nodejs\\yarn.cmd",
-      yarnScript: "C:\\nvm4w\\nodejs\\node_modules\\corepack\\dist\\yarn.js",
-      args: ["workspace", "@calcom/web", "exec", "next", "start"],
+      nextBin: "D:\\products\\cal\\node_modules\\next\\dist\\bin\\next",
+      args,
     });
     assert.equal(spec.command, "C:\\nvm4w\\nodejs\\node.exe");
-    assert.equal(spec.args[0], "C:\\nvm4w\\nodejs\\node_modules\\corepack\\dist\\yarn.js");
+    assert.equal(spec.args[0], "D:\\products\\cal\\node_modules\\next\\dist\\bin\\next");
     assert.equal(spec.shell, false);
-    assert.equal(spec.detached, false);
-    assert.throws(
-      () =>
-        calWebSpawnSpec({
-          platform: "win32",
-          execPath: "C:\\nvm4w\\nodejs\\node.exe",
-          yarn: "yarn.cmd",
-          args: [],
-        }),
-      /Refusing to start through cmd\.exe/,
-    );
+    assert.equal(spec.detached, true);
   });
 });
 
-describe("dead root and the port", () => {
-  const rows: ProcessRow[] = [
-    { pid: 100, ppid: 1, pgid: 100, start: "1000" },
-    { pid: 101, ppid: 100, pgid: 100, start: "2000" },
-    { pid: 102, ppid: 101, pgid: 100, start: "2100" },
-    { pid: 103, ppid: 100, pgid: 999, start: "500" },
-    { pid: 200, ppid: 1, pgid: 200, start: "3000" },
-  ];
-
-  it("dead root with live matched children stops only the matched descendants", () => {
-    const deps = fakeDeps(
-      {
-        readRecord: () => ({ pid: 100, startMark: "1000" }),
-        isPidRunning: (pid) => pid !== 100 && pid !== 103,
-        listProcesses: () => rows,
-      },
-      "linux",
-    );
-    const tree = stopCalWebTree(deps);
-    assert.deepEqual(deps.signaled, [
-      { pid: 101, signal: "SIGTERM" },
-      { pid: 102, signal: "SIGTERM" },
-    ]);
-    assert.deepEqual([...tree].sort(), [101, 102]);
-  });
-
-  it("dead root with an unmatched listener is refused and the pid file is kept", () => {
-    const deps = fakeDeps({ readRecord: () => ({ pid: 100, startMark: "1000" }), listProcesses: () => [] });
-    const tree = stopCalWebTree(deps);
-    assert.equal(tree.size, 0);
+describe("listener on the web port", () => {
+  it("dead recorded pid with an unrelated listener is refused, and the message names the record", () => {
+    const deps = fakeDeps({ readRecord: () => ({ pid: 100, startMark: "1000" }) });
+    const record = stopRecordedCalWeb(deps);
     assert.throws(
       () =>
         settleCalWebStop({
           address: "127.0.0.1:3000",
           portHeld: true,
           listeners: [555],
-          tree,
+          record,
           removePidFile: deps.removePidFile,
         }),
       (error: unknown) => {
         assert.ok(error instanceof CalWebStopError);
-        assert.match(error.message, /does not match the harness record; not killed/);
+        assert.match(error.message, /as pid 555, which does not match recorded pid 100, start mark 1000; not killed/);
         return true;
       },
     );
     assert.equal(deps.removed, 0);
   });
 
-  it("pid file is kept when the port is still held by a recorded process", () => {
+  it("pid file is kept when the port is still held by the recorded pid", () => {
     const deps = fakeDeps({});
-    const tree = new Set([101]);
     assert.throws(
       () =>
         settleCalWebStop({
           address: "127.0.0.1:3000",
           portHeld: true,
-          listeners: [101],
-          tree,
+          listeners: [100],
+          record: { pid: 100, startMark: "1000" },
           removePidFile: deps.removePidFile,
         }),
       (error: unknown) => {
@@ -269,7 +229,16 @@ describe("dead root and the port", () => {
     assert.equal(deps.removed, 0);
   });
 
-  it("does not match descendants when the root has no start mark", () => {
-    assert.deepEqual(matchCalWebTree(rows, 100, undefined, true), []);
+  it("up refuses to proceed unless the listener is the recorded pid", () => {
+    const record = { pid: 100, startMark: "1000" };
+    assert.doesNotThrow(() => assertListenerIsRecorded({ address: "127.0.0.1:3000", listeners: [100], record }));
+    assert.throws(
+      () => assertListenerIsRecorded({ address: "127.0.0.1:3000", listeners: [555], record }),
+      /listener pid 555 does not match recorded pid 100, start mark 1000/,
+    );
+    assert.throws(
+      () => assertListenerIsRecorded({ address: "127.0.0.1:3000", listeners: [], record }),
+      /no listener pid could be read/,
+    );
   });
 });

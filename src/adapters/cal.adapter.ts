@@ -15,13 +15,14 @@ import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
 import {
+  assertListenerIsRecorded,
   calWebSpawnSpec,
   readCalWebPidRecord,
   settleCalWebStop,
-  stopCalWebTree,
+  stopRecordedCalWeb,
   writeCalWebPid,
 } from "./cal-web-pid.js";
-import { calWebStopDeps, listenerPids, resolveYarnScript } from "./cal-web-process.js";
+import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 const CAL_WEB_STOP_WAIT_MS = 30_000;
@@ -400,6 +401,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
         `Cal web (pid ${String(recorded.pid)}) is still starting; waiting for it instead of starting another.`,
       );
       await this.waitForWeb(logFile, timeoutMs);
+      this.verifyListenerIsRecorded();
       console.log(`Cal web is up at ${this.webRootUrl()}`);
       return;
     }
@@ -423,38 +425,35 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     const { host, port } = this.webListen();
 
     if (!this.webProcess || this.webProcess.exitCode !== null) {
-      let args: string[];
-      let label: string;
+      // The server is node running the fork's Next.js bin, from apps/web (yarn's workspace cwd).
+      const webDir = path.join(this.productRoot, "apps", "web");
+      let nextArgs: string[];
       if (mode === "prod") {
         await this.ensureProdBuild(yarn);
-        args = ["workspace", "@calcom/web", "exec", "next", "start", "-H", host, "-p", port];
-        label = `next start -H ${host} -p ${port}`;
-      } else if (bundler === "webpack") {
-        console.log("Preparing Cal static assets (copy-app-store-static)…");
-        await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
-          cwd: this.productRoot,
-          timeoutMs: 3 * 60_000,
-          env: this.nodeHeapEnv(),
-        });
-        args = ["workspace", "@calcom/web", "exec", "next", "dev", "--webpack", "-H", host, "-p", port];
-        label = `next dev --webpack -H ${host} -p ${port}`;
+        nextArgs = [...readWebStartArgs(webDir), "-H", host, "-p", port];
       } else {
-        args = ["dev"];
-        label = "yarn dev";
+        if (bundler === "webpack") {
+          console.log("Preparing Cal static assets (copy-app-store-static)…");
+          await run(yarn, ["workspace", "@calcom/web", "run", "copy-app-store-static"], {
+            cwd: this.productRoot,
+            timeoutMs: 3 * 60_000,
+            env: this.nodeHeapEnv(),
+          });
+        }
+        nextArgs = ["dev", ...(bundler === "webpack" ? ["--webpack"] : []), "-H", host, "-p", port];
       }
-
-      console.log(`Starting Cal web (${mode}): ${yarn} ${label} (logs: ${logFile})`);
-      fs.mkdirSync(path.dirname(logFile), { recursive: true });
-      fs.writeFileSync(logFile, "");
       const spec = calWebSpawnSpec({
         platform: platform(),
         execPath: process.execPath,
-        yarn,
-        yarnScript: resolveYarnScript(),
-        args,
+        nextBin: resolveNextBin(webDir),
+        args: nextArgs,
       });
+
+      console.log(`Starting Cal web (${mode}): ${spec.command} ${spec.args.join(" ")} (cwd ${webDir}; logs: ${logFile})`);
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, "");
       this.webProcess = spawnLogged(spec.command, spec.args, {
-        cwd: this.productRoot,
+        cwd: webDir,
         logFile,
         env: this.nodeHeapEnv(),
         detached: spec.detached,
@@ -476,7 +475,18 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     }
 
     await this.waitForWeb(logFile, timeoutMs);
+    this.verifyListenerIsRecorded();
     console.log(`Cal web is up at ${this.webRootUrl()}`);
+  }
+
+  /** After Cal answers, the port listener must be the recorded pid. Otherwise up fails and does not guess. */
+  private verifyListenerIsRecorded(): void {
+    const { host, port } = this.webListen();
+    assertListenerIsRecorded({
+      address: `${host}:${port}`,
+      listeners: listenerPids(Number(port)),
+      record: readCalWebPidRecord(),
+    });
   }
 
   async down(): Promise<void> {
@@ -491,7 +501,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
    */
   private async stopWeb(): Promise<void> {
     const deps = calWebStopDeps(HARNESS_ROOT);
-    const tree = stopCalWebTree(deps);
+    const record = stopRecordedCalWeb(deps);
     const { host, port } = this.webListen();
     const deadline = Date.now() + CAL_WEB_STOP_WAIT_MS;
     while (Date.now() < deadline && (await this.isWebPortOpen())) {
@@ -502,7 +512,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       address: `${host}:${port}`,
       portHeld,
       listeners: portHeld ? listenerPids(Number(port)) : [],
-      tree,
+      record,
       removePidFile: deps.removePidFile,
     });
   }
