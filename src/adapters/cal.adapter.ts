@@ -13,7 +13,7 @@ import { HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
-import { CAL_SEED_USER_SQL } from "./cal-seed.js";
+import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
@@ -570,6 +570,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
         const captured = await runCapture(resolveYarn(), ["db-seed"], {
           cwd: this.productRoot,
           timeoutMs: 10 * 60 * 1000,
+          redactLine: redactSeedOutput,
         });
         output = `${captured.stdout}\n${captured.stderr}`;
         lastError = undefined;
