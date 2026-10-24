@@ -13,6 +13,7 @@ import { HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
+import { CAL_SEED_USER_SQL } from "./cal-seed.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
@@ -498,7 +499,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   private async seedAlreadyPresent(): Promise<boolean> {
     const pool = createPgClient(this.cfg.dbUrl);
     try {
-      const users = await pool.query(`SELECT 1 AS ok FROM "User" WHERE email = 'free@example.com' LIMIT 1`);
+      const users = await pool.query(CAL_SEED_USER_SQL);
       if ((users.rowCount ?? users.rows.length) < 1) {
         return false;
       }
