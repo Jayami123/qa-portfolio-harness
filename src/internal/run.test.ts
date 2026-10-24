@@ -1,9 +1,57 @@
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import { redactSecrets, runCapture } from "./run.js";
 
 const SECRET = "pw-secret-7f3a";
 const cwd = process.cwd();
+
+describe("runCapture redactLine redaction", () => {
+  // A runner process calls runCapture and prints what it passes through, so the test runner's own stdout is never touched.
+  // The child scripts take no spaces: on Windows runCapture joins the arguments into a shell command line.
+  function printedByRunner(childScript: string, mode: "pass" | "hold"): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "run-redact-"));
+    const runner = path.join(dir, "runner.mjs");
+    const runCaptureUrl = new URL("./run.js", import.meta.url).href;
+    fs.writeFileSync(
+      runner,
+      `import { runCapture } from ${JSON.stringify(runCaptureUrl)};
+const [secret, mode, script] = process.argv.slice(2);
+const passThrough = (chunk, carry) => ({ text: chunk, carry });
+const holdLastLine = (chunk, carry) => {
+  const joined = carry + chunk;
+  const cut = joined.lastIndexOf("\\n") + 1;
+  return { text: joined.slice(0, cut), carry: joined.slice(cut) };
+};
+await runCapture("node", ["-e", script, secret], {
+  cwd: process.cwd(),
+  redact: [secret],
+  redactLine: mode === "hold" ? holdLastLine : passThrough,
+});
+`,
+    );
+    try {
+      const result = spawnSync(process.execPath, [runner, SECRET, mode, childScript], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout;
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("redacts the secret in a line that redactLine passes through", () => {
+    const printed = printedByRunner("console.log(process.argv[1])", "pass");
+    assert.equal(printed, "***\n");
+  });
+
+  it("redacts a last line without a newline when the exit flush prints it", () => {
+    const printed = printedByRunner("process.stdout.write(process.argv[1])", "hold");
+    assert.equal(printed, "***");
+  });
+});
 
 describe("redactSecrets", () => {
   it("replaces every occurrence with ***", () => {

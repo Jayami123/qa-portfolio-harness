@@ -113,7 +113,7 @@ export function runCapture(
       }
       const next = redactLine(text, carry.value);
       carry.value = next.carry;
-      return next.text;
+      return redactSecrets(next.text, redact);
     };
     child.stdout?.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
@@ -131,13 +131,9 @@ export function runCapture(
       if (redactLine === undefined || carry.value === "") {
         return;
       }
-      write(redactLine("\n", carry.value).text.slice(0, -1));
+      write(redactSecrets(redactLine("\n", carry.value).text.slice(0, -1), redact));
       carry.value = "";
     };
-    child.on("close", () => {
-      flush(outCarry, (text) => process.stdout.write(text));
-      flush(errCarry, (text) => process.stderr.write(text));
-    });
 
     const timeout = options.timeoutMs
       ? setTimeout(() => {
@@ -155,6 +151,9 @@ export function runCapture(
 
     child.on("exit", (code) => {
       if (timeout) clearTimeout(timeout);
+      // Flush before settling, so the held-back text is printed before the caller continues.
+      flush(outCarry, (text) => process.stdout.write(text));
+      flush(errCarry, (text) => process.stderr.write(text));
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
