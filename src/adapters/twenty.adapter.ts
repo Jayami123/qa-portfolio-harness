@@ -26,6 +26,7 @@ import {
   type LoginTokenExchangeShape,
   type SignInResultShape,
 } from "./twenty-env.js";
+import { twentyRuntimeOverrideFiles, writeTwentyRuntimeOverride } from "./twenty-runtime-override.js";
 
 const COMPOSE_PROJECT = "qa-harness-twenty";
 const DEFAULT_WAIT_MS = 10 * 60 * 1000;
@@ -68,7 +69,10 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
   private composeOpts() {
     return {
       projectName: COMPOSE_PROJECT,
-      files: twentyComposeFilePaths(this.dockerDir(), harnessComposeFile("twenty.compose.yml")),
+      files: [
+        ...twentyComposeFilePaths(this.dockerDir(), harnessComposeFile("twenty.compose.yml")),
+        ...twentyRuntimeOverrideFiles(),
+      ],
       cwd: this.dockerDir(),
       env: {
         ...process.env,
@@ -143,6 +147,7 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
 
   async up(): Promise<void> {
     assertTwentyImageTag(this.cfg.imageTag);
+    writeTwentyRuntimeOverride({ env: process.env });
     await this.prepareDockerEnvAsync();
     await composeUp(this.composeOpts(), { wait: true });
     await this.assertRunningServerImage();
