@@ -17,12 +17,21 @@ function composeArgs(options: ComposeOptions, extra: string[]): string[] {
   return args;
 }
 
+/** The argv for `docker compose up -d`. With `wait`, `--wait` is limited to `waitServices` when given: compose treats any
+ *  exited container as a failure under --wait, so one-shot services (Cal's postgres_is_ready) must stay out of the wait. */
+export function composeUpArgs(
+  options: ComposeOptions,
+  opts: { wait?: boolean; waitServices?: string[] } = {},
+): string[] {
+  const extra = opts.wait ? ["up", "-d", "--wait", ...(opts.waitServices ?? [])] : ["up", "-d"];
+  return composeArgs(options, extra);
+}
+
 export async function composeUp(
   options: ComposeOptions,
-  opts: { wait?: boolean } = {},
+  opts: { wait?: boolean; waitServices?: string[] } = {},
 ): Promise<void> {
-  const extra = opts.wait ? ["up", "-d", "--wait"] : ["up", "-d"];
-  await run("docker", composeArgs(options, extra), {
+  await run("docker", composeUpArgs(options, opts), {
     cwd: options.cwd,
     env: options.env,
   });
