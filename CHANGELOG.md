@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.18 — 2026-10-29
+
 - With `HARNESS_PG_STATS=1`, Cal `up()` waits only on the fork's `postgres` service (`up -d --wait postgres`). `--wait` on every service failed because the fork's one-shot `postgres_is_ready` container exits by design. Unset or `true` keeps the v0.2.17 argv (`up -d`).
 
 ## v0.2.17 — 2026-10-29
