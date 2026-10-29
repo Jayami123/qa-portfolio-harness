@@ -17,6 +17,7 @@ import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import { enablePgStatsExtension, pgStatsComposeFiles, pgStatsEnabled } from "./pg-stats.js";
+import { elPreloadFromEnv, serverProcessEnv } from "./telemetry-env.js";
 import {
   defaultKillProcessTree,
   readMedusaBackend2Record,
@@ -937,7 +938,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     this.backendProcess = spawnLogged(command, args, {
       cwd,
       logFile,
-      env: this.backendProcessEnv(),
+      env: serverProcessEnv(this.backendProcessEnv(), "server", elPreloadFromEnv(process.env)),
       // Detach so the server stays up after this CLI exits. shell:false so the recorded pid is node.exe, which down() can taskkill.
       detached: true,
       shell: false,
@@ -1028,7 +1029,10 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     const child = spawnLogged(process.execPath, [cli, "start"], {
       cwd,
       logFile,
-      env: { ...this.backendProcessEnv(), PORT: port },
+      env: {
+        ...serverProcessEnv(this.backendProcessEnv(), "server-2", elPreloadFromEnv(process.env)),
+        PORT: port,
+      },
       detached: true,
       shell: false,
     });
