@@ -25,6 +25,7 @@ import {
   writeCalWebPid,
 } from "./cal-web-pid.js";
 import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
+import { appendNodeOptions, elPreloadFromEnv } from "./telemetry-env.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 const CAL_WEB_STOP_WAIT_MS = 30_000;
@@ -45,6 +46,29 @@ const TRPC_APP_ROUTER_RELATIVE = path.join(
 
 interface HarnessBuildRecord {
   readonly gitSha: string;
+}
+
+/** The heap-only env every Cal process gets (the default for all callers except the web server). */
+export function calHeapEnv(processEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    NEXT_TELEMETRY_DISABLED: "1",
+    NODE_OPTIONS: processEnv.NODE_OPTIONS?.trim() || "--max-old-space-size=8192",
+  };
+}
+
+/** The Cal web server env: the heap env, plus the event-loop preload when HARNESS_EL_PRELOAD is set. */
+export function calNodeHeapEnv(processEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const base = calHeapEnv(processEnv);
+  const el = elPreloadFromEnv(processEnv);
+  if (!el) {
+    return base;
+  }
+  return {
+    ...base,
+    NODE_OPTIONS: appendNodeOptions(base.NODE_OPTIONS, el.preload),
+    HARNESS_EL_OUT: el.out,
+    HARNESS_EL_ROLE: "server",
+  };
 }
 
 export class CalAdapter extends BaseAdapter<CalConfig> {
@@ -104,10 +128,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   }
 
   private nodeHeapEnv(): NodeJS.ProcessEnv {
-    return {
-      NEXT_TELEMETRY_DISABLED: "1",
-      NODE_OPTIONS: process.env.NODE_OPTIONS?.trim() || "--max-old-space-size=8192",
-    };
+    return calHeapEnv(process.env);
   }
 
   private nextDir(): string {
@@ -479,7 +500,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       this.webProcess = spawnLogged(spec.command, spec.args, {
         cwd: webDir,
         logFile,
-        env: this.nodeHeapEnv(),
+        env: calNodeHeapEnv(process.env),
         detached: spec.detached,
         shell: spec.shell,
       });

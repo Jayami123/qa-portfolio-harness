@@ -13,6 +13,7 @@ import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from "./pg-stats.js";
+import { documensoAppEnvWithPreload } from "./telemetry-env.js";
 import {
   assertDocumensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
@@ -97,7 +98,7 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
   }
 
   private appEnv(): Record<string, string> {
-    return buildDocumensoAppEnv(this.cfg);
+    return documensoAppEnvWithPreload(buildDocumensoAppEnv(this.cfg), process.env);
   }
 
   private timeoutFromEnv(envName: string, defaultMs: number, minMs: number): number {
