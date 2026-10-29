@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.17 — 2026-10-29
+
 - Optional `HARNESS_EL_PRELOAD` (an absolute path to a readable file) and `HARNESS_EL_OUT` (an absolute directory, created when missing) add `--require=<preload>` to the Node processes of Cal's web server, the Medusa backends, the Documenso app (and its build and seed, which share its env) and the Twenty server and worker, and set `HARNESS_EL_OUT` and `HARNESS_EL_ROLE` in each. Unset or blank keeps every process env byte-identical to v0.2.16. An invalid path makes `up()` fail before any file is written.
 - Optional `HARNESS_PG_STATS=1` (exact value) starts the Medusa, Documenso, Cal and Twenty Postgres with `pg_stat_statements` preloaded and `track_io_timing` on, then runs `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` once the database is healthy. Unset, `true` or blank keeps the stock command and creates no extension. A failed `CREATE EXTENSION` makes `up()` fail, with the psql message.
 
