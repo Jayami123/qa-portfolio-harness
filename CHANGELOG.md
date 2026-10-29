@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Optional API_RATE_LIMITING_SHORT_TTL_IN_MS, API_RATE_LIMITING_SHORT_LIMIT, API_RATE_LIMITING_LONG_TTL_IN_MS, API_RATE_LIMITING_LONG_LIMIT, APPLICATION_API_RATE_LIMITING_TTL_IN_MS and APPLICATION_API_RATE_LIMITING_LIMIT are written into the Twenty server and worker when set to a whole number of at least 1. Blank or unset keeps the image default. Nothing else is forwarded.
+
 ## v0.2.15 — 2026-10-24
 
 - Cal `up()` and `down()` read the port listener on Linux from `/proc/net/tcp`, `/proc/net/tcp6` and `/proc/<pid>/fd`. lsof skipped the Next.js server because its name `next-server (v16.x)` has an unbalanced parenthesis, so `up()` failed with "no listener pid could be read" on Linux. lsof stays as the fallback and the macOS lookup; Windows is unchanged.
