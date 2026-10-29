@@ -1,0 +1,5 @@
+# Opt-in pg_stat_statements overlay for the Documenso Postgres. Added only when HARNESS_PG_STATS=1
+# (src/adapters/pg-stats.ts). Base: docker/documenso.compose.yml, service postgres (no command there).
+services:
+  postgres:
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "track_io_timing=on"]

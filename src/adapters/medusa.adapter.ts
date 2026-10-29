@@ -16,6 +16,7 @@ import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
+import { enablePgStatsExtension, pgStatsComposeFiles, pgStatsEnabled } from "./pg-stats.js";
 import {
   defaultKillProcessTree,
   readMedusaBackend2Record,
@@ -1108,10 +1109,23 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
     const { host, port } = medusaListen(this.cfg.baseUrl);
 
     const switches = this.harnessSwitches();
-    const composeFiles = medusaComposeFileNames(switches);
+    const composeFiles = [
+      ...medusaComposeFileNames(switches),
+      ...pgStatsComposeFiles({ env: process.env, product: "medusa" }),
+    ];
     // Recorded before compose starts, so down() can tear down a partial bring-up too.
     this.writeComposeRecord(composeFiles);
     await composeUp(this.composeOpts(composeFiles), { wait: true });
+    if (pgStatsEnabled(process.env)) {
+      await enablePgStatsExtension({
+        project: COMPOSE_PROJECT,
+        files: this.composeOpts(composeFiles).files,
+        service: "postgres",
+        user: "medusa",
+        db: "medusa",
+        cwd: HARNESS_DOCKER_DIR,
+      });
+    }
     if (switches.redis) {
       console.log(
         "Medusa Postgres (127.0.0.1:5433) and Redis (127.0.0.1:6380) are up.",

@@ -7,6 +7,7 @@ import path from "node:path";
 import type { CalConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
+import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from "./pg-stats.js";
 import { detectPackageManager, run, runCapture } from "../internal/run.js";
 import { resolveYarn, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_ROOT } from "../paths.js";
@@ -75,7 +76,11 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   private composeOpts() {
     return {
       projectName: COMPOSE_PROJECT,
-      files: [this.productComposeFile(), harnessComposeFile("cal.compose.yml")],
+      files: [
+        this.productComposeFile(),
+        harnessComposeFile("cal.compose.yml"),
+        ...pgStatsComposeFilePaths({ env: process.env, product: "cal" }),
+      ],
       cwd: this.prismaDir(),
     };
   }
@@ -359,7 +364,19 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       );
     }
 
-    await composeUp(this.composeOpts());
+    // The extension needs a healthy database, so the pg_stat_statements path waits for the healthcheck.
+    const pgStats = pgStatsEnabled(process.env);
+    await composeUp(this.composeOpts(), { wait: pgStats });
+    if (pgStats) {
+      await enablePgStatsExtension({
+        project: COMPOSE_PROJECT,
+        files: this.composeOpts().files,
+        service: "postgres",
+        user: "postgres",
+        db: "calendso",
+        cwd: this.prismaDir(),
+      });
+    }
     console.log("Cal Postgres compose is up (host port 5450, db calendso).");
 
     const already = await this.health();

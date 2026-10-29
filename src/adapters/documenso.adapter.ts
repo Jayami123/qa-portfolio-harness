@@ -12,6 +12,7 @@ import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
+import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from "./pg-stats.js";
 import {
   assertDocumensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
@@ -87,7 +88,10 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
   private composeOpts() {
     return {
       projectName: COMPOSE_PROJECT,
-      files: [harnessComposeFile("documenso.compose.yml")],
+      files: [
+        harnessComposeFile("documenso.compose.yml"),
+        ...pgStatsComposeFilePaths({ env: process.env, product: "documenso" }),
+      ],
       cwd: HARNESS_DOCKER_DIR,
     };
   }
@@ -410,6 +414,16 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     }
 
     await composeUp(this.composeOpts(), { wait: true });
+    if (pgStatsEnabled(process.env)) {
+      await enablePgStatsExtension({
+        project: COMPOSE_PROJECT,
+        files: this.composeOpts().files,
+        service: "postgres",
+        user: "documenso",
+        db: "documenso",
+        cwd: HARNESS_DOCKER_DIR,
+      });
+    }
     console.log("Documenso Postgres (127.0.0.1:5451) and Inbucket (SMTP 127.0.0.1:2525) are up.");
 
     const already = await this.probe(FIRST_PROBE_REQUEST_MS);

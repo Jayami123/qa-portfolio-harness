@@ -26,6 +26,7 @@ import {
   type LoginTokenExchangeShape,
   type SignInResultShape,
 } from "./twenty-env.js";
+import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from "./pg-stats.js";
 import { twentyRuntimeOverrideFiles, writeTwentyRuntimeOverride } from "./twenty-runtime-override.js";
 
 const COMPOSE_PROJECT = "qa-harness-twenty";
@@ -72,6 +73,7 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
       files: [
         ...twentyComposeFilePaths(this.dockerDir(), harnessComposeFile("twenty.compose.yml")),
         ...twentyRuntimeOverrideFiles(),
+        ...pgStatsComposeFilePaths({ env: process.env, product: "twenty" }),
       ],
       cwd: this.dockerDir(),
       env: {
@@ -150,6 +152,17 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
     writeTwentyRuntimeOverride({ env: process.env });
     await this.prepareDockerEnvAsync();
     await composeUp(this.composeOpts(), { wait: true });
+    if (pgStatsEnabled(process.env)) {
+      // Same defaults the fork's compose substitutes when PG_DATABASE_USER and PG_DATABASE_NAME are unset.
+      await enablePgStatsExtension({
+        project: COMPOSE_PROJECT,
+        files: this.composeOpts().files,
+        service: "db",
+        user: process.env.PG_DATABASE_USER ?? "postgres",
+        db: process.env.PG_DATABASE_NAME ?? "default",
+        cwd: this.dockerDir(),
+      });
+    }
     await this.assertRunningServerImage();
     console.log(`
 Twenty stack is up (image ${twentyImageRef(this.cfg.imageTag)}).
