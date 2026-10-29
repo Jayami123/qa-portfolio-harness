@@ -3,7 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import type { MedusaConfig } from "../config.js";
 import { calHeapEnv, calNodeHeapEnv } from "./cal.adapter.js";
+import { MedusaAdapter } from "./medusa.adapter.js";
+import { parseMedusaEnvFile } from "./medusa-env.js";
 import {
   appendNodeOptions,
   documensoAppEnvWithPreload,
@@ -122,5 +125,37 @@ describe("documensoAppEnvWithPreload", () => {
       HARNESS_EL_OUT: out,
       HARNESS_EL_ROLE: "server",
     });
+  });
+});
+
+describe("Medusa pnpm env", () => {
+  it("carries no --require when the preload flag is on: the pnpm runs take the backend .env only", () => {
+    const productRoot = path.join(tmp, "medusa-dtc-starter");
+    const backend = path.join(productRoot, "apps", "backend");
+    fs.mkdirSync(backend, { recursive: true });
+    const envText = "DATABASE_URL=postgres://medusa\nNODE_OPTIONS=--max-old-space-size=4096\n";
+    fs.writeFileSync(path.join(backend, ".env"), envText);
+
+    const saved = { HARNESS_EL_PRELOAD: process.env.HARNESS_EL_PRELOAD, HARNESS_EL_OUT: process.env.HARNESS_EL_OUT };
+    process.env.HARNESS_EL_PRELOAD = preload;
+    process.env.HARNESS_EL_OUT = path.join(tmp, "medusa-pnpm-out");
+    try {
+      const adapter = new MedusaAdapter({ baseUrl: "http://127.0.0.1:9000", productRoot } as MedusaConfig);
+      const env = (adapter as unknown as { backendProcessEnv: () => Record<string, string> }).backendProcessEnv();
+      assert.deepEqual(env, parseMedusaEnvFile(envText));
+      assert.equal(env.NODE_OPTIONS, "--max-old-space-size=4096");
+      assert.equal(
+        Object.values(env).some((value) => value.includes("--require")),
+        false,
+      );
+    } finally {
+      for (const key of ["HARNESS_EL_PRELOAD", "HARNESS_EL_OUT"] as const) {
+        if (saved[key] === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = saved[key];
+        }
+      }
+    }
   });
 });

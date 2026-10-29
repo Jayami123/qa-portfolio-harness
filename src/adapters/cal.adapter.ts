@@ -28,6 +28,8 @@ import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "
 import { appendNodeOptions, elPreloadFromEnv } from "./telemetry-env.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
+/** The fork's Postgres service. --wait must name it: the fork's one-shot postgres_is_ready container exits, and --wait fails on any exit (docker/compose#10596). */
+export const CAL_POSTGRES_SERVICE = "postgres";
 const CAL_WEB_STOP_WAIT_MS = 30_000;
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
 const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
@@ -387,12 +389,12 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
 
     // The extension needs a healthy database, so the pg_stat_statements path waits for the healthcheck.
     const pgStats = pgStatsEnabled(process.env);
-    await composeUp(this.composeOpts(), { wait: pgStats });
+    await composeUp(this.composeOpts(), { wait: pgStats, waitServices: [CAL_POSTGRES_SERVICE] });
     if (pgStats) {
       await enablePgStatsExtension({
         project: COMPOSE_PROJECT,
         files: this.composeOpts().files,
-        service: "postgres",
+        service: CAL_POSTGRES_SERVICE,
         user: "postgres",
         db: "calendso",
         cwd: this.prismaDir(),
