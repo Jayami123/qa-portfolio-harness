@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- With `HARNESS_PG_STATS=1`, Cal `up()` waits only on the fork's `postgres` service (`up -d --wait postgres`). `--wait` on every service failed because the fork's one-shot `postgres_is_ready` container exits by design. Unset or `true` keeps the v0.2.17 argv (`up -d`).
+
 ## v0.2.17 — 2026-10-29
 
 - Optional `HARNESS_EL_PRELOAD` (an absolute path to a readable file) and `HARNESS_EL_OUT` (an absolute directory, created when missing) add `--require=<preload>` to the Node processes of Cal's web server, the Medusa backends, the Documenso app (and its build and seed, which share its env) and the Twenty server and worker, and set `HARNESS_EL_OUT` and `HARNESS_EL_ROLE` in each. Unset or blank keeps every process env byte-identical to v0.2.16. An invalid path makes `up()` fail before any file is written.
