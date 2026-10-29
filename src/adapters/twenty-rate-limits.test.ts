@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   readTwentyRateLimitEnv,
-  twentyRateLimitComposeYaml,
   TWENTY_RATE_LIMIT_ENV,
 } from "./twenty-rate-limits.js";
+import { twentyRuntimeOverrideYaml } from "./twenty-runtime-override.js";
 
 describe("readTwentyRateLimitEnv", () => {
   it("reads nothing when no allowlisted name is set", () => {
     assert.deepEqual(readTwentyRateLimitEnv({}), {});
-    assert.equal(twentyRateLimitComposeYaml(readTwentyRateLimitEnv({})), undefined);
+    assert.equal(twentyRuntimeOverrideYaml(readTwentyRateLimitEnv({}), undefined), undefined);
   });
 
   it("treats blank and whitespace values as unset", () => {
@@ -58,10 +58,13 @@ describe("readTwentyRateLimitEnv", () => {
   });
 
   it("writes the same keys for server and worker", () => {
-    const yaml = twentyRateLimitComposeYaml({
-      API_RATE_LIMITING_SHORT_LIMIT: "500",
-      APPLICATION_API_RATE_LIMITING_LIMIT: "700",
-    });
+    const yaml = twentyRuntimeOverrideYaml(
+      {
+        API_RATE_LIMITING_SHORT_LIMIT: "500",
+        APPLICATION_API_RATE_LIMITING_LIMIT: "700",
+      },
+      undefined,
+    );
     assert.equal(
       yaml,
       [
@@ -109,9 +112,9 @@ function assertForwarded(name: (typeof TWENTY_RATE_LIMIT_ENV)[number], value: st
   const values = readTwentyRateLimitEnv({ [name]: value });
   assert.deepEqual(values, { [name]: value });
 
-  const yaml = twentyRateLimitComposeYaml(values) ?? "";
+  const yaml = twentyRuntimeOverrideYaml(values, undefined) ?? "";
   assert.equal(yaml.split(`      ${name}: "${value}"`).length - 1, 2, "server and worker both carry the key");
 
   const blank = readTwentyRateLimitEnv({ [name]: "" });
-  assert.equal(twentyRateLimitComposeYaml(blank), undefined);
+  assert.equal(twentyRuntimeOverrideYaml(blank, undefined), undefined);
 }

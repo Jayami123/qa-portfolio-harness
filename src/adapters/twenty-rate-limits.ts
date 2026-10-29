@@ -42,23 +42,3 @@ export function readTwentyRateLimitEnv(
   }
   return values;
 }
-
-/** YAML for server and worker with the same keys, or undefined when there are no keys. Values are digits only. */
-export function twentyRateLimitComposeYaml(
-  values: Partial<Record<TwentyRateLimitEnvName, string>>,
-): string | undefined {
-  const names = TWENTY_RATE_LIMIT_ENV.filter((name) => values[name] !== undefined);
-  if (names.length === 0) {
-    return undefined;
-  }
-  const lines = ["services:"];
-  for (const service of ["server", "worker"]) {
-    lines.push(`  ${service}:`, "    environment:");
-    for (const name of names) {
-      const value = values[name] as string;
-      assertWholeLimit(name, value);
-      lines.push(`      ${name}: "${value}"`);
-    }
-  }
-  return `${lines.join("\n")}\n`;
-}
