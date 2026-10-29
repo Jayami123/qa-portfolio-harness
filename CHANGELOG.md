@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Optional `HARNESS_PG_STATS=1` (exact value) starts the Medusa, Documenso, Cal and Twenty Postgres with `pg_stat_statements` preloaded and `track_io_timing` on, then runs `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` once the database is healthy. Unset, `true` or blank keeps the stock command and creates no extension. A failed `CREATE EXTENSION` makes `up()` fail, with the psql message.
+
 ## v0.2.16 — 2026-10-29
 
 - Optional API_RATE_LIMITING_SHORT_TTL_IN_MS, API_RATE_LIMITING_SHORT_LIMIT, API_RATE_LIMITING_LONG_TTL_IN_MS, API_RATE_LIMITING_LONG_LIMIT, APPLICATION_API_RATE_LIMITING_TTL_IN_MS and APPLICATION_API_RATE_LIMITING_LIMIT are written into the Twenty server and worker when set to a whole number of at least 1. Blank or unset keeps the image default. Nothing else is forwarded.
