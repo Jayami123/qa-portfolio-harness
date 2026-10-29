@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.16 — 2026-10-29
+
 - Optional API_RATE_LIMITING_SHORT_TTL_IN_MS, API_RATE_LIMITING_SHORT_LIMIT, API_RATE_LIMITING_LONG_TTL_IN_MS, API_RATE_LIMITING_LONG_LIMIT, APPLICATION_API_RATE_LIMITING_TTL_IN_MS and APPLICATION_API_RATE_LIMITING_LIMIT are written into the Twenty server and worker when set to a whole number of at least 1. Blank or unset keeps the image default. Nothing else is forwarded.
 
 ## v0.2.15 — 2026-10-24
