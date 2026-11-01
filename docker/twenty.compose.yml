@@ -13,6 +13,8 @@ services:
 
   server:
     image: twentycrm/twenty:${TAG:-v2.44.0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: curl --fail http://localhost:3000/healthz
       start_period: 300s
@@ -35,6 +37,8 @@ services:
       IS_EMAIL_VERIFICATION_REQUIRED: "false"
   worker:
     image: twentycrm/twenty:${TAG:-v2.44.0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       mailpit:
         condition: service_started

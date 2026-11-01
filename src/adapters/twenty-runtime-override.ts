@@ -7,6 +7,7 @@ import {
   type TwentyRateLimitEnvName,
 } from "./twenty-rate-limits.js";
 import { elPreloadFromEnv, type ElPreload } from "./telemetry-env.js";
+import { readTwentyPassthroughNames, type TwentyPassthroughName } from "./twenty-passthrough.js";
 
 export const TWENTY_RUNTIME_OVERRIDE_FILE = "twenty.runtime.compose.yml";
 
@@ -48,9 +49,12 @@ function rateLimitEnvLines(values: Partial<Record<TwentyRateLimitEnvName, string
 export function twentyRuntimeOverrideYaml(
   values: Partial<Record<TwentyRateLimitEnvName, string>>,
   preload: ElPreload | undefined,
+  passthrough: readonly TwentyPassthroughName[] = [],
 ): string | undefined {
   const limitLines = rateLimitEnvLines(values);
-  if (limitLines.length === 0 && preload === undefined) {
+  // Mapping form with no value: compose takes NAME from the environment of up. The value never reaches this file.
+  const passLines = passthrough.map((name) => `      ${name}:`);
+  if (limitLines.length === 0 && passLines.length === 0 && preload === undefined) {
     return undefined;
   }
   if (preload && /['\r\n]/.test(`${preload.preload}${preload.out}`)) {
@@ -58,7 +62,7 @@ export function twentyRuntimeOverrideYaml(
   }
   const out = ["services:"];
   for (const role of ["server", "worker"]) {
-    out.push(`  ${role}:`, "    environment:", ...limitLines);
+    out.push(`  ${role}:`, "    environment:", ...limitLines, ...passLines);
     if (preload) {
       out.push(
         `      NODE_OPTIONS: "--require=${CONTAINER_PRELOAD}"`,
@@ -83,7 +87,7 @@ export function writeTwentyRuntimeOverride(opts: {
 }): string | undefined {
   const values = readTwentyRateLimitEnv(opts.env);
   const preload = elPreloadFromEnv(opts.env);
-  const yaml = twentyRuntimeOverrideYaml(values, preload);
+  const yaml = twentyRuntimeOverrideYaml(values, preload, readTwentyPassthroughNames(opts.env));
   const fsImpl = opts.fs ?? defaultRuntimeOverrideFs;
   const file = twentyRuntimeOverridePath();
 
