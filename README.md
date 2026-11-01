@@ -53,12 +53,12 @@ qa-portfolio-harness/
 
 | Product   | Path                                      | Typical ports (harness)      |
 |-----------|-------------------------------------------|------------------------------|
-| Cal.diy   | `../products/cal`                         | web 3000, API v2 5555, pg 5450 |
+| Cal.diy   | `../products/cal`                         | web 3000, API v2 **5555**, pg 5450, Redis **6381** (harness compose) |
 | Documenso | `../products/documenso`                   | web **3001**, pg **5451** (harness compose), SMTP 2525 |
 | Medusa    | `../products/medusa-dtc-starter`          | backend **9000**, pg **5433** (harness compose) |
 | Twenty    | `../products/twenty-CRM`                  | app **3002**, pg 5434          |
 
-Cal defaults to web **3000**. Documenso is started by the harness on **127.0.0.1:3001**. Twenty’s compose overlay publishes **3002**. This harness does **not** change product defaults.
+Cal defaults to web **3000**. `up cal` also starts the Cal API v2 on **127.0.0.1:5555** (health `GET /health` → `OK`, not `/v2/health`) and Redis on **127.0.0.1:6381** (`REDIS_URL`); `down cal` stops both. If port 5555 or 3000 is held by a process the harness did not start, `up` stops and names it. Documenso is started by the harness on **127.0.0.1:3001**. Twenty’s compose overlay publishes **3002**. This harness does **not** change product defaults.
 
 ## Setup
 

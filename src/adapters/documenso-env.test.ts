@@ -17,6 +17,7 @@ import {
   parseNetstatListeningPids,
   parseTasklistImageName,
   runningWebappUrlMatches,
+  withDocumensoHeap,
 } from "./documenso-env.js";
 
 const productRoot = path.resolve("products", "documenso");
@@ -301,5 +302,23 @@ describe("parseTasklistImageName", () => {
 
   it("returns undefined when no task matches", () => {
     assert.equal(parseTasklistImageName("INFO: No tasks are running which match the specified criteria."), undefined);
+  });
+});
+
+describe("withDocumensoHeap", () => {
+  it("merges the 7168 MB default into an unset NODE_OPTIONS", () => {
+    assert.equal(withDocumensoHeap({ A: "1" }, undefined).NODE_OPTIONS, "--max-old-space-size=7168");
+  });
+
+  it("keeps the caller's flags and appends the default", () => {
+    assert.equal(withDocumensoHeap({}, "--use-openssl-ca").NODE_OPTIONS, "--use-openssl-ca --max-old-space-size=7168");
+  });
+
+  it("keeps the caller's own heap limit with no second flag", () => {
+    assert.equal(withDocumensoHeap({}, "--max-old-space-size=4096").NODE_OPTIONS, "--max-old-space-size=4096");
+  });
+
+  it("leaves the other keys of the base env unchanged", () => {
+    assert.deepEqual(withDocumensoHeap({ A: "1", B: "2" }, undefined), { A: "1", B: "2", NODE_OPTIONS: "--max-old-space-size=7168" });
   });
 });

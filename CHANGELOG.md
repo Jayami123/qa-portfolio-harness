@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v0.3.0 — 2026-11-01
+
+- Cal `up()` starts the Cal API v2 on `127.0.0.1:5555` (`apps/api/v2`, built with the fork's `build:docker` and `build` scripts, detached, pid in `.harness/cal-api.pid`) and Redis on `127.0.0.1:6381` (`docker/cal.redis.compose.yml`, `REDIS_URL` passed in the API's spawn env). `up()` returns only when the web root and `$CAL_API_BASE_URL/health` both answer 200, and the listeners are the recorded pids. A process the harness did not start that holds 5555 or 3000 makes `up()` fail and names it. `down()` stops the API, then the web, then compose (Postgres and Redis).
+- Cal and Documenso processes merge a default `--max-old-space-size` into an existing `NODE_OPTIONS` (new helper `withHeapDefault`). Cal stays at 8192 MB. Documenso gets 7168 MB, which passed the build in the P2 probe (exit 134 at about 2 GB before). A caller's own heap limit is kept, with no second flag.
+- Twenty: `docker/twenty.compose.yml` adds `extra_hosts: host.docker.internal:host-gateway` to `server` and `worker` (ADR 0002).
+- Twenty forwards `OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS`, `IS_BILLING_ENABLED`, `BILLING_STRIPE_API_KEY`, `BILLING_STRIPE_WEBHOOK_SECRET` and `BILLING_STRIPE_PUBLISHABLE_KEY` by name, only when set. Compose reads the value from the environment of `up`; no value is written to `.harness/twenty.runtime.compose.yml`.
+- `down documenso` stops only the process tree tied to the pid record, and deletes the record only after port 3001 is free. A record whose root had already exited, with its server still on the port, no longer loses track of the server; a listener is signaled only when the record is its ancestor. If the port is still held, `down` exits non-zero and names the recorded pid and the listeners.
+- Cal API v2 is started with `NODE_ENV=production`, a per-run generated `JWT_SECRET` (never written to disk), and the shared web values from the Cal `.env`. `STRIPE_API_KEY` is a real credential: it comes from the environment or the harness `.env`, and a missing one fails `up` by name. The API log line redacts every secret.
+
+**Upgrade note.** Consumers who set none of the new variables get the same Cal web, Twenty and Documenso behaviour, with two exceptions: `up cal` now also starts the API v2 and Redis (both stop in `down cal`), and Documenso now sets a 7168 MB heap default when `NODE_OPTIONS` is unset. The Cal compose `up` now waits for the Redis healthcheck as well as Postgres.
+
 ## v0.2.18 — 2026-10-29
 
 - With `HARNESS_PG_STATS=1`, Cal `up()` waits only on the fork's `postgres` service (`up -d --wait postgres`). `--wait` on every service failed because the fork's one-shot `postgres_is_ready` container exits by design. Unset or `true` keeps the v0.2.17 argv (`up -d`).

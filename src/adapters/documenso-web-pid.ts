@@ -129,36 +129,83 @@ export interface StopDocumensoWebFromPidFileDeps {
   captureStartMark: (pid: number) => string | undefined;
 }
 
+/** Parent pid of a process, or undefined when it has no parent or cannot be read (Windows: CIM; POSIX: ps). */
+export function parentPidOf(pid: number, platformName: NodeJS.Platform = platform()): number | undefined {
+  const options = { encoding: "utf8" as const, stdio: ["ignore", "pipe", "ignore"] as ["ignore", "pipe", "ignore"] };
+  try {
+    const out =
+      platformName === "win32"
+        ? execFileSync("powershell", ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId=${String(pid)}').ParentProcessId`], options)
+        : execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], options);
+    const parent = Number(out.trim());
+    return Number.isSafeInteger(parent) && parent > 0 ? parent : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Stops only the harness-recorded Documenso web pid (and its tree). Missing or empty pid files are
- * a no-op. Corrupt pid files are removed. Throws {@link DocumensoWebStopError} when kill fails while
- * the pid may still be live, or when a live pid no longer matches the recorded start mark.
+ * The pid to signal so that a port listener dies, or undefined when the listener is not proven to belong to the record.
+ * The listener belongs to the record when the recorded pid is on its ancestor chain. A live root is signaled whole
+ * (taskkill /T, or the process group). A dead root keeps its children on the chain (Windows does not reparent them),
+ * so the child just below the root is signaled and its tree takes the listener with it.
  */
-export function stopDocumensoWebFromPidFile(
+export function ownedKillTarget(input: {
+  readonly listener: number;
+  readonly recordedRoot: number;
+  readonly rootAlive: boolean;
+  readonly parentOf: (pid: number) => number | undefined;
+}): number | undefined {
+  const chain: number[] = [];
+  let current: number | undefined = input.listener;
+  while (current !== undefined && chain.length < 64 && !chain.includes(current)) {
+    chain.push(current);
+    current = input.parentOf(current);
+  }
+  const index = chain.indexOf(input.recordedRoot);
+  if (index < 0) {
+    return undefined;
+  }
+  if (input.rootAlive) {
+    return input.recordedRoot;
+  }
+  return index > 0 ? chain[index - 1] : undefined;
+}
+
+export type DocumensoRootState = "none" | "dead" | "live";
+
+export interface DocumensoRootStop {
+  readonly record: DocumensoWebPidRecord | undefined;
+  /** dead: the recorded pid had already exited. live: the recorded tree was signaled (or its kill returned). */
+  readonly state: DocumensoRootState;
+}
+
+/**
+ * Signals the recorded root tree only while the root is alive and its start mark matches. Never removes the pid
+ * file: the caller removes it after the port is confirmed free. A corrupt pid file is removed (it names no pid).
+ * A dead root is reported as dead, not as stopped: its children may still hold the port.
+ */
+export function stopDocumensoWebRoot(
   harnessRoot: string = HARNESS_ROOT,
   deps?: Partial<StopDocumensoWebFromPidFileDeps>,
-): void {
-  const pidFile = documensoWebPidFile(harnessRoot);
+): DocumensoRootStop {
   const readRecord = deps?.readRecord ?? (() => readDocumensoWebPidRecord(harnessRoot));
-  const removePidFile =
-    deps?.removePidFile ??
-    (() => {
-      fs.rmSync(pidFile, { force: true });
-    });
   const pidRunning = deps?.isPidRunning ?? isPidRunning;
   const killTree = deps?.killProcessTree ?? defaultKillProcessTree;
   const readStartMark = deps?.captureStartMark ?? captureProcessStartMark;
 
   const record = readRecord();
   if (record === undefined) {
-    if (fs.existsSync(pidFile)) {
-      removePidFile();
+    const file = documensoWebPidFile(harnessRoot);
+    if (fs.existsSync(file)) {
+      fs.rmSync(file, { force: true });
     }
-    return;
+    return { record: undefined, state: "none" };
   }
-
-  const running = pidRunning(record.pid);
-  if (running && record.startMark !== undefined) {
+  if (!pidRunning(record.pid)) {
+    return { record, state: "dead" };
+  }
+  if (record.startMark !== undefined) {
     const currentMark = readStartMark(record.pid);
     if (currentMark !== record.startMark) {
       throw new DocumensoWebStopError(
@@ -167,20 +214,21 @@ export function stopDocumensoWebFromPidFile(
       );
     }
   }
-
   try {
     killTree(record.pid);
   } catch (error) {
-    if (!pidRunning(record.pid)) {
-      removePidFile();
-      return;
+    if (pidRunning(record.pid)) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new DocumensoWebStopError(
+        `Failed to stop Documenso web process tree for pid ${String(record.pid)}: ${detail}`,
+        { cause: error },
+      );
     }
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new DocumensoWebStopError(
-      `Failed to stop Documenso web process tree for pid ${String(record.pid)}: ${detail}`,
-      { cause: error },
-    );
   }
+  return { record, state: "live" };
+}
 
-  removePidFile();
+/** Removes the recorded pid file. Called only after the port is confirmed free. */
+export function removeDocumensoWebPidFile(harnessRoot: string = HARNESS_ROOT): void {
+  fs.rmSync(documensoWebPidFile(harnessRoot), { force: true });
 }
