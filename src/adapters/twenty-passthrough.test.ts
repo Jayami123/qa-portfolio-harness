@@ -122,3 +122,25 @@ describe("writeTwentyRuntimeOverride with pass-through names", () => {
     assert.equal(yaml.includes("BILLING_STRIPE_API_KEY:"), true);
   });
 });
+
+describe("twentyRuntimeOverrideYaml snapshot with rate limits and pass-through", () => {
+  it("writes the rate limit and the pass-through names, in order, with no value for the names", () => {
+    assert.equal(
+      twentyRuntimeOverrideYaml({ API_RATE_LIMITING_SHORT_LIMIT: "500" }, undefined, ["IS_BILLING_ENABLED", "BILLING_STRIPE_API_KEY"]),
+      [
+        "services:",
+        "  server:",
+        "    environment:",
+        '      API_RATE_LIMITING_SHORT_LIMIT: "500"',
+        "      IS_BILLING_ENABLED:",
+        "      BILLING_STRIPE_API_KEY:",
+        "  worker:",
+        "    environment:",
+        '      API_RATE_LIMITING_SHORT_LIMIT: "500"',
+        "      IS_BILLING_ENABLED:",
+        "      BILLING_STRIPE_API_KEY:",
+        "",
+      ].join("\n"),
+    );
+  });
+});
