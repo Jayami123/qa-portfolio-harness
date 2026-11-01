@@ -85,6 +85,23 @@ interface HarnessBuildRecord {
 export const CAL_HEAP_MB = 8192;
 
 /** The heap-only env every Cal process gets (the default for all callers except the web server). */
+/** The order of down(): the API first, then the web, then compose (which also removes Redis). Exported so the order is tested. */
+export async function calDownSequence(steps: {
+  readonly stopApi: () => Promise<void>;
+  readonly stopWeb: () => Promise<void>;
+  readonly composeDown: () => Promise<void>;
+}): Promise<void> {
+  await steps.stopApi();
+  await steps.stopWeb();
+  await steps.composeDown();
+}
+
+/** The readiness timeout for the API, with the API log tail. Exported so the message is tested. */
+export function apiTimeoutMessage(url: string, logTail: string): string {
+  return `Timed out waiting for ${url} to answer OK. Last log:
+${logTail}`;
+}
+
 export function calHeapEnv(processEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
     NEXT_TELEMETRY_DISABLED: "1",
@@ -555,8 +572,7 @@ ${this.readLogTail(logFile)}`,
       healthy = await this.apiHealthOk();
     }
     if (!healthy) {
-      throw new Error(`Timed out waiting for ${url} to answer OK. Last log:
-${this.readLogTail(logFile)}`);
+      throw new Error(apiTimeoutMessage(url, this.readLogTail(logFile)));
     }
   }
 
@@ -765,9 +781,11 @@ ${this.readLogTail(logFile)}`);
   }
 
   async down(): Promise<void> {
-    await this.stopApi();
-    await this.stopWeb();
-    await composeDown(this.composeOpts());
+    await calDownSequence({
+      stopApi: () => this.stopApi(),
+      stopWeb: () => this.stopWeb(),
+      composeDown: () => composeDown(this.composeOpts()),
+    });
     console.log("Cal API v2 and web stopped; compose stack torn down (Postgres and Redis).");
   }
 
