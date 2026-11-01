@@ -17,6 +17,7 @@ export const CAL_API_NO_FALLBACK_KEYS = [
   { key: "STRIPE_API_KEY", class: "external", source: "apps/api/v2/src/config/app.ts:39" },
   { key: "STRIPE_WEBHOOK_SECRET", class: "external", source: "apps/api/v2/src/config/app.ts:40" },
   { key: "JWT_SECRET", class: "generated", source: "apps/api/v2/src/modules/jwt/jwt.module.ts:8" },
+  { key: "NODE_ENV", class: "infra", source: "apps/api/v2/src/swagger/generate-swagger.ts:32" },
 ] as const;
 
 export type CalApiEnvKey = (typeof CAL_API_NO_FALLBACK_KEYS)[number]["key"];
@@ -47,6 +48,8 @@ export function buildCalApiEnv(input: CalApiEnvInput): Record<string, string> {
   const env: Record<string, string> = {
     API_PORT: String(input.apiPort),
     REDIS_URL: input.redisUrl,
+    // Read with no fallback by the swagger path (generate-swagger.ts:32). Production matches the web start.
+    NODE_ENV: "production",
   };
   const missing: string[] = [];
   for (const { key, class: cls } of CAL_API_NO_FALLBACK_KEYS) {
@@ -84,12 +87,12 @@ export function buildCalApiEnv(input: CalApiEnvInput): Record<string, string> {
   return env;
 }
 
-/** A log-safe view of the env: every key is shown, every value that is a generated or external secret is replaced. */
+/** Keys whose values are safe to print: the port, the local Redis address, and the mode. Everything else is redacted. */
+const PRINTABLE_ENV_KEYS = new Set(["API_PORT", "REDIS_URL", "NODE_ENV"]);
+
+/** A log-safe view of the env. Secrets and connection strings (shared, generated, external) are never printed. */
 export function describeCalApiEnv(env: Readonly<Record<string, string>>): string {
-  const secret = new Set<string>(
-    CAL_API_NO_FALLBACK_KEYS.filter((k) => k.class === "generated" || k.class === "external").map((k) => k.key),
-  );
   return Object.keys(env)
-    .map((key) => `${key}=${secret.has(key) ? "<redacted>" : env[key]}`)
+    .map((key) => `${key}=${PRINTABLE_ENV_KEYS.has(key) ? env[key] : "<redacted>"}`)
     .join(" ");
 }

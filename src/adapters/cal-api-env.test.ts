@@ -36,6 +36,7 @@ describe("CAL_API_NO_FALLBACK_KEYS", () => {
         "STRIPE_API_KEY",
         "STRIPE_WEBHOOK_SECRET",
         "JWT_SECRET",
+        "NODE_ENV",
       ],
     );
     for (const k of CAL_API_NO_FALLBACK_KEYS) {
@@ -51,6 +52,15 @@ describe("buildCalApiEnv", () => {
       assert.ok(env[key] !== undefined, `missing ${key}`);
     }
     assert.equal(env.API_PORT, "5555");
+    assert.equal(env.NODE_ENV, "production");
+  });
+
+  it("never lets a shared web secret or DB URL into the log-safe view", () => {
+    const text = describeCalApiEnv(buildCalApiEnv(input()));
+    assert.equal(text.includes(ROOT.NEXTAUTH_SECRET), false);
+    assert.equal(text.includes(ROOT.DATABASE_URL), false);
+    assert.match(text, /NEXTAUTH_SECRET=<redacted>/);
+    assert.match(text, /NODE_ENV=production/);
   });
 
   it("gives shared keys the web's own values", () => {
