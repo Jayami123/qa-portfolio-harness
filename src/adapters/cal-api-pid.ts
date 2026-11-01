@@ -134,7 +134,7 @@ export function assertApiListenerIsRecorded(input: {
 export type CalApiState = "ok" | "starting" | "down";
 
 export interface CalApiStateInput {
-  /** The API answered 200 on `${apiBaseUrl}/health`. */
+  /** `GET <apiBaseUrl>/health` returned status 200 with the body "OK" (the fork's health route). */
   readonly healthy: boolean;
   /** Something accepts TCP connections on the API port. */
   readonly portOpen: boolean;
@@ -148,23 +148,26 @@ export interface CalApiStateInput {
 }
 
 /**
- * The API state for up(). `ok`: healthy. `starting`: the recorded pid is alive and listening, not healthy yet, so wait
- * and do not spawn a second process. `down`: nothing listens. Anything else holding the port throws and names it.
+ * The API state for up(). The answer must come from the recorded pid: `ok` when the health answer is OK and the
+ * port listener is the live recorded pid; `starting` when that pid listens but is not healthy yet (wait, do not spawn);
+ * `down` when nothing listens. Any other holder throws and names it, even one that answers OK.
  */
 export function classifyCalApiState(input: CalApiStateInput): CalApiState {
-  if (input.healthy) {
+  const ours = input.record !== undefined && input.recordLive && input.listeners.includes(input.record.pid);
+  if (input.healthy && ours) {
     return "ok";
   }
-  if (!input.portOpen) {
+  if (!input.healthy && !input.portOpen) {
     return "down";
   }
-  if (input.record !== undefined && input.recordLive && input.listeners.includes(input.record.pid)) {
+  if (!input.healthy && ours) {
     return "starting";
   }
   const holder = input.listeners.length === 0 ? "a process whose pid could not be read" : `pid ${input.listeners.join(", ")}`;
+  const answer = input.healthy ? "answers OK" : "does not answer OK";
   throw new Error(
     `Port ${String(input.port)} is held by ${holder}, which is not the recorded Cal API v2 process ` +
-      `(${describeCalApiRecord(input.record)}) and does not answer ${input.healthUrl} with 200. ` +
+      `(${describeCalApiRecord(input.record)}) and ${answer} at ${input.healthUrl}. ` +
       `Stop it yourself, then run up again. The harness does not kill processes it did not start.`,
   );
 }

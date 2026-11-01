@@ -104,38 +104,46 @@ describe("settleCalApiStop", () => {
 });
 
 describe("classifyCalApiState", () => {
-  const base = { portOpen: true, listeners: [7], record: { pid: 7 }, recordLive: true, port: 5555, healthUrl: "http://127.0.0.1:5555/health" };
+  const ours = { portOpen: true, listeners: [7], record: { pid: 7 }, recordLive: true, port: 5555, healthUrl: "http://127.0.0.1:5555/health" };
 
-  it("is ok when health answers, whatever holds the port", () => {
-    assert.equal(classifyCalApiState({ ...base, healthy: true, listeners: [99], record: undefined }), "ok");
+  it("is ok only when the health answer is OK and the recorded live pid listens", () => {
+    assert.equal(classifyCalApiState({ ...ours, healthy: true }), "ok");
   });
 
-  it("is down when nothing listens", () => {
-    assert.equal(classifyCalApiState({ ...base, healthy: false, portOpen: false, listeners: [] }), "down");
+  it("throws when a foreign process answers OK on the port (the N1 case)", () => {
+    assert.throws(
+      () => classifyCalApiState({ ...ours, healthy: true, listeners: [99], record: undefined, recordLive: false }),
+      /Port 5555 is held by pid 99, which is not the recorded Cal API v2 process .* answers OK/,
+    );
+  });
+
+  it("throws when the recorded pid answers OK but another pid holds the port", () => {
+    assert.throws(() => classifyCalApiState({ ...ours, healthy: true, listeners: [99] }), /held by pid 99/);
+  });
+
+  it("is down when nothing listens and nothing answers", () => {
+    assert.equal(classifyCalApiState({ ...ours, healthy: false, portOpen: false, listeners: [] }), "down");
   });
 
   it("is starting when the recorded live pid listens but is not healthy yet", () => {
-    assert.equal(classifyCalApiState({ ...base, healthy: false }), "starting");
+    assert.equal(classifyCalApiState({ ...ours, healthy: false }), "starting");
   });
 
-  it("throws and names a foreign pid on the port", () => {
+  it("throws for a foreign listener that does not answer OK", () => {
     assert.throws(
-      () => classifyCalApiState({ ...base, healthy: false, listeners: [99], record: undefined, recordLive: false }),
-      /Port 5555 is held by pid 99, which is not the recorded Cal API v2 process/,
+      () => classifyCalApiState({ ...ours, healthy: false, listeners: [99], record: undefined, recordLive: false }),
+      /Port 5555 is held by pid 99.*does not answer OK/,
     );
   });
 
   it("throws when the holder is unknown and no record exists", () => {
     assert.throws(
-      () => classifyCalApiState({ ...base, healthy: false, listeners: [], record: undefined, recordLive: false }),
+      () => classifyCalApiState({ ...ours, healthy: false, listeners: [], record: undefined, recordLive: false }),
       /held by a process whose pid could not be read/,
     );
   });
 
   it("does not treat a stale record (live=false) as ours", () => {
-    assert.throws(
-      () => classifyCalApiState({ ...base, healthy: false, recordLive: false }),
-      /Port 5555 is held by pid 7/,
-    );
+    assert.throws(() => classifyCalApiState({ ...ours, healthy: false, recordLive: false }), /held by pid 7/);
   });
 });

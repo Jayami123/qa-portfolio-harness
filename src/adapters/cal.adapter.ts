@@ -27,6 +27,7 @@ import {
   writeCalWebPid,
 } from "./cal-web-pid.js";
 import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
+import { buildCalApiEnv, describeCalApiEnv } from "./cal-api-env.js";
 import {
   assertApiListenerIsRecorded,
   calApiSpawnSpec,
@@ -421,14 +422,24 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     return { web: web.ok ? "ok" : "down", api: await this.apiState() };
   }
 
+  /** 200 with the body "OK" (the fork's health route, apps/api/v2/src/app.controller.ts:7). Anything else is not healthy. */
+  private async apiHealthOk(): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.cfg.apiBaseUrl}/health`, { signal: AbortSignal.timeout(10_000) });
+      return res.status === 200 && (await res.text()).trim() === "OK";
+    } catch {
+      return false;
+    }
+  }
+
   private async apiState(): Promise<CalApiState> {
     const { port } = this.apiListen();
-    const health = await pollHealth(`${this.cfg.apiBaseUrl}/health`, { timeoutMs: 0, requestTimeoutMs: 10_000 });
+    const healthy = await this.apiHealthOk();
     const record = readCalApiPidRecord();
     return classifyCalApiState({
-      healthy: health.ok,
-      portOpen: health.ok || (await this.isApiPortOpen()),
-      listeners: health.ok ? [] : listenerPids(port),
+      healthy,
+      portOpen: healthy || (await this.isApiPortOpen()),
+      listeners: listenerPids(port),
       record,
       recordLive: record !== undefined && recordedWebState(record, calApiStopDeps()) === "live",
       port,
@@ -460,25 +471,16 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     return path.join(this.harnessStateDir(), "cal-api.log");
   }
 
-  /** The API process env, added to the caller's: the heap default, the port, Redis, and the product root .env keys. */
-  private apiSpawnEnv(): NodeJS.ProcessEnv {
+  /** The API process env: the no-fallback keys from the product root .env, the generated test secret, and the port and Redis URL. */
+  private apiSpawnEnv(): Record<string, string> {
     const rootEnvFile = path.join(this.productRoot, ".env");
     const rootEnv = loadDotenv({ path: rootEnvFile, processEnv: {} }).parsed ?? {};
-    const missing = CAL_API_REQUIRED_ENV.filter((key) => !rootEnv[key]);
-    if (missing.length > 0) {
-      throw new Error(`Cal API v2 needs ${missing.join(", ")} in ${rootEnvFile} (names only).`);
-    }
-    const env: NodeJS.ProcessEnv = {};
-    for (const key of [...CAL_API_REQUIRED_ENV, ...CAL_API_OPTIONAL_ENV]) {
-      if (rootEnv[key]) {
-        env[key] = rootEnv[key];
-      }
-    }
-    env.DATABASE_READ_URL ??= rootEnv.DATABASE_URL;
-    env.DATABASE_WRITE_URL ??= rootEnv.DATABASE_URL;
-    env.API_PORT = String(this.apiListen().port);
-    env.REDIS_URL = `redis://127.0.0.1:${String(CAL_REDIS_HOST_PORT)}`;
-    return env;
+    return buildCalApiEnv({
+      rootEnv,
+      processEnv: process.env,
+      apiPort: this.apiListen().port,
+      redisUrl: `redis://127.0.0.1:${String(CAL_REDIS_HOST_PORT)}`,
+    });
   }
 
   /** Builds the fork's API v2 with its own scripts. Skips when the build marker matches the fork HEAD and main.js exists. */
@@ -509,6 +511,8 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   private async startApi(): Promise<void> {
     const apiDir = path.join(this.productRoot, "apps", "api", "v2");
     const mainJs = path.join(apiDir, "dist", "apps", "api", "v2", "src", "main.js");
+    const apiEnv = this.apiSpawnEnv();
+    console.log(`Cal API v2 env: ${describeCalApiEnv(apiEnv)}`);
     await this.ensureApiBuild(mainJs);
     const logFile = this.apiLogFile();
     fs.mkdirSync(path.dirname(logFile), { recursive: true });
@@ -518,7 +522,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     this.apiProcess = spawnLogged(spec.command, spec.args, {
       cwd: apiDir,
       logFile,
-      env: { ...calHeapEnv(process.env), ...this.apiSpawnEnv() },
+      env: { ...calHeapEnv(process.env), ...apiEnv },
       detached: spec.detached,
       shell: spec.shell,
     });
@@ -535,26 +539,24 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   }
 
   /** Polls `${apiBaseUrl}/health` until 200. A process that exits, or a timeout, throws with the API log tail. */
+  /** Polls the API health until OK. A process that exits, or a timeout, throws with the API log tail. */
   private async waitForApi(logFile: string, timeoutMs: number): Promise<void> {
     const url = `${this.cfg.apiBaseUrl}/health`;
     const deadline = Date.now() + timeoutMs;
-    let last = await pollHealth(url, { timeoutMs: 0, requestTimeoutMs: 10_000 });
-    while (!last.ok && Date.now() < deadline) {
+    let healthy = await this.apiHealthOk();
+    while (!healthy && Date.now() < deadline) {
       if (this.apiProcess && this.apiProcess.exitCode !== null) {
         throw new Error(
-          `Cal API v2 process exited (code ${String(this.apiProcess.exitCode)}). Last log:\n${this.readLogTail(logFile)}`,
+          `Cal API v2 process exited (code ${String(this.apiProcess.exitCode)}). Last log:
+${this.readLogTail(logFile)}`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 5000));
-      last = await pollHealth(url, { timeoutMs: 0, requestTimeoutMs: 10_000 });
+      healthy = await this.apiHealthOk();
     }
-    if (!last.ok) {
-      throw new Error(
-        `Timed out waiting for ${url} to become healthy` +
-          (last.statusCode !== undefined ? ` (last HTTP ${last.statusCode})` : "") +
-          (last.error ? `: ${last.error}` : "") +
-          `\nLast log:\n${this.readLogTail(logFile)}`,
-      );
+    if (!healthy) {
+      throw new Error(`Timed out waiting for ${url} to answer OK. Last log:
+${this.readLogTail(logFile)}`);
     }
   }
 
