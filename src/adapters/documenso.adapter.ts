@@ -7,7 +7,7 @@ import type { DocumensoConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
 import { run } from "../internal/run.js";
-import { resolveNpm, spawnLogged } from "../internal/spawn-detached.js";
+import { isPidRunning, resolveNpm, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
@@ -31,7 +31,16 @@ import {
   runningWebappUrlMatches,
   type DocumensoProbeVerdict,
 } from "./documenso-env.js";
-import { stopDocumensoWebFromPidFile, writeDocumensoWebPid } from "./documenso-web-pid.js";
+import {
+  defaultKillProcessTree,
+  DocumensoWebStopError,
+  ownedKillTarget,
+  parentPidOf,
+  removeDocumensoWebPidFile,
+  stopDocumensoWebRoot,
+  writeDocumensoWebPid,
+} from "./documenso-web-pid.js";
+import { listenerPids } from "./cal-web-process.js";
 
 const COMPOSE_PROJECT = "qa-harness-documenso";
 const SEED_EXAMPLE_EMAIL = "example@documenso.com";
@@ -244,22 +253,38 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       this.webProcess.kill("SIGTERM");
       await sleep(3000);
     }
-    let stopError: Error | undefined;
-    try {
-      stopDocumensoWebFromPidFile(HARNESS_ROOT);
-    } catch (error) {
-      stopError = error instanceof Error ? error : new Error(String(error));
-    }
-    const closed = await this.waitForPortClosed(host, port, DOCUMENSO_WEB_STOP_POLL_MS);
-    if (closed) {
+    const root = stopDocumensoWebRoot(HARNESS_ROOT);
+    if (await this.waitForPortClosed(host, port, DOCUMENSO_WEB_STOP_POLL_MS)) {
+      removeDocumensoWebPidFile(HARNESS_ROOT);
       return;
     }
-    if (stopError !== undefined) {
-      throw stopError;
+    // The port is still held. Signal a listener only when the recorded pid is on its ancestor chain.
+    if (root.record !== undefined) {
+      const rootAlive = isPidRunning(root.record.pid);
+      for (const listener of listenerPids(Number(port))) {
+        const target = ownedKillTarget({
+          listener,
+          recordedRoot: root.record.pid,
+          rootAlive,
+          parentOf: (pid) => parentPidOf(pid),
+        });
+        if (target !== undefined) {
+          defaultKillProcessTree(target);
+        }
+      }
     }
-    throw new Error(
-      `Documenso web still listening on ${host}:${port} after stop attempt.\n` +
-        `Listeners:\n${this.portOwnerReport(port)}`,
+    if (await this.waitForPortClosed(host, port, DOCUMENSO_WEB_STOP_POLL_MS)) {
+      removeDocumensoWebPidFile(HARNESS_ROOT);
+      return;
+    }
+    const recorded = root.record === undefined ? "none" : `pid ${String(root.record.pid)} (${root.state})`;
+    throw new DocumensoWebStopError(
+      `Documenso web still listening on ${host}:${port} after stop. Recorded ${recorded}.
+` +
+        `Listeners (not owned by the record, or not stopped):
+${this.portOwnerReport(port)}
+` +
+        `Stop the listener yourself, then run down again.`,
     );
   }
 
