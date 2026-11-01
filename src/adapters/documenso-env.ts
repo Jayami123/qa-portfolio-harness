@@ -4,6 +4,15 @@ import dns from "node:dns/promises";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { withHeapDefault } from "../internal/node-options.js";
+
+/** Documenso's old-space default. 7168 MB passed the build in P2 probe 1.3; 2044 MB died with exit 134. */
+export const DOCUMENSO_HEAP_MB = 7168;
+
+/** The base env with the heap default merged into NODE_OPTIONS. The caller's own heap limit wins. */
+export function withDocumensoHeap(base: Record<string, string>, nodeOptions: string | undefined): Record<string, string> {
+  return { ...base, NODE_OPTIONS: withHeapDefault(nodeOptions, DOCUMENSO_HEAP_MB) };
+}
 
 export const DOCUMENSO_NODE_MAJOR = 24;
 export const DOCUMENSO_DEFAULT_PORT = "3001";

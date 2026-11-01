@@ -7,6 +7,7 @@ import path from "node:path";
 import type { CalConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
+import { withHeapDefault } from "../internal/node-options.js";
 import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from "./pg-stats.js";
 import { detectPackageManager, run, runCapture } from "../internal/run.js";
 import { resolveYarn, spawnLogged } from "../internal/spawn-detached.js";
@@ -50,11 +51,14 @@ interface HarnessBuildRecord {
   readonly gitSha: string;
 }
 
+/** Cal's default old-space limit. The caller's own limit in NODE_OPTIONS wins; otherwise the default is merged in. */
+export const CAL_HEAP_MB = 8192;
+
 /** The heap-only env every Cal process gets (the default for all callers except the web server). */
 export function calHeapEnv(processEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return {
     NEXT_TELEMETRY_DISABLED: "1",
-    NODE_OPTIONS: processEnv.NODE_OPTIONS?.trim() || "--max-old-space-size=8192",
+    NODE_OPTIONS: withHeapDefault(processEnv.NODE_OPTIONS, CAL_HEAP_MB),
   };
 }
 

@@ -21,6 +21,7 @@ import {
   buildDocumensoAppEnv,
   classifyDocumensoProbe,
   documensoHealthUrls,
+  withDocumensoHeap,
   documensoListen,
   isDocumensoHealthyStatus,
   localhostTwin,
@@ -98,7 +99,10 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
   }
 
   private appEnv(): Record<string, string> {
-    return documensoAppEnvWithPreload(buildDocumensoAppEnv(this.cfg), process.env);
+    return documensoAppEnvWithPreload(
+      withDocumensoHeap(buildDocumensoAppEnv(this.cfg), process.env.NODE_OPTIONS),
+      process.env,
+    );
   }
 
   private timeoutFromEnv(envName: string, defaultMs: number, minMs: number): number {
