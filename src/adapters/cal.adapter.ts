@@ -4,6 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import { platform } from "node:os";
 import path from "node:path";
+import { config as loadDotenv } from "dotenv";
 import type { CalConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
@@ -26,14 +27,42 @@ import {
   writeCalWebPid,
 } from "./cal-web-pid.js";
 import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
+import {
+  assertApiListenerIsRecorded,
+  calApiSpawnSpec,
+  calApiStopDeps,
+  type CalApiState,
+  classifyCalApiState,
+  describeCalApiRecord,
+  readCalApiPidRecord,
+  settleCalApiStop,
+  writeCalApiPid,
+} from "./cal-api-pid.js";
 import { appendNodeOptions, elPreloadFromEnv } from "./telemetry-env.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
 /** The fork's Postgres service. --wait must name it: the fork's one-shot postgres_is_ready container exits, and --wait fails on any exit (docker/compose#10596). */
 export const CAL_POSTGRES_SERVICE = "postgres";
+export const CAL_REDIS_SERVICE = "redis";
 const CAL_WEB_STOP_WAIT_MS = 30_000;
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
 const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
+/** Cal API v2 build: the fork's own build:docker plus build. Reuses the tRPC build default (README: CAL_TRPC_BUILD_MS). */
+const CAL_API_BUILD_MS = 10 * 60_000;
+/** The API readiness wait. Reuses the web wait default (up's CAL_WEB_WAIT_MS); not raised. */
+const CAL_API_WAIT_MS = 10 * 60_000;
+const CAL_API_BUILD_MARKER = "cal-api-build.json";
+/** Host port of the harness Redis overlay (docker/cal.redis.compose.yml). 6380 is Medusa's. */
+const CAL_REDIS_HOST_PORT = 6381;
+/** Product .env keys the API reads from the root env file. The first three are required. */
+const CAL_API_REQUIRED_ENV = ["DATABASE_URL", "NEXTAUTH_SECRET", "CALENDSO_ENCRYPTION_KEY"] as const;
+const CAL_API_OPTIONAL_ENV = [
+  "DATABASE_READ_URL",
+  "DATABASE_WRITE_URL",
+  "DATABASE_DIRECT_URL",
+  "JWT_SECRET",
+  "CALCOM_SERVICE_ACCOUNT_ENCRYPTION_KEY",
+] as const;
 const DEFAULT_NEXT_BUILD_TIMEOUT_MS = 45 * 60_000;
 const MIN_NEXT_BUILD_TIMEOUT_MS = 120_000;
 const MIN_TRPC_BUILD_TIMEOUT_MS = 120_000;
@@ -82,6 +111,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   private seededApiKey?: string;
   private seedResult?: SeedResult;
   private webProcess?: ChildProcess;
+  private apiProcess?: ChildProcess;
 
   constructor(cfg: CalConfig) {
     super(cfg);
@@ -109,6 +139,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       files: [
         this.productComposeFile(),
         harnessComposeFile("cal.compose.yml"),
+        harnessComposeFile("cal.redis.compose.yml"),
         ...pgStatsComposeFilePaths({ env: process.env, product: "cal" }),
       ],
       cwd: this.prismaDir(),
@@ -384,6 +415,182 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     }
   }
 
+  /** The web and API states for up(). A held API port that is neither healthy nor the recorded pid throws here. */
+  private async readyState(): Promise<{ web: "ok" | "down"; api: "ok" | "starting" | "down" }> {
+    const web = await pollHealth(this.webRootUrl(), { timeoutMs: 0, requestTimeoutMs: 30_000 });
+    return { web: web.ok ? "ok" : "down", api: await this.apiState() };
+  }
+
+  private async apiState(): Promise<CalApiState> {
+    const { port } = this.apiListen();
+    const health = await pollHealth(`${this.cfg.apiBaseUrl}/health`, { timeoutMs: 0, requestTimeoutMs: 10_000 });
+    const record = readCalApiPidRecord();
+    return classifyCalApiState({
+      healthy: health.ok,
+      portOpen: health.ok || (await this.isApiPortOpen()),
+      listeners: health.ok ? [] : listenerPids(port),
+      record,
+      recordLive: record !== undefined && recordedWebState(record, calApiStopDeps()) === "live",
+      port,
+      healthUrl: `${this.cfg.apiBaseUrl}/health`,
+    });
+  }
+
+  private apiListen(): { host: string; port: number } {
+    const parsed = new URL(this.cfg.apiBaseUrl);
+    return { host: parsed.hostname || "127.0.0.1", port: Number(parsed.port || "5555") };
+  }
+
+  private isApiPortOpen(): Promise<boolean> {
+    const { host, port } = this.apiListen();
+    return new Promise((resolve) => {
+      const socket = net.connect({ host, port, timeout: 1000 }, () => {
+        socket.end();
+        resolve(true);
+      });
+      socket.on("error", () => resolve(false));
+      socket.on("timeout", () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+  }
+
+  private apiLogFile(): string {
+    return path.join(this.harnessStateDir(), "cal-api.log");
+  }
+
+  /** The API process env, added to the caller's: the heap default, the port, Redis, and the product root .env keys. */
+  private apiSpawnEnv(): NodeJS.ProcessEnv {
+    const rootEnvFile = path.join(this.productRoot, ".env");
+    const rootEnv = loadDotenv({ path: rootEnvFile, processEnv: {} }).parsed ?? {};
+    const missing = CAL_API_REQUIRED_ENV.filter((key) => !rootEnv[key]);
+    if (missing.length > 0) {
+      throw new Error(`Cal API v2 needs ${missing.join(", ")} in ${rootEnvFile} (names only).`);
+    }
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of [...CAL_API_REQUIRED_ENV, ...CAL_API_OPTIONAL_ENV]) {
+      if (rootEnv[key]) {
+        env[key] = rootEnv[key];
+      }
+    }
+    env.DATABASE_READ_URL ??= rootEnv.DATABASE_URL;
+    env.DATABASE_WRITE_URL ??= rootEnv.DATABASE_URL;
+    env.API_PORT = String(this.apiListen().port);
+    env.REDIS_URL = `redis://127.0.0.1:${String(CAL_REDIS_HOST_PORT)}`;
+    return env;
+  }
+
+  /** Builds the fork's API v2 with its own scripts. Skips when the build marker matches the fork HEAD and main.js exists. */
+  private async ensureApiBuild(mainJs: string): Promise<void> {
+    const head = (await runCapture("git", ["rev-parse", "HEAD"], { cwd: this.productRoot, timeoutMs: 60_000 })).stdout.trim();
+    const markerFile = path.join(this.harnessStateDir(), CAL_API_BUILD_MARKER);
+    const marker = fs.existsSync(markerFile)
+      ? (JSON.parse(fs.readFileSync(markerFile, "utf8")) as HarnessBuildRecord)
+      : undefined;
+    if (fs.existsSync(mainJs) && marker?.gitSha === head) {
+      console.log(`Cal API v2 build matches HEAD ${head.slice(0, 7)}; skipping the build.`);
+      return;
+    }
+    const yarn = resolveYarn();
+    const env = calHeapEnv(process.env);
+    for (const script of ["build:docker", "build"]) {
+      await run(yarn, ["workspace", "@calcom/api-v2", "run", script], {
+        cwd: this.productRoot,
+        env,
+        timeoutMs: CAL_API_BUILD_MS,
+      });
+    }
+    fs.mkdirSync(this.harnessStateDir(), { recursive: true });
+    fs.writeFileSync(markerFile, `${JSON.stringify({ gitSha: head })}\n`, "utf8");
+  }
+
+  /** Starts the built API v2 as a detached node process, records its pid, and checks that it stayed up. */
+  private async startApi(): Promise<void> {
+    const apiDir = path.join(this.productRoot, "apps", "api", "v2");
+    const mainJs = path.join(apiDir, "dist", "apps", "api", "v2", "src", "main.js");
+    await this.ensureApiBuild(mainJs);
+    const logFile = this.apiLogFile();
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    fs.writeFileSync(logFile, "");
+    const spec = calApiSpawnSpec({ execPath: process.execPath, mainJs });
+    console.log(`Starting Cal API v2: ${spec.command} ${spec.args.join(" ")} (cwd ${apiDir}; logs: ${logFile})`);
+    this.apiProcess = spawnLogged(spec.command, spec.args, {
+      cwd: apiDir,
+      logFile,
+      env: { ...calHeapEnv(process.env), ...this.apiSpawnEnv() },
+      detached: spec.detached,
+      shell: spec.shell,
+    });
+    if (this.apiProcess.pid !== undefined) {
+      writeCalApiPid(this.apiProcess.pid);
+    }
+    this.apiProcess.unref();
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    if (this.apiProcess.exitCode !== null) {
+      throw new Error(
+        `Cal API v2 exited immediately (code ${String(this.apiProcess.exitCode)}). Last log:\n${this.readLogTail(logFile)}`,
+      );
+    }
+  }
+
+  /** Polls `${apiBaseUrl}/health` until 200. A process that exits, or a timeout, throws with the API log tail. */
+  private async waitForApi(logFile: string, timeoutMs: number): Promise<void> {
+    const url = `${this.cfg.apiBaseUrl}/health`;
+    const deadline = Date.now() + timeoutMs;
+    let last = await pollHealth(url, { timeoutMs: 0, requestTimeoutMs: 10_000 });
+    while (!last.ok && Date.now() < deadline) {
+      if (this.apiProcess && this.apiProcess.exitCode !== null) {
+        throw new Error(
+          `Cal API v2 process exited (code ${String(this.apiProcess.exitCode)}). Last log:\n${this.readLogTail(logFile)}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      last = await pollHealth(url, { timeoutMs: 0, requestTimeoutMs: 10_000 });
+    }
+    if (!last.ok) {
+      throw new Error(
+        `Timed out waiting for ${url} to become healthy` +
+          (last.statusCode !== undefined ? ` (last HTTP ${last.statusCode})` : "") +
+          (last.error ? `: ${last.error}` : "") +
+          `\nLast log:\n${this.readLogTail(logFile)}`,
+      );
+    }
+  }
+
+  private verifyApiListenerIsRecorded(): void {
+    const { host, port } = this.apiListen();
+    assertApiListenerIsRecorded({
+      address: `${host}:${String(port)}`,
+      listeners: listenerPids(port),
+      record: readCalApiPidRecord(),
+    });
+  }
+
+  /** Stops the recorded API pid when its start mark matches, waits for the port, and removes the pid file only when it is free. */
+  private async stopApi(): Promise<void> {
+    const deps = calApiStopDeps(HARNESS_ROOT);
+    const stopped = stopRecordedCalWeb(deps);
+    if (stopped?.state === "stale") {
+      console.log(
+        `Cal API v2 pid file is stale: pid ${String(stopped.record.pid)} is not the recorded process (start mark ${stopped.record.startMark ?? "none"} does not match). Not signaling it.`,
+      );
+    }
+    const { host, port } = this.apiListen();
+    const deadline = Date.now() + CAL_WEB_STOP_WAIT_MS;
+    while (Date.now() < deadline && (await this.isApiPortOpen())) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const portHeld = await this.isApiPortOpen();
+    settleCalApiStop({
+      address: `${host}:${String(port)}`,
+      portHeld,
+      listeners: portHeld ? listenerPids(port) : [],
+      record: stopped?.record,
+      removePidFile: deps.removePidFile,
+    });
+  }
+
   async up(): Promise<void> {
     if (!fs.existsSync(this.productComposeFile())) {
       throw new Error(
@@ -393,7 +600,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
 
     // The extension needs a healthy database, so the pg_stat_statements path waits for the healthcheck.
     const pgStats = pgStatsEnabled(process.env);
-    await composeUp(this.composeOpts(), { wait: pgStats, waitServices: [CAL_POSTGRES_SERVICE] });
+    await composeUp(this.composeOpts(), { wait: true, waitServices: [CAL_POSTGRES_SERVICE, CAL_REDIS_SERVICE] });
     if (pgStats) {
       await enablePgStatsExtension({
         project: COMPOSE_PROJECT,
@@ -406,9 +613,9 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     }
     console.log("Cal Postgres compose is up (host port 5450, db calendso).");
 
-    const already = await this.health();
-    if (already.ok) {
-      console.log(`Cal already healthy at ${already.url} (HTTP ${already.statusCode}).`);
+    const state = await this.readyState();
+    if (state.web === "ok" && state.api === "ok") {
+      console.log(`Cal already healthy: web ${this.webRootUrl()}, API v2 ${this.cfg.apiBaseUrl}/health.`);
       return;
     }
 
@@ -421,6 +628,21 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
       );
     }
 
+    if (state.web !== "ok") {
+      await this.ensureWeb();
+    }
+    if (state.api !== "ok") {
+      if (state.api === "down") {
+        await this.startApi();
+      }
+      await this.waitForApi(this.apiLogFile(), CAL_API_WAIT_MS);
+      this.verifyApiListenerIsRecorded();
+    }
+    console.log(`Cal is up: web ${this.webRootUrl()}, API v2 ${this.cfg.apiBaseUrl}/health.`);
+  }
+
+  /** The web server path of up(): seed, start or reuse the recorded web process, wait for it to answer. */
+  private async ensureWeb(): Promise<void> {
     if (process.env.CAL_SKIP_WEB_START === "1") {
       throw new Error(
         `Cal web is not reachable at ${this.webRootUrl()} and CAL_SKIP_WEB_START=1. Start it yourself: cd ${this.productRoot} && yarn workspace @calcom/web exec next start (or CAL_WEB_MODE=dev for next dev).`,
@@ -541,9 +763,10 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
   }
 
   async down(): Promise<void> {
+    await this.stopApi();
     await this.stopWeb();
     await composeDown(this.composeOpts());
-    console.log("Cal web stopped and compose stack torn down.");
+    console.log("Cal API v2 and web stopped; compose stack torn down (Postgres and Redis).");
   }
 
   /**
