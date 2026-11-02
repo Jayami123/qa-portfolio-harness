@@ -24,6 +24,8 @@ import {
   assertDocumensoSigningCert,
   buildDocumensoAppEnv,
   classifyDocumensoProbe,
+  DOCUMENSO_GOTENBERG_URL,
+  documensoGotenbergEnabled,
   documensoHealthUrls,
   withDocumensoHeap,
   documensoListen,
@@ -105,6 +107,7 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       projectName: COMPOSE_PROJECT,
       files: [
         harnessComposeFile("documenso.compose.yml"),
+        ...(documensoGotenbergEnabled(process.env) ? [harnessComposeFile("documenso.gotenberg.compose.yml")] : []),
         ...pgStatsComposeFilePaths({ env: process.env, product: "documenso" }),
       ],
       cwd: HARNESS_DOCKER_DIR,
@@ -112,8 +115,12 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
   }
 
   private appEnv(): Record<string, string> {
+    const gotenberg = documensoGotenbergEnabled(process.env);
     const base = documensoAppEnvWithPreload(
-      withDocumensoHeap(buildDocumensoAppEnv(this.cfg), process.env.NODE_OPTIONS),
+      withDocumensoHeap(
+        buildDocumensoAppEnv({ ...this.cfg, documentConversionUrl: gotenberg ? DOCUMENSO_GOTENBERG_URL : undefined }),
+        process.env.NODE_OPTIONS,
+      ),
       process.env,
     );
     const nodeBinary = process.env.NODE24?.trim() || undefined;

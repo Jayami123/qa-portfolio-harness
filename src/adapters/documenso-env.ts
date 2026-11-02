@@ -255,11 +255,21 @@ export function assertDocumensoSigningCert(
  * Local signing uses the fork example cert with an empty passphrase (same as `.env.example`).
  * Seal calls signPdf under production start, which requires this path.
  */
+/** Gotenberg service started by the opt-in overlay (docker/documenso.gotenberg.compose.yml). */
+export const DOCUMENSO_GOTENBERG_URL = "http://127.0.0.1:3010";
+
+/** True only for the exact value DOCUMENSO_GOTENBERG=1. Unset, blank or any other value keeps Gotenberg off. */
+export function documensoGotenbergEnabled(env: NodeJS.ProcessEnv): boolean {
+  return env.DOCUMENSO_GOTENBERG === "1";
+}
+
 export function buildDocumensoAppEnv(cfg: {
   baseUrl: string;
   dbUrl: string;
   productRoot: string;
   publicUrl?: string;
+  /** Set only when Gotenberg is on. Unset leaves NEXT_PRIVATE_DOCUMENT_CONVERSION_URL out of the env. */
+  documentConversionUrl?: string;
 }): Record<string, string> {
   const { port } = documensoListen(cfg.baseUrl);
   return {
@@ -283,6 +293,7 @@ export function buildDocumensoAppEnv(cfg: {
     NEXT_PRIVATE_SIGNING_TRANSPORT: "local",
     NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: documensoLocalSigningCertPath(cfg.productRoot),
     NEXT_PRIVATE_SIGNING_PASSPHRASE: "",
+    ...(cfg.documentConversionUrl ? { NEXT_PRIVATE_DOCUMENT_CONVERSION_URL: cfg.documentConversionUrl } : {}),
     ...(process.env.DANGEROUS_BYPASS_RATE_LIMITS === "true"
       ? { DANGEROUS_BYPASS_RATE_LIMITS: "true" }
       : {}),

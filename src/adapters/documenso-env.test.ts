@@ -10,6 +10,7 @@ import {
   assertDocumensoPublicHostResolvesToLoopback,
   assertDocumensoSigningCert,
   buildDocumensoAppEnv,
+  documensoGotenbergEnabled,
   documensoLocalSigningCertPath,
   classifyDocumensoProbe,
   documensoHealthUrls,
@@ -353,5 +354,24 @@ describe("withDocumensoHeap", () => {
 
   it("leaves the other keys of the base env unchanged", () => {
     assert.deepEqual(withDocumensoHeap({ A: "1", B: "2" }, undefined), { A: "1", B: "2", NODE_OPTIONS: "--max-old-space-size=7168" });
+  });
+});
+
+describe("Gotenberg opt-in", () => {
+  it("is enabled only by the exact value DOCUMENSO_GOTENBERG=1", () => {
+    assert.equal(documensoGotenbergEnabled({ DOCUMENSO_GOTENBERG: "1" }), true);
+    assert.equal(documensoGotenbergEnabled({ DOCUMENSO_GOTENBERG: "true" }), false);
+    assert.equal(documensoGotenbergEnabled({ DOCUMENSO_GOTENBERG: " " }), false);
+    assert.equal(documensoGotenbergEnabled({}), false);
+  });
+
+  it("buildDocumensoAppEnv omits NEXT_PRIVATE_DOCUMENT_CONVERSION_URL when Gotenberg is off", () => {
+    const env = buildDocumensoAppEnv(cfg);
+    assert.equal("NEXT_PRIVATE_DOCUMENT_CONVERSION_URL" in env, false);
+  });
+
+  it("buildDocumensoAppEnv sets NEXT_PRIVATE_DOCUMENT_CONVERSION_URL when given", () => {
+    const env = buildDocumensoAppEnv({ ...cfg, documentConversionUrl: "http://127.0.0.1:3010" });
+    assert.equal(env.NEXT_PRIVATE_DOCUMENT_CONVERSION_URL, "http://127.0.0.1:3010");
   });
 });
