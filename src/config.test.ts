@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { loadConfig, resetConfigCache } from "./config.js";
+import { documensoMailApiUrl, loadConfig, resetConfigCache } from "./config.js";
+import { HARNESS_ROOT } from "./paths.js";
 
 const PRODUCT_DIR_KEYS = ["CAL_PRODUCT_DIR", "DOCUMENSO_PRODUCT_DIR", "MEDUSA_PRODUCT_DIR", "TWENTY_PRODUCT_DIR"];
 const KEYS = [...PRODUCT_DIR_KEYS, "MEDUSA_SECOND_BASE_URL"];
@@ -52,5 +53,14 @@ describe("loadConfig second Medusa backend", () => {
     process.env.MEDUSA_SECOND_BASE_URL = "http://127.0.0.1:9001/";
     resetConfigCache();
     assert.equal(loadConfig().medusa.secondBaseUrl, "http://127.0.0.1:9001");
+  });
+});
+
+describe("documensoMailApiUrl", () => {
+  it("points at the Inbucket host port published by docker/documenso.compose.yml", () => {
+    const compose = fs.readFileSync(path.join(HARNESS_ROOT, "docker", "documenso.compose.yml"), "utf8");
+    const port = /"127\.0\.0\.1:(\d+):9000"/.exec(compose);
+    assert.ok(port, "inbucket REST port mapping not found in documenso.compose.yml");
+    assert.equal(documensoMailApiUrl, `http://127.0.0.1:${port[1]}/api/v1/mailbox`);
   });
 });

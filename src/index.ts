@@ -19,3 +19,5 @@ export {
   TWENTY_DEFAULT_ADMIN_EMAIL,
   TWENTY_DEV_SEED_PASSWORD,
 } from "./adapters/twenty-env.js";
+
+export { documensoMailApiUrl } from "./config.js";

@@ -10,6 +10,9 @@ import type { ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
 
+/** Inbucket REST mailbox base for Documenso e-mail checks. Must match the host port in docker/documenso.compose.yml (9003). */
+export const documensoMailApiUrl = "http://127.0.0.1:9003/api/v1/mailbox";
+
 const emptyToUndefined = (value: unknown) => (value === "" || value === undefined ? undefined : value);
 
 function medusaSecondBaseUrl(primaryBaseUrl: string, secondBaseUrl: string | undefined): string | undefined {
