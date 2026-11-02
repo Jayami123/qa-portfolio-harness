@@ -14,3 +14,6 @@ blob-report
 *.har
 .DS_Store
 Thumbs.db
+
+# Product forks cloned by scripts/cloud-install.sh when PRODUCTS_ROOT points inside the repo
+/products/

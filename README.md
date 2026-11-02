@@ -254,6 +254,134 @@ On every pull request and on pushes to `main`:
 
 Live product smoke and Docker are not run here; P1 CI covers Cal E2E against a pinned harness tag.
 
+## Cloud environments
+
+One install script serves both clouds: `scripts/cloud-install.sh`. It runs `npm ci`, clones each product fork at its pinned commit into `PRODUCTS_ROOT` (default `../products`, outside this repo), and installs that product's dependencies. It stops when a clone sits at another commit, and it stops when Cal's `packages/prisma/.env` is not a real symlink.
+
+Environment variables read by `cloud-install.sh` (names only; set them in the cloud environment, never in a file):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PRODUCTS_ROOT` | `../products` | Where the forks are cloned |
+| `HARNESS_PRODUCTS` | `cal documenso medusa twenty` | Subset to prepare, space-separated |
+| `NODE24` | `/opt/node24/bin/node` (Cloud) | Node 24 binary. Required only when `documenso` is selected |
+
+### Cursor cloud
+
+**Automatic from the repo:**
+- `.cursor/Dockerfile`: Ubuntu 24.04, Node 22.23.3 on `PATH`, Node 24.21.0 as `$NODE24`, pnpm 10.11.1 through corepack, Docker 28.5.2 with `fuse-overlayfs`, and a non-root `ubuntu` user.
+- `.cursor/environment.json`: `install` runs `bash scripts/cloud-install.sh`, and `start` runs `sudo service docker start`.
+
+**Pasted by hand (Cursor settings):**
+- Point the cloud environment's location at this repo's `.cursor/environment.json`, and build from `.cursor/Dockerfile`.
+- Environment variables (optional): `HARNESS_PRODUCTS`, `PRODUCTS_ROOT`.
+- Network access: allow the domains in the list below.
+- Cursor builds from the default branch, so changes under `.cursor/` apply after they merge to `main`.
+
+### Claude Code cloud
+
+**Automatic from the repo:**
+- `.claude/settings.json`: the `SessionStart` hook, and no Claude attribution lines in commits or PRs.
+- `.claude/hooks/session-start.sh` (cloud sessions only): puts `/usr/local/bin` first on `PATH`, exports `NODE24`, starts Docker, and prints `WARNING:` lines on stderr when Node 24 or the harness dependencies are missing.
+
+**Pasted by hand (Claude Code environment, Edit):**
+1. **Setup script:** paste the script below as it is.
+2. **Network access:** Limited, with "Allow package managers" ticked, and these domains:
+
+   | Domain | Why |
+   |---|---|
+   | `nodejs.org` | Node 22.23.3 and 24.21.0 tarballs and `SHASUMS256.txt` (setup script) |
+   | `registry.npmjs.org` | `npm ci` for the harness and Documenso, pnpm packages |
+   | `repo.yarnpkg.com` | Corepack fetches Yarn 4 for the Cal fork |
+   | `github.com`, `codeload.github.com` | product fork clones |
+   | `archive.ubuntu.com`, `security.ubuntu.com`, `ports.ubuntu.com` | apt packages (Docker prerequisites) |
+   | `download.docker.com` | Docker apt repository and signing key |
+   | `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com` | product and Docker images |
+
+3. **Environment variables:**
+   - Git identity, so commits are attributed to the owner: `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`.
+   - Optional: `HARNESS_PRODUCTS`, `PRODUCTS_ROOT`.
+   - No product passwords. Do not add any `*_PASSWORD` variable here.
+
+**Setup script (root, idempotent, fail-soft for the install):**
+
+```bash
+# --- qa-portfolio-harness: toolchain, Docker, dependencies and product forks (root, idempotent) ---
+set -euo pipefail
+HARNESS_NODE22_VERSION=22.23.3
+HARNESS_NODE24_VERSION=24.21.0
+HARNESS_PNPM_VERSION=10.11.1
+HARNESS_DOCKER_VERSION=5:28.5.2-1~ubuntu.24.04~noble
+HARNESS_REPO=/home/user/qa-portfolio-harness
+
+SUDO=""
+[ "$(id -u)" -eq 0 ] || SUDO="sudo"
+
+case "$(uname -m)" in
+  x86_64) harness_arch=x64 ;;
+  aarch64) harness_arch=arm64 ;;
+  *) echo "harness: unsupported architecture $(uname -m)" >&2; exit 1 ;;
+esac
+
+# harness_install_node <version> <prefix>: skip if installed, else download and verify before extracting.
+harness_install_node() {
+  local version="$1" prefix="$2" tar tmp
+  tar="node-v$version-linux-$harness_arch.tar.xz"
+  if [ "$("$prefix/bin/node" -v 2>/dev/null)" = "v$version" ]; then return 0; fi
+  tmp="$(mktemp -d)"
+  curl -fsSL --retry 3 -o "$tmp/$tar" "https://nodejs.org/dist/v$version/$tar"
+  curl -fsSL --retry 3 -o "$tmp/SHASUMS256.txt" "https://nodejs.org/dist/v$version/SHASUMS256.txt"
+  (cd "$tmp" && grep " $tar\$" SHASUMS256.txt | sha256sum -c -)
+  if [ "$prefix" != /usr/local ]; then $SUDO rm -rf "$prefix"; fi
+  $SUDO mkdir -p "$prefix"
+  $SUDO tar -xJf "$tmp/$tar" -C "$prefix" --strip-components=1
+  rm -rf "$tmp"
+}
+
+# Docker from Docker's apt repository (as in .cursor/Dockerfile). Skipped when docker is already present.
+harness_install_docker() {
+  if command -v docker >/dev/null 2>&1; then return 0; fi
+  $SUDO install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL --retry 3 https://download.docker.com/linux/ubuntu/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+  $SUDO apt-get update -qq
+  $SUDO apt-get install -y -qq "docker-ce=$HARNESS_DOCKER_VERSION" "docker-ce-cli=$HARNESS_DOCKER_VERSION" containerd.io docker-buildx-plugin docker-compose-plugin
+}
+
+# Start the daemon when it is not answering (no systemd in many cloud images).
+harness_start_docker() {
+  if docker info >/dev/null 2>&1; then return 0; fi
+  ($SUDO dockerd > /tmp/dockerd.log 2>&1 &)
+  for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && return 0; sleep 1; done
+  echo "harness: dockerd did not start; see /tmp/dockerd.log" >&2
+  return 1
+}
+
+harness_install_node "$HARNESS_NODE22_VERSION" /usr/local
+harness_install_node "$HARNESS_NODE24_VERSION" /opt/node24
+export PATH="/usr/local/bin:$PATH"
+$SUDO corepack enable
+corepack prepare "pnpm@$HARNESS_PNPM_VERSION" --activate
+harness_install_docker
+harness_start_docker
+echo "node $(node -v), node24 $(/opt/node24/bin/node -v), pnpm $(cd / && pnpm -v), docker $(docker version --format '{{.Server.Version}}')"
+
+# Dependencies and forks are fail-soft: report with a "harness:" line and carry on, so the script exits 0.
+set +euo pipefail
+if [ -d "$HARNESS_REPO" ] && cd "$HARNESS_REPO"; then
+  bash scripts/cloud-install.sh || echo "harness: cloud-install.sh failed; run it by hand in $HARNESS_REPO" >&2
+else
+  echo "harness: repo not found at $HARNESS_REPO; skipped cloud-install.sh" >&2
+fi
+exit 0
+```
+
+Limits of this script: Claude Code snapshots an environment only when its setup script finishes in about five minutes ([environment caching](https://code.claude.com/docs/en/cloud-environments#environment-caching)). `cloud-install.sh` runs the Cal yarn install (about 21 minutes in this repo's run), so the snapshot is not taken on a full install. To cache a faster set, put `HARNESS_PRODUCTS=twenty` in the environment variables. Products then install on demand with `bash scripts/cloud-install.sh` in the session.
+
+**Symlinks.** Cal's `packages/prisma/.env` must be a real symlink. A Windows host without symlink rights writes a plain file, and `cloud-install.sh` stops there with the reason. Cloud Linux images create the symlink.
+
 ## Limitations / TODOs
 
 Honest gaps:

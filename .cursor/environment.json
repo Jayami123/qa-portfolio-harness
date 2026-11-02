@@ -1,0 +1,7 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "bash scripts/cloud-install.sh",
+  "start": "sudo service docker start || echo 'WARNING: docker did not start'"
+}
