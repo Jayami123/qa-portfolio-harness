@@ -303,7 +303,7 @@ Environment variables read by `cloud-install.sh` (names only; set them in the cl
    - Optional: `HARNESS_PRODUCTS`, `PRODUCTS_ROOT`.
    - No product passwords. Do not add any `*_PASSWORD` variable here.
 
-**Setup script (root, idempotent, fail-soft for the install):**
+**Setup script (root, idempotent; any failure exits non-zero with a `harness:` line):**
 
 ```bash
 # --- qa-portfolio-harness: toolchain, Docker, dependencies and product forks (root, idempotent) ---
@@ -312,7 +312,12 @@ HARNESS_NODE22_VERSION=22.23.3
 HARNESS_NODE24_VERSION=24.21.0
 HARNESS_PNPM_VERSION=10.11.1
 HARNESS_DOCKER_VERSION=5:28.5.2-1~ubuntu.24.04~noble
-HARNESS_REPO=/home/user/qa-portfolio-harness
+# The checkout: the cloud's project directory, else the current directory. Never a fixed path.
+HARNESS_REPO="${CLAUDE_PROJECT_DIR:-$PWD}"
+if [ ! -f "$HARNESS_REPO/package.json" ] || ! grep -q '"name": "qa-portfolio-harness"' "$HARNESS_REPO/package.json"; then
+  echo "harness: ERROR no qa-portfolio-harness checkout at $HARNESS_REPO (set CLAUDE_PROJECT_DIR to it)" >&2
+  exit 1
+fi
 
 SUDO=""
 [ "$(id -u)" -eq 0 ] || SUDO="sudo"
@@ -368,14 +373,12 @@ harness_install_docker
 harness_start_docker
 echo "node $(node -v), node24 $(/opt/node24/bin/node -v), pnpm $(cd / && pnpm -v), docker $(docker version --format '{{.Server.Version}}')"
 
-# Dependencies and forks are fail-soft: report with a "harness:" line and carry on, so the script exits 0.
-set +euo pipefail
-if [ -d "$HARNESS_REPO" ] && cd "$HARNESS_REPO"; then
-  bash scripts/cloud-install.sh || echo "harness: cloud-install.sh failed; run it by hand in $HARNESS_REPO" >&2
-else
-  echo "harness: repo not found at $HARNESS_REPO; skipped cloud-install.sh" >&2
+# Dependencies and forks: any failure stops here with a "harness:" line and a non-zero exit.
+if [ ! -f "$HARNESS_REPO/scripts/cloud-install.sh" ]; then
+  echo "harness: ERROR scripts/cloud-install.sh is missing in $HARNESS_REPO" >&2
+  exit 1
 fi
-exit 0
+bash "$HARNESS_REPO/scripts/cloud-install.sh" || { echo "harness: ERROR cloud-install.sh failed (exit $?); see the lines above" >&2; exit 1; }
 ```
 
 Limits of this script: Claude Code snapshots an environment only when its setup script finishes in about five minutes ([environment caching](https://code.claude.com/docs/en/cloud-environments#environment-caching)). `cloud-install.sh` runs the Cal yarn install (about 21 minutes in this repo's run), so the snapshot is not taken on a full install. To cache a faster set, put `HARNESS_PRODUCTS=twenty` in the environment variables. Products then install on demand with `bash scripts/cloud-install.sh` in the session.

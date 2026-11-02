@@ -13,7 +13,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Refuse to run anywhere except the harness checkout, so a wrong path cannot create product folders.
+if ! grep -q '"name": "qa-portfolio-harness"' "$REPO_ROOT/package.json" 2>/dev/null; then
+  printf 'harness: ERROR %s is not the qa-portfolio-harness checkout (no matching package.json)\n' "$REPO_ROOT" >&2
+  exit 1
+fi
 cd "$REPO_ROOT"
+# Any failure, including one set -e does not report by name, exits non-zero with a "harness:" line.
+on_err() { printf 'harness: ERROR cloud-install.sh failed at line %s (exit %s)\n' "$1" "$2" >&2; }
+trap 'on_err "$LINENO" "$?"' ERR
 
 # Pins: the same commits as the P2 lane bootstrap (plan/2026-11-02-p2-lane-*).
 CAL_REF="c2b7ac44c66f24ffef1662b276f0653988a609a3"
@@ -23,8 +31,8 @@ TWENTY_REF="7cbdfec6f346b43715bc2056932f4fad5886f733"
 MEDUSA_PNPM="10.11.1"
 ALL_PRODUCTS="cal documenso medusa twenty"
 
-log() { printf '[cloud-install] %s\n' "$*"; }
-fail() { printf '[cloud-install] ERROR %s\n' "$*" >&2; exit 1; }
+log() { printf 'harness: %s\n' "$*"; }
+fail() { printf 'harness: ERROR %s\n' "$*" >&2; exit 1; }
 
 product_url() {
   case "$1" in
