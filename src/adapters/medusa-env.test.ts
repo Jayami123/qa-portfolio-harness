@@ -515,3 +515,32 @@ describe("assertMedusaSecondBaseUrl error names the second variable", () => {
     );
   });
 });
+
+describe("MEDUSA_FF_CACHING (caching module opt-in)", () => {
+  const base = { redis: true, stripe: false, lock: "memory" as const };
+
+  it("is off unless MEDUSA_FF_CACHING is exactly true", () => {
+    assert.ok(!parseMedusaHarnessSwitches({ MEDUSA_REDIS: "1" }).caching);
+    assert.ok(!parseMedusaHarnessSwitches({ MEDUSA_REDIS: "1", MEDUSA_FF_CACHING: "1" }).caching);
+    assert.equal(parseMedusaHarnessSwitches({ MEDUSA_REDIS: "1", MEDUSA_FF_CACHING: "true" }).caching, true);
+  });
+
+  it("fails when MEDUSA_FF_CACHING=true is set without MEDUSA_REDIS=1", () => {
+    assert.throws(() => parseMedusaHarnessSwitches({ MEDUSA_FF_CACHING: "true" }), /needs MEDUSA_REDIS=1/);
+  });
+
+  it("renders no caching module when the switch is unset, byte-identical to the switch-less render", () => {
+    const withoutField = renderServerMedusaConfigJs(base, "http://127.0.0.1:9000");
+    const explicitOff = renderServerMedusaConfigJs({ ...base, caching: false }, "http://127.0.0.1:9000");
+    assert.equal(explicitOff, withoutField);
+    assert.doesNotMatch(withoutField, /medusajs\/caching/);
+  });
+
+  it("renders the caching module with cache-redis when on, and keeps the legacy cache-redis entry", () => {
+    const js = renderServerMedusaConfigJs({ ...base, caching: true }, "http://127.0.0.1:9000");
+    assert.match(js, /resolve: "@medusajs\/medusa\/caching",/);
+    assert.match(js, /resolve: "@medusajs\/medusa\/caching-redis"/);
+    assert.match(js, /id: "cache-redis"/);
+    assert.match(js, /resolve: "@medusajs\/medusa\/cache-redis"/);
+  });
+});
