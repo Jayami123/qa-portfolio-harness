@@ -562,7 +562,8 @@ ${this.portOwnerReport(port)}
     const { host, port } = documensoListen(this.cfg.baseUrl);
     await this.stopListeningWeb(host, port);
     this.webProcess = undefined;
-    await composeDown(this.composeOpts());
+    // --remove-orphans: the opt-in Gotenberg container must go even when DOCUMENSO_GOTENBERG is unset at down time.
+    await composeDown(this.composeOpts(), ["--remove-orphans"]);
     console.log("Documenso web stopped and compose stack torn down.");
   }
 
