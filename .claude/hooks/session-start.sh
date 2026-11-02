@@ -24,11 +24,12 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # Docker Hub login, only when both variables are set. The token goes to docker on stdin and is never printed.
-# Docker Hub account names are lowercase; an uppercase letter in the variable makes docker send a malformed
-# Authorization header, so the name is lowercased first.
+# Docker Hub account names are lowercase. An uppercase letter makes docker send a malformed Authorization header,
+# so the hook prints an error that names the variable, not its value, and skips the login.
 if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
-  DOCKERHUB_LOGIN_USER=$(printf '%s' "$DOCKERHUB_USERNAME" | tr 'A-Z' 'a-z')
-  if printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_LOGIN_USER" --password-stdin >/dev/null 2>&1; then
+  if [ "$DOCKERHUB_USERNAME" != "$(printf '%s' "$DOCKERHUB_USERNAME" | tr 'A-Z' 'a-z')" ]; then
+    echo "harness: ERROR DOCKERHUB_USERNAME has an uppercase letter; set the lowercase Docker Hub name (Docker Hub names are lowercase). Docker login skipped." >&2
+  elif printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin >/dev/null 2>&1; then
     echo "harness: docker login ok"
   else
     echo "harness: ERROR docker login to Docker Hub failed (check DOCKERHUB_USERNAME and DOCKERHUB_TOKEN)" >&2

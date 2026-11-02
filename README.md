@@ -303,7 +303,7 @@ Environment variables read by `cloud-install.sh` (names only; set them in the cl
 3. **Environment variables:**
    - Git identity, so commits are attributed to the owner: `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`.
    - Optional: `HARNESS_PRODUCTS`, `PRODUCTS_ROOT`.
-   - Optional Docker Hub login (avoids anonymous pull limits): `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. When both are set, the session-start hook runs `docker login --password-stdin` and prints `harness: docker login ok`, or a `harness:` error line. The token is never printed. Docker Hub account names are lowercase, so the hook lowercases `DOCKERHUB_USERNAME` before the login. Use a read-only Docker Hub access token.
+   - Optional Docker Hub login (avoids anonymous pull limits): `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. When both are set, the session-start hook runs `docker login --password-stdin` and prints `harness: docker login ok`, or a `harness:` error line. The token is never printed. Docker Hub account names are lowercase. If `DOCKERHUB_USERNAME` has an uppercase letter, the hook prints a `harness:` error that names the variable and skips the login; set the lowercase name. Use a read-only Docker Hub access token.
    - No product passwords. Do not add any `*_PASSWORD` variable here.
 
 **Setup script (root, idempotent; any failure exits non-zero with a `harness:` line):**
