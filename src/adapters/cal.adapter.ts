@@ -16,7 +16,7 @@ import { HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
-import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
+import { CAL_SEED_USER_SQL, outputNamesCoreSeedUser, redactSeedOutput } from "./cal-seed.js";
 import {
   assertListenerIsRecorded,
   calWebSpawnSpec,
@@ -862,6 +862,22 @@ ${this.readLogTail(logFile)}`,
     return createHash("sha256").update(body).digest("hex");
   }
 
+  /** True only when the core seed user's row is in the database. A failed db-seed is accepted on this, not on output alone. */
+  private async coreSeedUserRowExists(): Promise<boolean> {
+    const pool = createPgClient(this.cfg.dbUrl);
+    try {
+      const users = await pool.query(CAL_SEED_USER_SQL);
+      return (users.rowCount ?? users.rows.length) > 0;
+    } catch (error) {
+      console.warn(
+        `Cal seed user check failed (${error instanceof Error ? error.message : error}); the failed db-seed is not accepted.`,
+      );
+      return false;
+    } finally {
+      await pool.end();
+    }
+  }
+
   private async seedAlreadyPresent(): Promise<boolean> {
     const pool = createPgClient(this.cfg.dbUrl);
     try {
@@ -946,7 +962,7 @@ ${this.readLogTail(logFile)}`,
         const extra = error as Error & { stdout?: string; stderr?: string };
         output = `${extra.stdout ?? ""}\n${extra.stderr ?? ""}`;
         this.captureApiKeyFromSeedOutput(output);
-        const coreUsers = /free@example\.com/i.test(output);
+        const coreUsers = outputNamesCoreSeedUser(output) && (await this.coreSeedUserRowExists());
         if (attempt === 1) {
           console.warn(`Cal yarn db-seed attempt ${attempt} failed; retrying once (idle Postgres).`);
           continue;

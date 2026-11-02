@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CAL_SEED_USER_SQL, redactSeedOutput } from "./cal-seed.js";
+import { CAL_SEED_USER_SQL, outputNamesCoreSeedUser, redactSeedOutput } from "./cal-seed.js";
 
 describe("CAL_SEED_USER_SQL", () => {
   it('selects from users and not from "User"', () => {
@@ -29,5 +29,20 @@ describe("redactSeedOutput", () => {
     assert.equal(second.text, "Created seeded API Key: ***\n");
     assert.doesNotMatch(second.text, /23456789/);
     assert.equal(second.carry, "");
+  });
+});
+
+describe("outputNamesCoreSeedUser", () => {
+  it("matches the exact core seed address", () => {
+    assert.equal(outputNamesCoreSeedUser("created free@example.com"), true);
+    assert.equal(outputNamesCoreSeedUser("Seeded free@example.com."), true);
+    assert.equal(outputNamesCoreSeedUser("FREE@EXAMPLE.COM"), true);
+  });
+
+  it("does not match a look-alike address", () => {
+    assert.equal(outputNamesCoreSeedUser("teamfree@example.com"), false);
+    assert.equal(outputNamesCoreSeedUser("xfree@example.com"), false);
+    assert.equal(outputNamesCoreSeedUser("free@example.com.evil"), false);
+    assert.equal(outputNamesCoreSeedUser("free@example.co"), false);
   });
 });
