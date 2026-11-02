@@ -23,7 +23,7 @@ cd "$REPO_ROOT"
 on_err() { printf 'harness: ERROR cloud-install.sh failed at line %s (exit %s)\n' "$1" "$2" >&2; }
 trap 'on_err "$LINENO" "$?"' ERR
 
-# Pins: the same commits as the P2 lane bootstrap (plan/2026-11-02-p2-lane-*).
+# Pins: the same commits as scripts/bootstrap.sh in Jayami123/api-webhook-db-test-suite (checked at aa10ec1).
 CAL_REF="c2b7ac44c66f24ffef1662b276f0653988a609a3"
 DOCUMENSO_REF="f4105e47eba56f5d8d7e70dd516a8fcc0c870d7c"
 MEDUSA_REF="f677db438f27294fc50e4c7c6612e71ff38eeff5"
@@ -126,24 +126,31 @@ require_cal_target() {
   log "Cal root .env present (values not shown)"
 }
 
-# Yarn 4 can print "Failed with error" in its link step and still exit 0. Then its build scripts (Prisma
-# generate among them) do not run. The first pass on a fresh checkout hits this (EEXIST while it persists the
-# workspace symlink it just created); a second pass completes. So: retry once, and fail when it still fails.
+# Yarn 4 can print "Failed with error" and still exit 0. Its build scripts (Prisma generate among them) then
+# do not run, so a zero exit is not success: stop on that text too. No retry.
 install_cal() {
-  local dest="$1" attempt out rc
+  local dest="$1" out rc
   if [ -d "$dest/node_modules" ]; then log "$dest/node_modules exists. Install skipped."; return; fi
-  for attempt in 1 2; do
-    out="$(mktemp)"
-    log "yarn install --immutable in $dest (attempt $attempt)"
-    set +e
-    (cd "$dest" && TURBO_TELEMETRY_DISABLED=1 COREPACK_ENABLE_STRICT=0 corepack yarn install --immutable) 2>&1 | tee "$out"
-    rc=${PIPESTATUS[0]}
-    set -e
-    if [ "$rc" -eq 0 ] && ! grep -q 'Failed with error' "$out"; then rm -f "$out"; return; fi
+  out="$(mktemp)"
+  log "yarn install --immutable in $dest"
+  set +e
+  (cd "$dest" && TURBO_TELEMETRY_DISABLED=1 COREPACK_ENABLE_STRICT=0 corepack yarn install --immutable) 2>&1 | tee "$out"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [ "$rc" -ne 0 ] || grep -q 'Failed with error' "$out"; then
     rm -f "$out"
-    log "yarn install in $dest failed (exit $rc, or 'Failed with error' in the output); attempt $attempt"
-  done
-  fail "yarn install in $dest failed twice. Build scripts such as Prisma generate did not run. Remove $dest/node_modules and rerun."
+    fail "yarn install in $dest failed (exit $rc, or 'Failed with error' in its output, which yarn can print with exit 0). The yarn output above names the failing step. Remove $dest/node_modules before rerunning."
+  fi
+  rm -f "$out"
+}
+
+# Prisma's postinstall reports a conflict when a root .env exists (packages/prisma/.env is a symlink to it).
+# The repo's root postinstall still generates the client, so check the output, not the warning.
+verify_cal_prisma() {
+  local dest="$1"
+  [ -f "$dest/packages/prisma/generated/prisma/client.ts" ] \
+    || fail "Prisma client was not generated in $dest (packages/prisma/generated/prisma/client.ts is missing). See the yarn output above."
+  log "Prisma client generated (packages/prisma/generated/prisma)"
 }
 
 install_medusa() {
@@ -185,7 +192,7 @@ done
 for product in $selected; do
   dest="$products_root/$(product_dir_name "$product")"
   case "$product" in
-    cal) install_cal "$dest"; prepare_cal_env "$dest"; require_cal_target "$dest" ;;
+    cal) install_cal "$dest"; verify_cal_prisma "$dest"; prepare_cal_env "$dest"; require_cal_target "$dest" ;;
     medusa) install_medusa "$dest" ;;
     documenso) install_documenso "$dest" ;;
     twenty) ;; # the Twenty stack runs from its image; the harness does not install its dependencies
