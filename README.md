@@ -275,6 +275,7 @@ Environment variables read by `cloud-install.sh` (names only; set them in the cl
 **Pasted by hand (Cursor settings):**
 - Point the cloud environment's location at this repo's `.cursor/environment.json`, and build from `.cursor/Dockerfile`.
 - Environment variables (optional): `HARNESS_PRODUCTS`, `PRODUCTS_ROOT`.
+- Docker Hub (optional): `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. Cursor has no session-start hook, so nothing logs in for you there. To log in by hand, run `printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin`. Allow `index.docker.io` in the network list.
 - Network access: allow the domains in the list below.
 - Cursor builds from the default branch, so changes under `.cursor/` apply after they merge to `main`.
 
@@ -297,10 +298,12 @@ Environment variables read by `cloud-install.sh` (names only; set them in the cl
    | `archive.ubuntu.com`, `security.ubuntu.com`, `ports.ubuntu.com` | apt packages (Docker prerequisites) |
    | `download.docker.com` | Docker apt repository and signing key |
    | `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com` | product and Docker images |
+   | `index.docker.io` | Docker Hub login (`docker login` in the session-start hook, when `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set) |
 
 3. **Environment variables:**
    - Git identity, so commits are attributed to the owner: `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`.
    - Optional: `HARNESS_PRODUCTS`, `PRODUCTS_ROOT`.
+   - Optional Docker Hub login (avoids anonymous pull limits): `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. When both are set, the session-start hook runs `docker login --password-stdin` and prints `harness: docker login ok`, or a `harness:` error line. The token is never printed. Docker Hub account names are lowercase. If `DOCKERHUB_USERNAME` has an uppercase letter, the hook prints a `harness:` error that names the variable and skips the login; set the lowercase name. Use a read-only Docker Hub access token.
    - No product passwords. Do not add any `*_PASSWORD` variable here.
 
 **Setup script (root, idempotent; any failure exits non-zero with a `harness:` line):**

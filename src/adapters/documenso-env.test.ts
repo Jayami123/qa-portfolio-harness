@@ -3,9 +3,14 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   assertDocumensoNodeVersion,
+  documensoChildPath,
+  documensoNodeBinary,
+  documensoNodeVersion,
+  documensoPathKey,
   assertDocumensoPublicHostResolvesToLoopback,
   assertDocumensoSigningCert,
   buildDocumensoAppEnv,
+  documensoGotenbergEnabled,
   documensoLocalSigningCertPath,
   classifyDocumensoProbe,
   documensoHealthUrls,
@@ -243,6 +248,35 @@ describe("parseDocumensoRunningWebappUrl", () => {
   });
 });
 
+describe("documenso Node binary (NODE24)", () => {
+  it("uses $NODE24 when it is set, and the harness's Node when it is unset or blank", () => {
+    assert.equal(documensoNodeBinary({ NODE24: "/opt/node24/bin/node" }, "/usr/local/bin/node"), "/opt/node24/bin/node");
+    assert.equal(documensoNodeBinary({}, "/usr/local/bin/node"), "/usr/local/bin/node");
+    assert.equal(documensoNodeBinary({ NODE24: "  " }, "/usr/local/bin/node"), "/usr/local/bin/node");
+  });
+
+  it("puts the Node 24 folder first on the child PATH, and leaves PATH alone without NODE24", () => {
+    assert.equal(
+      documensoChildPath("/opt/node24/bin/node", "/usr/local/bin:/usr/bin"),
+      `/opt/node24/bin${path.delimiter}/usr/local/bin:/usr/bin`,
+    );
+    assert.equal(documensoChildPath("/opt/node24/bin/node", undefined), "/opt/node24/bin");
+    assert.equal(documensoChildPath(undefined, "/usr/local/bin"), "/usr/local/bin");
+  });
+
+  it("reuses an existing PATH key in any case, and uses PATH when there is none", () => {
+    assert.equal(documensoPathKey({ Path: "C:\\Windows" }), "Path");
+    assert.equal(documensoPathKey({ PATH: "/usr/bin" }), "PATH");
+    assert.equal(documensoPathKey({ path: "/usr/bin" }), "path");
+    assert.equal(documensoPathKey({ HOME: "/root" }), "PATH");
+  });
+
+  it("reads the version of the binary it is given, not of the calling process", () => {
+    // The test process runs its own Node. Asking that same binary must return its real version.
+    assert.equal(documensoNodeVersion(process.execPath), process.versions.node);
+  });
+});
+
 describe("assertDocumensoNodeVersion", () => {
   it("accepts Node 24 and newer", () => {
     assert.doesNotThrow(() => assertDocumensoNodeVersion("24.0.0"));
@@ -320,5 +354,24 @@ describe("withDocumensoHeap", () => {
 
   it("leaves the other keys of the base env unchanged", () => {
     assert.deepEqual(withDocumensoHeap({ A: "1", B: "2" }, undefined), { A: "1", B: "2", NODE_OPTIONS: "--max-old-space-size=7168" });
+  });
+});
+
+describe("Gotenberg opt-in", () => {
+  it("is enabled only by the exact value DOCUMENSO_GOTENBERG=1", () => {
+    assert.equal(documensoGotenbergEnabled({ DOCUMENSO_GOTENBERG: "1" }), true);
+    assert.equal(documensoGotenbergEnabled({ DOCUMENSO_GOTENBERG: "true" }), false);
+    assert.equal(documensoGotenbergEnabled({ DOCUMENSO_GOTENBERG: " " }), false);
+    assert.equal(documensoGotenbergEnabled({}), false);
+  });
+
+  it("buildDocumensoAppEnv omits NEXT_PRIVATE_DOCUMENT_CONVERSION_URL when Gotenberg is off", () => {
+    const env = buildDocumensoAppEnv(cfg);
+    assert.equal("NEXT_PRIVATE_DOCUMENT_CONVERSION_URL" in env, false);
+  });
+
+  it("buildDocumensoAppEnv sets NEXT_PRIVATE_DOCUMENT_CONVERSION_URL when given", () => {
+    const env = buildDocumensoAppEnv({ ...cfg, documentConversionUrl: "http://127.0.0.1:3010" });
+    assert.equal(env.NEXT_PRIVATE_DOCUMENT_CONVERSION_URL, "http://127.0.0.1:3010");
   });
 });

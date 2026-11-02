@@ -29,6 +29,7 @@ describe("TWENTY_PASSTHROUGH_ENV", () => {
     assert.deepEqual(TWENTY_PASSTHROUGH_ENV, [
       "OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS",
       "IS_BILLING_ENABLED",
+      "IS_MULTIWORKSPACE_ENABLED",
       "BILLING_STRIPE_API_KEY",
       "BILLING_STRIPE_WEBHOOK_SECRET",
       "BILLING_STRIPE_PUBLISHABLE_KEY",
@@ -142,5 +143,13 @@ describe("twentyRuntimeOverrideYaml snapshot with rate limits and pass-through",
         "",
       ].join("\n"),
     );
+  });
+});
+
+describe("IS_MULTIWORKSPACE_ENABLED passthrough", () => {
+  it("is forwarded only when set to a non-blank value", () => {
+    assert.deepEqual(readTwentyPassthroughNames({ IS_MULTIWORKSPACE_ENABLED: "true" }), ["IS_MULTIWORKSPACE_ENABLED"]);
+    assert.deepEqual(readTwentyPassthroughNames({ IS_MULTIWORKSPACE_ENABLED: "   " }), []);
+    assert.deepEqual(readTwentyPassthroughNames({}), []);
   });
 });

@@ -167,6 +167,8 @@ export interface MedusaHarnessSwitches {
   readonly stripe: boolean;
   /** Absent in hand-built switches; treated as `memory`. */
   readonly lock?: MedusaLockProvider;
+  /** Absent in hand-built switches; treated as off. Needs `redis`. Set by MEDUSA_FF_CACHING=true. */
+  readonly caching?: boolean;
 }
 
 export function parseMedusaHarnessSwitches(env: Record<string, string | undefined>): MedusaHarnessSwitches {
@@ -179,10 +181,17 @@ export function parseMedusaHarnessSwitches(env: Record<string, string | undefine
   if (rawLock === "redis" && !redis) {
     throw new Error("MEDUSA_LOCK=redis needs MEDUSA_REDIS=1, because the Redis locking provider uses the harness Redis.");
   }
+  // MEDUSA_FF_CACHING=true (exact value) registers Medusa's caching module on the harness Redis. Anything else is off.
+  const caching = env.MEDUSA_FF_CACHING === "true";
+  if (caching && !redis) {
+    throw new Error("MEDUSA_FF_CACHING=true needs MEDUSA_REDIS=1, because the caching module uses the harness Redis.");
+  }
   return {
     redis,
     stripe: env.MEDUSA_STRIPE === "1",
     lock: rawLock,
+    // Present only when on, so a consumer who sets nothing gets the same switch object as before.
+    ...(caching ? { caching } : {}),
   };
 }
 
@@ -270,6 +279,26 @@ export function medusaBuiltServerConfigPath(backendDir: string): string {
  */
 export function renderServerMedusaConfigJs(switches: MedusaHarnessSwitches, baseUrl: string): string {
   const modules: string[] = [];
+  if (switches.caching) {
+    if (!switches.redis) {
+      throw new Error("The caching module needs the Redis switch (MEDUSA_REDIS=1).");
+    }
+    // The legacy cache-redis entry below stays registered (decision OD-2). Provider id matches the provider's identifier.
+    modules.push(
+      `    {
+      resolve: "@medusajs/medusa/caching",
+      options: {
+        providers: [
+          {
+            resolve: "@medusajs/medusa/caching-redis",
+            id: "cache-redis",
+            options: { redisUrl: process.env.REDIS_URL },
+          },
+        ],
+      },
+    }`,
+    );
+  }
   if (switches.redis) {
     modules.push(
       `    {

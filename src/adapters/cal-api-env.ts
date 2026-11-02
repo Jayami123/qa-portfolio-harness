@@ -14,6 +14,7 @@ export const CAL_API_NO_FALLBACK_KEYS = [
   { key: "DATABASE_WRITE_URL", class: "shared", source: "apps/api/v2/src/config/app.ts:27" },
   { key: "REDIS_URL", class: "infra", source: "apps/api/v2/src/config/app.ts:32" },
   { key: "NEXTAUTH_SECRET", class: "shared", source: "apps/api/v2/src/config/app.ts:36" },
+  { key: "CALENDSO_ENCRYPTION_KEY", class: "shared", source: "apps/api/v2/src/modules/tokens/tokens.service.ts:33" },
   { key: "STRIPE_API_KEY", class: "external", source: "apps/api/v2/src/config/app.ts:39" },
   { key: "STRIPE_WEBHOOK_SECRET", class: "external", source: "apps/api/v2/src/config/app.ts:40" },
   { key: "JWT_SECRET", class: "generated", source: "apps/api/v2/src/modules/jwt/jwt.module.ts:8" },
@@ -27,6 +28,8 @@ export interface CalApiEnvInput {
   readonly rootEnv: Readonly<Record<string, string | undefined>>;
   /** The harness process env. Used for an external key the root .env does not provide. */
   readonly processEnv: NodeJS.ProcessEnv;
+  /** The harness Cal database URL (CAL_DB_URL). Passed as DATABASE_URL: the API's Prisma client reads it, and never logged. */
+  readonly dbUrl: string;
   /** The API's listen port and the harness Redis URL. */
   readonly apiPort: number;
   readonly redisUrl: string;
@@ -84,6 +87,7 @@ export function buildCalApiEnv(input: CalApiEnvInput): Record<string, string> {
         `Set them in the environment of up, or in the Cal product .env. Names only; no value is printed.`,
     );
   }
+  env.DATABASE_URL = input.dbUrl;
   return env;
 }
 

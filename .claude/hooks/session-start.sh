@@ -23,6 +23,19 @@ if ! docker info >/dev/null 2>&1; then
   echo "WARNING: Docker is not available (dockerd missing or failed to start; see /tmp/dockerd.log). Product stacks will not start." >&2
 fi
 
+# Docker Hub login, only when both variables are set. The token goes to docker on stdin and is never printed.
+# Docker Hub account names are lowercase. An uppercase letter makes docker send a malformed Authorization header,
+# so the hook prints an error that names the variable, not its value, and skips the login.
+if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+  if [ "$DOCKERHUB_USERNAME" != "$(printf '%s' "$DOCKERHUB_USERNAME" | tr 'A-Z' 'a-z')" ]; then
+    echo "harness: ERROR DOCKERHUB_USERNAME has an uppercase letter; set the lowercase Docker Hub name (Docker Hub names are lowercase). Docker login skipped." >&2
+  elif printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin >/dev/null 2>&1; then
+    echo "harness: docker login ok"
+  else
+    echo "harness: ERROR docker login to Docker Hub failed (check DOCKERHUB_USERNAME and DOCKERHUB_TOKEN)" >&2
+  fi
+fi
+
 # Missing pieces are reported by name only, never by value.
 if [ ! -x /opt/node24/bin/node ]; then
   echo "WARNING: Node 24 missing at /opt/node24; Documenso needs it. Run the Claude setup script (README, Cloud environments)." >&2

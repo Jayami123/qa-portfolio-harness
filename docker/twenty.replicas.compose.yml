@@ -1,0 +1,49 @@
+# Opt-in overlay, added only when TWENTY_SERVER_REPLICAS=2 (src/adapters/twenty-replicas.ts, ADR 0003).
+# server-2 copies the server's environment from the fork's docker-compose.yml and docker/twenty.compose.yml.
+# It never runs migrations (DISABLE_DB_MIGRATIONS=true) and never registers cron jobs twice.
+# Published on 127.0.0.1 only.
+
+services:
+  server-2:
+    image: twentycrm/twenty:${TAG:-v2.44.0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - server-local-data:/app/packages/twenty-server/.local-storage
+    ports:
+      - "127.0.0.1:3003:3000"
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz
+      start_period: 300s
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:-postgres}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/${PG_DATABASE_NAME:-default}
+      SERVER_URL: ${TWENTY_BASE_URL:-http://localhost:3002}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DISABLE_DB_MIGRATIONS: "true"
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+      STORAGE_TYPE: ${STORAGE_TYPE}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION}
+      STORAGE_S3_NAME: ${STORAGE_S3_NAME}
+      STORAGE_S3_ENDPOINT: ${STORAGE_S3_ENDPOINT}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      FALLBACK_ENCRYPTION_KEY: ${FALLBACK_ENCRYPTION_KEY}
+      APP_SECRET: ${APP_SECRET:-}
+      IS_MULTIWORKSPACE_ENABLED: "false"
+      EMAIL_DRIVER: smtp
+      EMAIL_SMTP_HOST: mailpit
+      EMAIL_SMTP_PORT: 1025
+      EMAIL_SMTP_NO_TLS: "true"
+      EMAIL_FROM_ADDRESS: qa-harness@test.local
+      IS_EMAIL_VERIFICATION_REQUIRED: "false"
+    restart: always

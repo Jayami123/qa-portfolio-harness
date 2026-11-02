@@ -1,5 +1,6 @@
 /** Documenso helpers. Parsers are pure (no I/O). DNS lookup and cert existence are injected so tests stay offline. */
 
+import { execFileSync } from "node:child_process";
 import dns from "node:dns/promises";
 import fs from "node:fs";
 import net from "node:net";
@@ -254,11 +255,21 @@ export function assertDocumensoSigningCert(
  * Local signing uses the fork example cert with an empty passphrase (same as `.env.example`).
  * Seal calls signPdf under production start, which requires this path.
  */
+/** Gotenberg service started by the opt-in overlay (docker/documenso.gotenberg.compose.yml). */
+export const DOCUMENSO_GOTENBERG_URL = "http://127.0.0.1:3010";
+
+/** True only for the exact value DOCUMENSO_GOTENBERG=1. Unset, blank or any other value keeps Gotenberg off. */
+export function documensoGotenbergEnabled(env: NodeJS.ProcessEnv): boolean {
+  return env.DOCUMENSO_GOTENBERG === "1";
+}
+
 export function buildDocumensoAppEnv(cfg: {
   baseUrl: string;
   dbUrl: string;
   productRoot: string;
   publicUrl?: string;
+  /** Set only when Gotenberg is on. Unset leaves NEXT_PRIVATE_DOCUMENT_CONVERSION_URL out of the env. */
+  documentConversionUrl?: string;
 }): Record<string, string> {
   const { port } = documensoListen(cfg.baseUrl);
   return {
@@ -282,13 +293,14 @@ export function buildDocumensoAppEnv(cfg: {
     NEXT_PRIVATE_SIGNING_TRANSPORT: "local",
     NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: documensoLocalSigningCertPath(cfg.productRoot),
     NEXT_PRIVATE_SIGNING_PASSPHRASE: "",
+    ...(cfg.documentConversionUrl ? { NEXT_PRIVATE_DOCUMENT_CONVERSION_URL: cfg.documentConversionUrl } : {}),
     ...(process.env.DANGEROUS_BYPASS_RATE_LIMITS === "true"
       ? { DANGEROUS_BYPASS_RATE_LIMITS: "true" }
       : {}),
   };
 }
 
-/** Throws unless the active Node major version is at least Documenso's required 24. */
+/** Throws unless the given Node major version is at least Documenso's required 24. */
 export function assertDocumensoNodeVersion(version: string): void {
   const major = Number(version.split(".")[0]);
   if (!Number.isInteger(major) || major < DOCUMENSO_NODE_MAJOR) {
@@ -296,6 +308,36 @@ export function assertDocumensoNodeVersion(version: string): void {
       `Documenso needs Node ${DOCUMENSO_NODE_MAJOR} or newer; active Node is v${version}. Run nvm use ${DOCUMENSO_NODE_MAJOR} for Documenso commands, then retry.`,
     );
   }
+}
+
+/** The Node binary Documenso runs under: $NODE24 when it is set and not blank, else the Node running the harness. */
+export function documensoNodeBinary(env: NodeJS.ProcessEnv, execPath: string): string {
+  const fromEnv = env.NODE24?.trim();
+  return fromEnv ? fromEnv : execPath;
+}
+
+/** The version of a Node binary, read by running it (not the version of the harness's own process). */
+export function documensoNodeVersion(binary: string): string {
+  return execFileSync(binary, ["-p", "process.versions.node"], { encoding: "utf8" }).trim();
+}
+
+/**
+ * The name of the PATH variable in an env object. Windows matches it case-insensitively ("Path"), so an existing
+ * key in any spelling is reused. Without one, "PATH" is used.
+ */
+export function documensoPathKey(env: NodeJS.ProcessEnv): string {
+  return Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+}
+
+/**
+ * The PATH value for Documenso child steps when $NODE24 is set: the Node 24 folder comes first, so `npm` and
+ * the processes it starts run under Node 24. Returns the current PATH unchanged when no binary is given.
+ */
+export function documensoChildPath(nodeBinary: string | undefined, currentPath: string | undefined): string | undefined {
+  if (nodeBinary === undefined) {
+    return currentPath;
+  }
+  return [path.dirname(nodeBinary), currentPath ?? ""].filter((part) => part !== "").join(path.delimiter);
 }
 
 export type DocumensoProbeVerdict = "healthy" | "unhealthy" | "environment";

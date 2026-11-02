@@ -11,3 +11,12 @@ export function redactSeedOutput(chunk: string, carry = ""): { text: string; car
   const complete = joined.slice(0, cut);
   return { text: complete.replace(SEEDED_KEY, "$1***"), carry: joined.slice(cut) };
 }
+
+/**
+ * True when the seed output names the core seed user as an exact address. A look-alike such as `teamfree@example.com`,
+ * `xfree@example.com` or `free@example.com.evil` does not match. The `users` row is still checked before a failure is accepted.
+ */
+const CORE_SEED_EMAIL = /(?<![\w.+-])free@example\.com(?![\w-]|\.[\w-])/i;
+export function outputNamesCoreSeedUser(output: string): boolean {
+  return CORE_SEED_EMAIL.test(output);
+}

@@ -10,6 +10,9 @@ import type { ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
 
+/** Inbucket REST mailbox base for Documenso e-mail checks. Must match the host port in docker/documenso.compose.yml (9003). */
+export const documensoMailApiUrl = "http://127.0.0.1:9003/api/v1/mailbox";
+
 const emptyToUndefined = (value: unknown) => (value === "" || value === undefined ? undefined : value);
 
 function medusaSecondBaseUrl(primaryBaseUrl: string, secondBaseUrl: string | undefined): string | undefined {
@@ -32,7 +35,7 @@ const envSchema = z.object({
 
   CAL_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3000"),
   CAL_API_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:5555"),
-  CAL_DB_URL: z.string().trim().min(1).default("postgresql://postgres:@localhost:5450/calendso"),
+  CAL_DB_URL: z.string().trim().min(1).default("postgresql://postgres:@127.0.0.1:5450/calendso"),
   CAL_WEBHOOK_SECRET: optionalString,
   CAL_API_KEY: optionalString,
 

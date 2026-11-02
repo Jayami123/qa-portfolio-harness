@@ -16,10 +16,16 @@ import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from 
 import { documensoAppEnvWithPreload } from "./telemetry-env.js";
 import {
   assertDocumensoNodeVersion,
+  documensoChildPath,
+  documensoPathKey,
+  documensoNodeBinary,
+  documensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
   assertDocumensoSigningCert,
   buildDocumensoAppEnv,
   classifyDocumensoProbe,
+  DOCUMENSO_GOTENBERG_URL,
+  documensoGotenbergEnabled,
   documensoHealthUrls,
   withDocumensoHeap,
   documensoListen,
@@ -101,6 +107,7 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       projectName: COMPOSE_PROJECT,
       files: [
         harnessComposeFile("documenso.compose.yml"),
+        ...(documensoGotenbergEnabled(process.env) ? [harnessComposeFile("documenso.gotenberg.compose.yml")] : []),
         ...pgStatsComposeFilePaths({ env: process.env, product: "documenso" }),
       ],
       cwd: HARNESS_DOCKER_DIR,
@@ -108,10 +115,27 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
   }
 
   private appEnv(): Record<string, string> {
-    return documensoAppEnvWithPreload(
-      withDocumensoHeap(buildDocumensoAppEnv(this.cfg), process.env.NODE_OPTIONS),
+    const gotenberg = documensoGotenbergEnabled(process.env);
+    const base = documensoAppEnvWithPreload(
+      withDocumensoHeap(
+        buildDocumensoAppEnv({ ...this.cfg, documentConversionUrl: gotenberg ? DOCUMENSO_GOTENBERG_URL : undefined }),
+        process.env.NODE_OPTIONS,
+      ),
       process.env,
     );
+    const nodeBinary = process.env.NODE24?.trim() || undefined;
+    if (nodeBinary === undefined) {
+      return base;
+    }
+    // $NODE24 is the Node that runs Documenso's steps, so its folder comes first on PATH for npm and its children.
+    // Reuse the spelling the env already has (Windows: "Path"), so the child env never holds two PATH keys.
+    const pathKey = documensoPathKey(process.env);
+    return { ...base, [pathKey]: documensoChildPath(nodeBinary, process.env[pathKey]) ?? "" };
+  }
+
+  /** Stops unless the Node that runs Documenso (`$NODE24`, else the harness's Node) is version 24 or newer. */
+  private assertDocumensoNode(): void {
+    assertDocumensoNodeVersion(documensoNodeVersion(documensoNodeBinary(process.env, process.execPath)));
   }
 
   private timeoutFromEnv(envName: string, defaultMs: number, minMs: number): number {
@@ -435,7 +459,7 @@ ${this.portOwnerReport(port)}
   }
 
   async up(): Promise<void> {
-    assertDocumensoNodeVersion(process.versions.node);
+    this.assertDocumensoNode();
     assertDocumensoSigningCert(this.productRoot);
     const { host, port } = documensoListen(this.cfg.baseUrl);
 
@@ -538,7 +562,8 @@ ${this.portOwnerReport(port)}
     const { host, port } = documensoListen(this.cfg.baseUrl);
     await this.stopListeningWeb(host, port);
     this.webProcess = undefined;
-    await composeDown(this.composeOpts());
+    // --remove-orphans: the opt-in Gotenberg container must go even when DOCUMENSO_GOTENBERG is unset at down time.
+    await composeDown(this.composeOpts(), ["--remove-orphans"]);
     console.log("Documenso web stopped and compose stack torn down.");
   }
 
@@ -574,7 +599,7 @@ ${this.portOwnerReport(port)}
   }
 
   async seed(): Promise<SeedResult> {
-    assertDocumensoNodeVersion(process.versions.node);
+    this.assertDocumensoNode();
     if (this.seedResult) {
       return this.seedResult;
     }
