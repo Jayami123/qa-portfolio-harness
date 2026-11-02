@@ -64,3 +64,34 @@ describe("documensoMailApiUrl", () => {
     assert.equal(documensoMailApiUrl, `http://127.0.0.1:${port[1]}/api/v1/mailbox`);
   });
 });
+
+describe("CAL_DB_URL default", () => {
+  it("is the harness Cal Postgres on 127.0.0.1:5450 when unset", () => {
+    const saved = process.env.CAL_DB_URL;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-config-cal-"));
+    const keys = PRODUCT_DIR_KEYS.map((key) => [key, process.env[key]] as const);
+    try {
+      delete process.env.CAL_DB_URL;
+      for (const key of PRODUCT_DIR_KEYS) {
+        process.env[key] = dir;
+      }
+      resetConfigCache();
+      assert.equal(loadConfig().cal.dbUrl, "postgresql://postgres:@127.0.0.1:5450/calendso");
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CAL_DB_URL;
+      } else {
+        process.env.CAL_DB_URL = saved;
+      }
+      for (const [key, value] of keys) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      resetConfigCache();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

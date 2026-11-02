@@ -35,7 +35,7 @@ const envSchema = z.object({
 
   CAL_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3000"),
   CAL_API_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:5555"),
-  CAL_DB_URL: z.string().trim().min(1).default("postgresql://postgres:@localhost:5450/calendso"),
+  CAL_DB_URL: z.string().trim().min(1).default("postgresql://postgres:@127.0.0.1:5450/calendso"),
   CAL_WEBHOOK_SECRET: optionalString,
   CAL_API_KEY: optionalString,
 
