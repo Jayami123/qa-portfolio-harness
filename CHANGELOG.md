@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.1] - 2026-11-03
+
 - Cal: the API v2 spawn env now sets `DATABASE_URL` from `CAL_DB_URL` and passes `CALENDSO_ENCRYPTION_KEY` from the product root `.env` (shared value). Before, `POST /v2/bookings` answered 500 with "Can't reach database server at 127.0.0.1:5432" (Prisma's fallback), and `GET /v2/me` answered 500 ("CALENDSO_ENCRYPTION_KEY environment variable is not set"). `CAL_DB_URL` now defaults to `postgresql://postgres:@127.0.0.1:5450/calendso` (was `localhost`).
 - Cal seed: a failed `yarn db-seed` is accepted only when the output names exactly `free@example.com` (so `teamfree@example.com` no longer matches) and the `users` row exists. Before, the output match alone was enough.
 - Documenso: `documensoMailApiUrl` is exported from `src/config.ts` and `src/index.ts` (`http://127.0.0.1:9003/api/v1/mailbox`), with a test that it matches the compose port.
@@ -128,3 +130,6 @@
 
 - Default Cal `up()` to `next build` then `next start`.
 - Skip `next build` when a production `.next` marker exists unless `CAL_WEB_REBUILD=1`.
+
+[Unreleased]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.0...v0.3.1
