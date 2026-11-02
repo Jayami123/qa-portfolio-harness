@@ -15,6 +15,7 @@ import { resolveYarn, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
+import { calDbHostPort, calReadinessError } from "./cal-readiness.js";
 import { BaseAdapter } from "./base.js";
 import { CAL_SEED_USER_SQL, outputNamesCoreSeedUser, redactSeedOutput } from "./cal-seed.js";
 import {
@@ -634,6 +635,7 @@ ${this.readLogTail(logFile)}`,
 
     const state = await this.readyState();
     if (state.web === "ok" && state.api === "ok") {
+      await this.assertApiReadsDatabase();
       console.log(`Cal already healthy: web ${this.webRootUrl()}, API v2 ${this.cfg.apiBaseUrl}/health.`);
       return;
     }
@@ -657,7 +659,29 @@ ${this.readLogTail(logFile)}`,
       await this.waitForApi(this.apiLogFile(), CAL_API_WAIT_MS);
       this.verifyApiListenerIsRecorded();
     }
+    await this.assertApiReadsDatabase();
     console.log(`Cal is up: web ${this.webRootUrl()}, API v2 ${this.cfg.apiBaseUrl}/health.`);
+  }
+
+  /**
+   * One DB-backed read through the API (GET /v2/me). `/health` does not touch the database, so it cannot show a
+   * missing DATABASE_URL. Fails with a harness: error; the key is used in the request header only, never printed.
+   */
+  private async assertApiReadsDatabase(): Promise<void> {
+    const key = this.cfg.apiKey ?? this.seededApiKey ?? this.apiKeyFromSeedScript();
+    if (!key) {
+      throw new Error(
+        "harness: Cal readiness read needs an API key (CAL_API_KEY, or the seeded key after `yarn db-seed`). None found.",
+      );
+    }
+    const res = await fetch(`${this.cfg.apiBaseUrl}/v2/me`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    const message = calReadinessError(res.status, calDbHostPort(this.cfg.dbUrl));
+    if (message !== undefined) {
+      throw new Error(message);
+    }
   }
 
   /** The web server path of up(): seed, start or reuse the recorded web process, wait for it to answer. */
