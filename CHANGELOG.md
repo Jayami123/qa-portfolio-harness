@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-- v0.3.1 item (not fixed in v0.3.0): `CalAdapter.seed()` in `src/adapters/cal.adapter.ts` (lines 949–958) treats a failed second `yarn db-seed` attempt as success when the output matches `/free@example\.com/i`, clears `lastError`, and continues. The match is a substring, so `teamfree@example.com` (`scripts/seed.ts:961` in the Cal fork) also satisfies it, and a run that never created `free@example.com` can pass. Fix: match the exact address (anchored so `teamfree@` does not match) and confirm that row in `users` before accepting the failure.
+- Cal: the API v2 spawn env now sets `DATABASE_URL` from `CAL_DB_URL` and passes `CALENDSO_ENCRYPTION_KEY` from the product root `.env` (shared value). Before, `POST /v2/bookings` answered 500 with "Can't reach database server at 127.0.0.1:5432" (Prisma's fallback), and `GET /v2/me` answered 500 ("CALENDSO_ENCRYPTION_KEY environment variable is not set"). `CAL_DB_URL` now defaults to `postgresql://postgres:@127.0.0.1:5450/calendso` (was `localhost`).
+- Cal seed: a failed `yarn db-seed` is accepted only when the output names exactly `free@example.com` (so `teamfree@example.com` no longer matches) and the `users` row exists. Before, the output match alone was enough.
+- Documenso: `documensoMailApiUrl` is exported from `src/config.ts` and `src/index.ts` (`http://127.0.0.1:9003/api/v1/mailbox`), with a test that it matches the compose port.
+- Documenso: opt-in `DOCUMENSO_GOTENBERG=1` adds a pinned Gotenberg 8 service on `127.0.0.1:3010` (`docker/documenso.gotenberg.compose.yml`) and sets `NEXT_PRIVATE_DOCUMENT_CONVERSION_URL` in the app env. Unset keeps the compose argv and app env unchanged.
+- Documenso: `down documenso` passes `--remove-orphans`, so the Gotenberg container is removed even when the flag is unset at `down` time.
+- Medusa: opt-in `MEDUSA_FF_CACHING=true` (needs `MEDUSA_REDIS=1`) registers `@medusajs/medusa/caching` with the `caching-redis` provider. The legacy `cache-redis` entry stays. Unset keeps the rendered config unchanged. The provider writes `mc:*` keys.
+- Twenty: `IS_MULTIWORKSPACE_ENABLED` is forwarded when set to a non-blank value. `docker/twenty.compose.yml` still sets it to `false`, and a forwarded value overrides that.
+- Twenty: opt-in `TWENTY_SERVER_REPLICAS=2` adds `server-2` on `127.0.0.1:3003` with `DISABLE_DB_MIGRATIONS=true` and `DISABLE_CRON_JOBS_REGISTRATION=true` (`docker/twenty.replicas.compose.yml`, ADR 0003). Any other non-blank value fails `up()` by name. `down twenty` passes `--remove-orphans`.
+- Cloud (Claude Code): the session-start hook runs `docker login --password-stdin` when `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set, prints `harness: docker login ok`, and never prints the token. An uppercase letter in `DOCKERHUB_USERNAME` is rejected with a `harness:` error (Docker Hub names are lowercase). `index.docker.io` is added to the README domain list.
+
+**Upgrade note.** Consumers who set none of the new variables keep the v0.3.0 compose argv, Medusa config and Documenso app env. Two changes apply to everyone: Cal's `CAL_DB_URL` default is now `127.0.0.1:5450`, and the Cal API v2 spawn env now includes `DATABASE_URL` and `CALENDSO_ENCRYPTION_KEY`. A Cal consumer whose `CAL_DB_URL` points elsewhere sees the same value as before.
 
 ## v0.3.0 — 2026-11-01
 
