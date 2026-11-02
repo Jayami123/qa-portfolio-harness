@@ -6,6 +6,7 @@ import {
   documensoChildPath,
   documensoNodeBinary,
   documensoNodeVersion,
+  documensoPathKey,
   assertDocumensoPublicHostResolvesToLoopback,
   assertDocumensoSigningCert,
   buildDocumensoAppEnv,
@@ -260,6 +261,13 @@ describe("documenso Node binary (NODE24)", () => {
     );
     assert.equal(documensoChildPath("/opt/node24/bin/node", undefined), "/opt/node24/bin");
     assert.equal(documensoChildPath(undefined, "/usr/local/bin"), "/usr/local/bin");
+  });
+
+  it("reuses an existing PATH key in any case, and uses PATH when there is none", () => {
+    assert.equal(documensoPathKey({ Path: "C:\\Windows" }), "Path");
+    assert.equal(documensoPathKey({ PATH: "/usr/bin" }), "PATH");
+    assert.equal(documensoPathKey({ path: "/usr/bin" }), "path");
+    assert.equal(documensoPathKey({ HOME: "/root" }), "PATH");
   });
 
   it("reads the version of the binary it is given, not of the calling process", () => {

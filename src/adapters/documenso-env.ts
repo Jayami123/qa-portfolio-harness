@@ -311,6 +311,14 @@ export function documensoNodeVersion(binary: string): string {
 }
 
 /**
+ * The name of the PATH variable in an env object. Windows matches it case-insensitively ("Path"), so an existing
+ * key in any spelling is reused. Without one, "PATH" is used.
+ */
+export function documensoPathKey(env: NodeJS.ProcessEnv): string {
+  return Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+}
+
+/**
  * The PATH value for Documenso child steps when $NODE24 is set: the Node 24 folder comes first, so `npm` and
  * the processes it starts run under Node 24. Returns the current PATH unchanged when no binary is given.
  */

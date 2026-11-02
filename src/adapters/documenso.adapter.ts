@@ -17,6 +17,7 @@ import { documensoAppEnvWithPreload } from "./telemetry-env.js";
 import {
   assertDocumensoNodeVersion,
   documensoChildPath,
+  documensoPathKey,
   documensoNodeBinary,
   documensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
@@ -120,8 +121,8 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
       return base;
     }
     // $NODE24 is the Node that runs Documenso's steps, so its folder comes first on PATH for npm and its children.
-    // Windows keeps the variable as "Path"; a second "PATH" key would make the child env ambiguous.
-    const pathKey = process.platform === "win32" ? "Path" : "PATH";
+    // Reuse the spelling the env already has (Windows: "Path"), so the child env never holds two PATH keys.
+    const pathKey = documensoPathKey(process.env);
     return { ...base, [pathKey]: documensoChildPath(nodeBinary, process.env[pathKey]) ?? "" };
   }
 
