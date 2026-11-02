@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { TwentyConfig } from "../config.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
+import { TWENTY_REPLICAS_COMPOSE_FILE, twentyServerReplicas } from "./twenty-replicas.js";
 import { run, runCapture } from "../internal/run.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth, waitUntilHealthy } from "../wait/health.js";
@@ -73,6 +74,7 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
       files: [
         ...twentyComposeFilePaths(this.dockerDir(), harnessComposeFile("twenty.compose.yml")),
         ...twentyRuntimeOverrideFiles(),
+        ...(twentyServerReplicas(process.env) === 2 ? [harnessComposeFile(TWENTY_REPLICAS_COMPOSE_FILE)] : []),
         ...pgStatsComposeFilePaths({ env: process.env, product: "twenty" }),
       ],
       cwd: this.dockerDir(),
@@ -184,7 +186,8 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
       });
       return;
     }
-    await composeDown(opts);
+    // --remove-orphans: server-2 must go even when TWENTY_SERVER_REPLICAS is unset at down time.
+    await composeDown(opts, ["--remove-orphans"]);
   }
 
   async health(): Promise<HealthStatus> {
