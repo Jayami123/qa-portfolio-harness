@@ -3,6 +3,9 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   assertDocumensoNodeVersion,
+  documensoChildPath,
+  documensoNodeBinary,
+  documensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
   assertDocumensoSigningCert,
   buildDocumensoAppEnv,
@@ -240,6 +243,28 @@ describe("parseDocumensoRunningWebappUrl", () => {
   it("returns undefined when the __ENV__ script is missing", () => {
     assert.equal(parseDocumensoRunningWebappUrl("<html><body>signin</body></html>"), undefined);
     assert.equal(runningWebappUrlMatches("<html></html>", "http://p1.lvh.me:3001"), false);
+  });
+});
+
+describe("documenso Node binary (NODE24)", () => {
+  it("uses $NODE24 when it is set, and the harness's Node when it is unset or blank", () => {
+    assert.equal(documensoNodeBinary({ NODE24: "/opt/node24/bin/node" }, "/usr/local/bin/node"), "/opt/node24/bin/node");
+    assert.equal(documensoNodeBinary({}, "/usr/local/bin/node"), "/usr/local/bin/node");
+    assert.equal(documensoNodeBinary({ NODE24: "  " }, "/usr/local/bin/node"), "/usr/local/bin/node");
+  });
+
+  it("puts the Node 24 folder first on the child PATH, and leaves PATH alone without NODE24", () => {
+    assert.equal(
+      documensoChildPath("/opt/node24/bin/node", "/usr/local/bin:/usr/bin"),
+      `/opt/node24/bin${path.delimiter}/usr/local/bin:/usr/bin`,
+    );
+    assert.equal(documensoChildPath("/opt/node24/bin/node", undefined), "/opt/node24/bin");
+    assert.equal(documensoChildPath(undefined, "/usr/local/bin"), "/usr/local/bin");
+  });
+
+  it("reads the version of the binary it is given, not of the calling process", () => {
+    // The test process runs its own Node. Asking that same binary must return its real version.
+    assert.equal(documensoNodeVersion(process.execPath), process.versions.node);
   });
 });
 

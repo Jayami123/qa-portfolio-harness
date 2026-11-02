@@ -1,5 +1,6 @@
 /** Documenso helpers. Parsers are pure (no I/O). DNS lookup and cert existence are injected so tests stay offline. */
 
+import { execFileSync } from "node:child_process";
 import dns from "node:dns/promises";
 import fs from "node:fs";
 import net from "node:net";
@@ -288,7 +289,7 @@ export function buildDocumensoAppEnv(cfg: {
   };
 }
 
-/** Throws unless the active Node major version is at least Documenso's required 24. */
+/** Throws unless the given Node major version is at least Documenso's required 24. */
 export function assertDocumensoNodeVersion(version: string): void {
   const major = Number(version.split(".")[0]);
   if (!Number.isInteger(major) || major < DOCUMENSO_NODE_MAJOR) {
@@ -296,6 +297,28 @@ export function assertDocumensoNodeVersion(version: string): void {
       `Documenso needs Node ${DOCUMENSO_NODE_MAJOR} or newer; active Node is v${version}. Run nvm use ${DOCUMENSO_NODE_MAJOR} for Documenso commands, then retry.`,
     );
   }
+}
+
+/** The Node binary Documenso runs under: $NODE24 when it is set and not blank, else the Node running the harness. */
+export function documensoNodeBinary(env: NodeJS.ProcessEnv, execPath: string): string {
+  const fromEnv = env.NODE24?.trim();
+  return fromEnv ? fromEnv : execPath;
+}
+
+/** The version of a Node binary, read by running it (not the version of the harness's own process). */
+export function documensoNodeVersion(binary: string): string {
+  return execFileSync(binary, ["-p", "process.versions.node"], { encoding: "utf8" }).trim();
+}
+
+/**
+ * The PATH value for Documenso child steps when $NODE24 is set: the Node 24 folder comes first, so `npm` and
+ * the processes it starts run under Node 24. Returns the current PATH unchanged when no binary is given.
+ */
+export function documensoChildPath(nodeBinary: string | undefined, currentPath: string | undefined): string | undefined {
+  if (nodeBinary === undefined) {
+    return currentPath;
+  }
+  return [path.dirname(nodeBinary), currentPath ?? ""].filter((part) => part !== "").join(path.delimiter);
 }
 
 export type DocumensoProbeVerdict = "healthy" | "unhealthy" | "environment";

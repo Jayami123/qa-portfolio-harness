@@ -16,6 +16,9 @@ import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from 
 import { documensoAppEnvWithPreload } from "./telemetry-env.js";
 import {
   assertDocumensoNodeVersion,
+  documensoChildPath,
+  documensoNodeBinary,
+  documensoNodeVersion,
   assertDocumensoPublicHostResolvesToLoopback,
   assertDocumensoSigningCert,
   buildDocumensoAppEnv,
@@ -108,10 +111,23 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
   }
 
   private appEnv(): Record<string, string> {
-    return documensoAppEnvWithPreload(
+    const base = documensoAppEnvWithPreload(
       withDocumensoHeap(buildDocumensoAppEnv(this.cfg), process.env.NODE_OPTIONS),
       process.env,
     );
+    const nodeBinary = process.env.NODE24?.trim() || undefined;
+    if (nodeBinary === undefined) {
+      return base;
+    }
+    // $NODE24 is the Node that runs Documenso's steps, so its folder comes first on PATH for npm and its children.
+    // Windows keeps the variable as "Path"; a second "PATH" key would make the child env ambiguous.
+    const pathKey = process.platform === "win32" ? "Path" : "PATH";
+    return { ...base, [pathKey]: documensoChildPath(nodeBinary, process.env[pathKey]) ?? "" };
+  }
+
+  /** Stops unless the Node that runs Documenso (`$NODE24`, else the harness's Node) is version 24 or newer. */
+  private assertDocumensoNode(): void {
+    assertDocumensoNodeVersion(documensoNodeVersion(documensoNodeBinary(process.env, process.execPath)));
   }
 
   private timeoutFromEnv(envName: string, defaultMs: number, minMs: number): number {
@@ -435,7 +451,7 @@ ${this.portOwnerReport(port)}
   }
 
   async up(): Promise<void> {
-    assertDocumensoNodeVersion(process.versions.node);
+    this.assertDocumensoNode();
     assertDocumensoSigningCert(this.productRoot);
     const { host, port } = documensoListen(this.cfg.baseUrl);
 
@@ -574,7 +590,7 @@ ${this.portOwnerReport(port)}
   }
 
   async seed(): Promise<SeedResult> {
-    assertDocumensoNodeVersion(process.versions.node);
+    this.assertDocumensoNode();
     if (this.seedResult) {
       return this.seedResult;
     }
