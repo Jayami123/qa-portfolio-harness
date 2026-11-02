@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- v0.3.1 item (not fixed in v0.3.0): `CalAdapter.seed()` in `src/adapters/cal.adapter.ts` (lines 949–958) treats a failed second `yarn db-seed` attempt as success when the output matches `/free@example\.com/i`, clears `lastError`, and continues. The match is a substring, so `teamfree@example.com` (`scripts/seed.ts:961` in the Cal fork) also satisfies it, and a run that never created `free@example.com` can pass. Fix: match the exact address (anchored so `teamfree@` does not match) and confirm that row in `users` before accepting the failure.
+
 ## v0.3.0 — 2026-11-01
 
 - Cal `up()` starts the Cal API v2 on `127.0.0.1:5555` (`apps/api/v2`, built with the fork's `build:docker` and `build` scripts, detached, pid in `.harness/cal-api.pid`) and Redis on `127.0.0.1:6381` (`docker/cal.redis.compose.yml`, `REDIS_URL` passed in the API's spawn env). `up()` returns only when the web root and `$CAL_API_BASE_URL/health` both answer 200, and the listeners are the recorded pids. A process the harness did not start that holds 5555 or 3000 makes `up()` fail and names it. `down()` stops the API, then the web, then compose (Postgres and Redis).
