@@ -126,11 +126,24 @@ require_cal_target() {
   log "Cal root .env present (values not shown)"
 }
 
+# Yarn 4 can print "Failed with error" in its link step and still exit 0. Then its build scripts (Prisma
+# generate among them) do not run. The first pass on a fresh checkout hits this (EEXIST while it persists the
+# workspace symlink it just created); a second pass completes. So: retry once, and fail when it still fails.
 install_cal() {
-  local dest="$1"
+  local dest="$1" attempt out rc
   if [ -d "$dest/node_modules" ]; then log "$dest/node_modules exists. Install skipped."; return; fi
-  log "yarn install --immutable in $dest"
-  (cd "$dest" && TURBO_TELEMETRY_DISABLED=1 COREPACK_ENABLE_STRICT=0 corepack yarn install --immutable)
+  for attempt in 1 2; do
+    out="$(mktemp)"
+    log "yarn install --immutable in $dest (attempt $attempt)"
+    set +e
+    (cd "$dest" && TURBO_TELEMETRY_DISABLED=1 COREPACK_ENABLE_STRICT=0 corepack yarn install --immutable) 2>&1 | tee "$out"
+    rc=${PIPESTATUS[0]}
+    set -e
+    if [ "$rc" -eq 0 ] && ! grep -q 'Failed with error' "$out"; then rm -f "$out"; return; fi
+    rm -f "$out"
+    log "yarn install in $dest failed (exit $rc, or 'Failed with error' in the output); attempt $attempt"
+  done
+  fail "yarn install in $dest failed twice. Build scripts such as Prisma generate did not run. Remove $dest/node_modules and rerun."
 }
 
 install_medusa() {
