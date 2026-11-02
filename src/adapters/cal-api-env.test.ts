@@ -18,6 +18,7 @@ function input(overrides: Partial<Parameters<typeof buildCalApiEnv>[0]> = {}) {
   return {
     rootEnv: { ...ROOT, STRIPE_WEBHOOK_SECRET: EXTERNAL.STRIPE_WEBHOOK_SECRET },
     processEnv: { STRIPE_API_KEY: EXTERNAL.STRIPE_API_KEY } as NodeJS.ProcessEnv,
+    dbUrl: "postgresql://postgres:@127.0.0.1:5450/calendso",
     apiPort: 5555,
     redisUrl: "redis://127.0.0.1:6381",
     ...overrides,
@@ -33,6 +34,7 @@ describe("CAL_API_NO_FALLBACK_KEYS", () => {
         "DATABASE_WRITE_URL",
         "REDIS_URL",
         "NEXTAUTH_SECRET",
+        "CALENDSO_ENCRYPTION_KEY",
         "STRIPE_API_KEY",
         "STRIPE_WEBHOOK_SECRET",
         "JWT_SECRET",
@@ -122,5 +124,25 @@ describe("log safety", () => {
 
   it("generateTestSecret returns a fresh 32-byte hex value each call", () => {
     assert.notEqual(generateTestSecret(), generateTestSecret());
+  });
+});
+
+describe("DATABASE_URL and CALENDSO_ENCRYPTION_KEY in the API spawn env", () => {
+  it("sets DATABASE_URL from the harness dbUrl, not from the product root DATABASE_URL", () => {
+    const env = buildCalApiEnv(input({ dbUrl: "postgresql://postgres:@127.0.0.1:5450/calendso" }));
+    assert.equal(env.DATABASE_URL, "postgresql://postgres:@127.0.0.1:5450/calendso");
+    assert.notEqual(env.DATABASE_URL, ROOT.DATABASE_URL);
+  });
+
+  it("takes CALENDSO_ENCRYPTION_KEY from the product root .env (shared value)", () => {
+    const env = buildCalApiEnv(input());
+    assert.equal(env.CALENDSO_ENCRYPTION_KEY, ROOT.CALENDSO_ENCRYPTION_KEY);
+  });
+
+  it("describeCalApiEnv never prints the DATABASE_URL value", () => {
+    const env = buildCalApiEnv(input({ dbUrl: "postgresql://postgres:s3cret-pass@127.0.0.1:5450/calendso" }));
+    const described = describeCalApiEnv(env);
+    assert.doesNotMatch(described, /s3cret-pass/);
+    assert.match(described, /DATABASE_URL=<redacted>/);
   });
 });

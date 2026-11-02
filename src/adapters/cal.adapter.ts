@@ -495,6 +495,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
     return buildCalApiEnv({
       rootEnv,
       processEnv: process.env,
+      dbUrl: this.cfg.dbUrl,
       apiPort: this.apiListen().port,
       redisUrl: `redis://127.0.0.1:${String(CAL_REDIS_HOST_PORT)}`,
     });
