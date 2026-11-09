@@ -6,7 +6,7 @@
 - Medusa: opt-in `MEDUSA_FF_RBAC` (`true` or `false`) is written into the harness-generated backend `.env`. Unset leaves the file unchanged, so Medusa's default (`false`) applies.
 - Twenty: opt-in `HARNESS_TWENTY_CANARY_NAME` and `HARNESS_TWENTY_CANARY_VALUE` write one caller-named variable into the Twenty server and worker. The name must match `^[A-Z][A-Z0-9_]{2,63}$` and must not collide with a harness-owned name. The value is never logged or written to disk; it reaches the container by compose interpolation.
 
-**Upgrade note.** Unset keeps the v0.3.1 override YAML and Medusa backend `.env` unchanged. A consumer that already exports `LOGIC_FUNCTION_TYPE` in its shell will now see it forwarded to the Twenty server and worker.
+**Upgrade note.** Unset keeps the v0.3.1 override YAML and Medusa backend `.env` unchanged. A consumer that already exports `LOGIC_FUNCTION_TYPE` in its shell will now see it forwarded to the Twenty server and worker. An invalid `LOGIC_FUNCTION_TYPE` (not `DISABLED`, `LAMBDA` or `LOCAL`, case-insensitive, no surrounding spaces) or `HARNESS_TWENTY_CANARY_*` value now makes `up twenty` fail, and any `MEDUSA_FF_RBAC` other than exactly `true` or `false` (including Medusa-valid values such as `1`) makes `up medusa` fail. Before, these variables were ignored.
 
 ## [0.3.1] - 2026-11-03
 
