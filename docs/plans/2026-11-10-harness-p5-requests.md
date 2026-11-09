@@ -106,8 +106,8 @@ No item is CONTRADICTS. No STOP condition was hit in the probe.
 - `up()` does not seed. It runs compose up, the optional pg_stat extension, the server image check and a log message (`twenty.adapter.ts:152-178`). Seeding is a separate call: `smoke.mjs:189` calls `adapter.seed()`, which runs `yarn command:prod workspace:seed:dev` in the server container (`twenty.adapter.ts` seed, around `:227-262`).
 - Redis has no named volume. Upstream `packages/twenty-docker/docker-compose.yml:128-133` defines `redis` with `image: redis`, `restart: always`, `command: [--maxmemory-policy, noeviction]` and no `volumes:`. The only named volumes are `db-data` and `server-local-data` (`:139-140`), so the Redis data is in the container's writable layer.
 - The `redis` image declares no `VOLUME`. `docker image inspect redis` reports `Config.Volumes = null` for the pulled digest `redis@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53`. So there is no anonymous volume either. The original hypothesis (an anonymous `/data` volume) is refuted for this digest.
-- The compose file uses the unpinned tag `image: redis`. The digest above is what this probe pulled; a later pull may differ. Pinning is a separate decision (3e).
-- Consequences, from these facts: `down` (no `-v`) removes the Redis container and so its counters. Postgres `db-data` keeps workspaces, API keys and `core."usageLimit"` rows. A container recreate of Redis without `down` (for example `up --force-recreate`) also discards the writable layer. The recreate case is inferred from Docker semantics and is UNPROBED live.
+- The compose file uses the unpinned tag `image: redis`. The digest above is what this probe pulled; a later pull may differ. Pinning is decision (c) in 3e and ships as PR R with ADR 0005.
+- Consequences, from these facts: `down` (no `-v`) removes the Redis container and so its counters. Postgres `db-data` keeps workspaces, API keys and `core."usageLimit"` rows. A container recreate of Redis without `down` (for example `up --force-recreate`) also discards the writable layer. The recreate case is inferred from Docker semantics and is UNPROBED live. A Redis restart is not a reset: the image's default RDB snapshot lives in `/data` in the writable layer and is reloaded when the process starts again (inferred from the default `save` schedule; an L4 observation can confirm it). Only `down` (container removal) or a recreate discards the counters.
 
 **Contract to document.** After `down` without `-v`: counters are empty, rows are kept. After `down -v` (`TWENTY_DOWN_VOLUMES=1`): counters and rows are both empty, and the next `up` must be seeded by smoke or by an explicit seed. A first non-429 is not evidence of either (MP:804).
 
@@ -223,7 +223,7 @@ MP:804(d) asks for "another product's control". The harness runs one product sta
 
 **Design (rev 2).**
 
-- `src/adapters/cal-env.ts`, `ensureCalRootEnv`, called from the Cal prepare path before the preflight at `:646-648`:
+- `src/adapters/cal-env.ts`, `ensureCalRootEnv`, called at the top of `up()`, after the prisma compose check (`cal.adapter.ts:615-619`) and before `composeUp` (`:623`). This mirrors Twenty, where `writeTwentyRuntimeOverride` runs before `composeUp` (`twenty.adapter.ts:154-156`). It must not run at the preflight (`:646-648`): `up()` reaches that check only after `composeUp` has created `qa-harness-cal_db_data`, so the volume guard would fire on every first run. The preflight then reads the file the writer produced.
   1. If `.env` is missing, copy `.env.example` to `.env` (mode 600).
   2. Replace every `http://localhost:3000` with `http://127.0.0.1:3000` (only on creation, as the script does).
   3. For `NEXTAUTH_SECRET` (32 bytes) and `CALENDSO_ENCRYPTION_KEY` (24 bytes): if the key is absent or its value is empty (the placeholder), remove the line and append the generated value as base64. If it has a non-empty value, leave it.
@@ -234,10 +234,11 @@ MP:804(d) asks for "another product's control". The harness runs one product sta
 **Files and tests.**
 
 - `src/adapters/cal-env.ts` (new); `src/adapters/cal-env.test.ts` (new).
-- `src/adapters/cal.adapter.ts` (call `ensureCalRootEnv` before `:646`; pass `calDownArgs` at `:812`).
+- `src/adapters/cal.adapter.ts`: call `ensureCalRootEnv` at the top of `up()`, between the prisma compose check (`:615-619`) and `composeUp` (`:623`); pass `calDownArgs` into the compose down at `:808-814`.
+- `src/adapters/cal-env.ts` also exports `calUpPrelude(deps)` (see 3h), which `up()` calls with the writer and `composeUp`, so the order is testable without starting compose.
 - No compose change.
 
-**Acceptance.** Unit tests: missing file, placeholder keys, real keys untouched, `localhost` rewrite on creation only, key lengths (32 and 24 decoded bytes), mode 600, guard refusal, `calDownArgs`. Live: L8 in 3g (UNPROBED in this build).
+**Acceptance.** Unit tests: missing file, placeholder keys, real keys untouched, `localhost` rewrite on creation only, key lengths (32 and 24 decoded bytes), mode 600, guard refusal, `calDownArgs`, and call order: `calUpPrelude` runs the writer before `composeUp`, checked with a recorded call sequence. Without that order the guard would fire on every first run, because compose creates `qa-harness-cal_db_data` before the preflight. Live: L8 in 3g (UNPROBED in this build).
 
 **README and CHANGELOG text (draft).**
 
@@ -294,9 +295,9 @@ Appendix A is the record. Live results in this document: the Twenty up, smoke an
 | 5 Cal `.env` and `CAL_DOWN_VOLUMES` | `src/adapters/cal-env.ts` (new), `cal-env.test.ts` (new), `src/adapters/cal.adapter.ts`, `README.md` | none (`docker/cal.compose.yml` unchanged) | Guard on `qa-harness-cal_db_data` |
 | 6 canary | `src/adapters/twenty-canary.ts` (new), `twenty-canary.test.ts` (new), `twenty-runtime-override.ts`, `.test.ts` | none | Reference only in YAML |
 
-Compose: no `docker/*.compose.yml` change is planned. The Redis image is left unpinned and the question is an owner decision (3e).
+Compose: one overlay change, the Redis image pin in `docker/twenty.compose.yml` (PR R, decision (c) in 3e). It is an upstream-default change, so it needs an ADR-level reason under `CONTRIBUTING.md:40`, which ADR 0005 records. No other compose change is planned.
 
-ADR: only ADR 0004 (item 3b). Its justification is in 1.3(b), by contrast with `CONTRIBUTING.md:38`.
+ADR: ADR 0004 (item 3b; justified in 1.3(b) by contrast with `CONTRIBUTING.md:38`) and ADR 0005 (Redis pin, PR R; justified by `CONTRIBUTING.md:40`).
 
 ### 3b. PR split, order and commits (rev 2)
 
@@ -335,12 +336,19 @@ Each PR is opened from `main` after the previous PR merges. No stacked PRs. Each
 10. `docs(twenty): document the fresh-stack and reset contract`
     - `git add README.md CHANGELOG.md`
 
+**PR R, branch `chore/2026-11-13-pin-redis`** (decision (c) in 3e; after PR D, before PR E)
+
+11. `chore(twenty): pin the redis image by version and digest`
+    - `git add docker/twenty.compose.yml docs/adr/0005-pin-twenty-redis-image.md`
+    - The overlay sets `redis.image` to `redis:8.10.3@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53`. The digest was verified in revision 3: `docker pull redis:8.10.3` reports `RepoDigests` `redis@sha256:1f88…dd53`, the same digest already pulled for the unpinned `redis`, so the pin changes no image at this date.
+    - Check: `docker compose -p qa-harness-twenty -f <twenty-docker>/docker-compose.yml -f docker/twenty.compose.yml config --images` lists a `redis` reference whose digest is `sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53`. Expected: exit 0 and that digest.
+
 **PR E, branch `chore/2026-11-14-release-0-4-0`** (release; see 3c)
 
-11. `chore(release): prepare v0.4.0`
+12. `chore(release): prepare v0.4.0`
     - `git add package.json CHANGELOG.md README.md`
 
-**Order.** A, B, C, D, then E. A and D both touch `README.md` and `CHANGELOG.md`; each PR rebases on `main` before opening, so the second one sees the first one's entries. No commit depends on a later PR.
+**Order.** A, B, C, D, R, then E. Each branch is created from the latest `main` after the previous PR has merged. No rebase is used. A and D both touch `README.md` and `CHANGELOG.md`, so D's branch is created after A has merged and sees A's entries. Branch dates are the day the branch is created; the dates in this section are planned dates. No commit depends on a later PR.
 
 ### 3c. Release PR (rev 2)
 
@@ -362,11 +370,13 @@ Each PR is opened from `main` after the previous PR merges. No stacked PRs. Each
 - Create and push the tag `v0.4.0` on the main merge commit of PR E.
 - Verify the tag points at a commit in `main` history and that `npm run check` passed on that commit.
 - Authorise the P5 foundation pin PR (`MP:631`): `package.json`, `package-lock.json` and `tests/unit/foundation.test.ts` change together.
-- Update the P5 plan's `v0.3.2` references (`MP:317`, `MP:338`) to the release version, before the P5 pin PR.
-- Decide whether `TWENTY_REQUIRE_FRESH` should be the default for CI (this plan keeps it opt-in).
-- Decide whether `scripts/cloud-install.sh:104-120` (the Cal writer) stays after PR C. It is harmless to keep: it exits early when `.env` exists.
-- Decide whether the Redis image is pinned by tag or digest. The compose file uses `image: redis`, unpinned.
-- Decide MP:804(d) (see 1.3(d)).
+Owner decisions, recorded in revision 3:
+
+- (a) `TWENTY_REQUIRE_FRESH` stays opt-in. P5 sets it to `1` only in its `tw-iso` and `tw-limiter-last` jobs.
+- (b) `scripts/cloud-install.sh` keeps its Cal writer for now (it exits early when `.env` exists, so it is harmless). After PR C, a separate `chore(cloud)` PR makes it call the shared `ensureCalRootEnv`, so there is one writer.
+- (c) Redis is pinned by version and digest: `redis:8.10.3@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53`. The pin ships in its own small PR (PR R) with a short ADR (0005), before the 0.4.0 release PR (PR E).
+- (d) MP:804(d) is an accepted deviation. The control is the YCombinator workspace in the same stack, plus a unit test that the reset targets only Twenty's Redis (`buildComposeRedisArgv` starts with `-p qa-harness-twenty` and contains `exec -T redis`). No other product is touched.
+- (e) The P5 plan's `v0.3.2` references (`MP:317`, `MP:338`) are fixed in a separate P5 docs PR, not in the pin-bump PR.
 
 ### 3f. Downstream note (rev 2)
 
@@ -385,7 +395,13 @@ Consumer pins at probe time (2d): P1 `v0.3.0`, P2 `v0.3.1`, P6 `v0.2.18`. The re
 
 ### 3g. Live checks (rev 2)
 
-Each check has an exact command and an expected result. Compose commands use the project directory of the Twenty fork, `TD=/home/user/products/twenty-CRM/packages/twenty-docker`, and the harness overlay. Keys and canary values are read from shell variables that the scripts never print. Every stack run ends with `down` in a `finally`. One product at a time.
+Each check has an exact command and an expected result. Compose commands use the project directory of the Twenty fork, `TD=/home/user/products/twenty-CRM/packages/twenty-docker`, and the harness overlay. Keys and canary values are read from shell variables that the scripts never print. One product at a time. **Every stack check runs under a trap, shown once here and used in L0 to L6 and L8 (L3 uses the same form with `medusa`):**
+
+```bash
+trap 'node scripts/down.mjs twenty' EXIT
+```
+
+The trap runs `down` on any exit, including a failed step. Each check runs in its own shell, so each trap belongs to one run. The explicit `down` steps in L4 and L5 are deliberate state changes inside a run; the trap then runs `down` again, which is harmless when nothing is up. L7 starts no stack and has no trap.
 
 Common setup (not a check):
 
@@ -403,21 +419,21 @@ export RL="API_RATE_LIMITING_LONG_TTL_IN_MS=3600000 API_RATE_LIMITING_LONG_LIMIT
 
 **L1 (item 1, `LOGIC_FUNCTION_TYPE`).**
 
-- Command: `LOGIC_FUNCTION_TYPE=local node scripts/up.mjs twenty; docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' qa-harness-twenty-server-1 | grep '^LOGIC_FUNCTION_TYPE='; node scripts/down.mjs twenty`
-- Expected: `up` exit 0; grep prints `LOGIC_FUNCTION_TYPE=local`; `down` exit 0.
-- Unset control: `node scripts/up.mjs twenty; docker inspect ... | grep -c '^LOGIC_FUNCTION_TYPE='` then `node scripts/down.mjs twenty`. Expected: `0` (grep exit 1 is also acceptable; the count is the check).
+- Command (under the trap): `LOGIC_FUNCTION_TYPE=local node scripts/up.mjs twenty; docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' qa-harness-twenty-server-1 | grep '^LOGIC_FUNCTION_TYPE='`
+- Expected: `up` exit 0; grep prints `LOGIC_FUNCTION_TYPE=local`; the trap's `down` exits 0.
+- Unset control: `node scripts/up.mjs twenty; docker inspect ... | grep -c '^LOGIC_FUNCTION_TYPE='` Expected: `0`. Run it in its own shell under the trap (grep exit 1 is also acceptable; the count is the check).
 
 **L2 (item 6, canary, hash only).**
 
-- Command: `HARNESS_TWENTY_CANARY_NAME=P5_CANARY_PROBE HARNESS_TWENTY_CANARY_VALUE="$CANARY" node scripts/up.mjs twenty`, then `docker exec qa-harness-twenty-server-1 sh -c 'printf %s "$P5_CANARY_PROBE" | sha256sum | cut -c1-16'` and, in the harness shell, `printf %s "$CANARY" | sha256sum | cut -c1-16`, then `node scripts/down.mjs twenty`.
+- Command: `HARNESS_TWENTY_CANARY_NAME=P5_CANARY_PROBE HARNESS_TWENTY_CANARY_VALUE="$CANARY" node scripts/up.mjs twenty`, then `docker exec qa-harness-twenty-server-1 sh -c 'printf %s "$P5_CANARY_PROBE" | sha256sum | cut -c1-16'` and, in the harness shell, `printf %s "$CANARY" | sha256sum | cut -c1-16` (the trap runs `down`).
 - Expected: the two 16-character hex strings are identical. The canary value is never printed.
 - Unset control: `docker exec qa-harness-twenty-server-1 printenv P5_CANARY_PROBE` on a stack started without the name. Expected: no output and exit code 1.
 - Note: `printenv NAME | sha256sum` hashes the value plus a trailing newline. The check uses `printf %s` so the hash covers exactly the value.
 
 **L3 (item 2, `MEDUSA_FF_RBAC`).**
 
-- Command: `MEDUSA_FF_RBAC=true node scripts/up.mjs medusa; grep -c '^MEDUSA_FF_RBAC=true$' <medusa-dtc-starter>/apps/backend/.env; node scripts/down.mjs medusa`.
-- Expected: `up` exit 0; grep prints `1`; `down` exit 0.
+- Command (under `trap 'node scripts/down.mjs medusa' EXIT`): `MEDUSA_FF_RBAC=true node scripts/up.mjs medusa; grep -c '^MEDUSA_FF_RBAC=true$' <medusa-dtc-starter>/apps/backend/.env`.
+- Expected: `up` exit 0; grep prints `1`; the trap's `down` exits 0.
 - Flag reading: `grep -c 'Using flag MEDUSA_FF_RBAC from environment with value true' <backend log>` expected `1`. The backend log path is confirmed at build step 0; it is UNPROBED now.
 
 **L4 (item 3a, fresh stack and window).**
@@ -426,34 +442,34 @@ export RL="API_RATE_LIMITING_LONG_TTL_IN_MS=3600000 API_RATE_LIMITING_LONG_LIMIT
   1. `env $RL node scripts/up.mjs twenty && node scripts/smoke.mjs twenty` (seeds both workspaces).
   2. Target: five `curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TARGET_KEY" http://127.0.0.1:3002/rest/people?limit=1`, then a sixth.
   3. Read-only key list: `docker compose $TC exec -T redis redis-cli --scan --pattern 'engine:usage-limit:*'`.
-  4. `node scripts/down.mjs twenty` (no `-v`).
-  5. `env $RL node scripts/up.mjs twenty`, then the same key list, then five requests on `$TARGET_KEY`.
-  6. `node scripts/down.mjs twenty`.
-- Expected: step 2 gives `200` five times, then `429`. Step 3 lists `engine:usage-limit:{20202020-1c25-4d02-bf25-6aeccf7ea419}:speed:API:API_REQUEST:apiKey:-:3600` (and a `:1` key). Step 5's key list before any request is empty. The first five requests after `up` return `200` inside the open 3600 s window. That proves a fresh counter, not a time-based reset.
+  4. `node scripts/down.mjs twenty` (no `-v`). The L0 keys survive, because they live in Postgres and `down` keeps `db-data`.
+  5. `env $RL node scripts/up.mjs twenty`, then the same key list, then five requests on `$TARGET_KEY` (still the L0 key).
+  6. The trap runs `down`.
+- Expected: step 2 gives `200` five times, then `429`. The sixth response body contains `Rate limit exceeded for apiKey: 5 requests per 3600s.` in its `messages` array. That string is `usage-limit-speed.service.ts:67` (`refillPerWindow` 5, `windowMs / 1000` 3600). `usage-limit-to-rest-api-exception-handler.util.ts` builds the 429 with `messages: [error.message]`, so the text reaches REST unchanged. The exact REST shape is confirmed at L4. If the body differs, record it and STOP the attribution. Step 3 lists `engine:usage-limit:{20202020-1c25-4d02-bf25-6aeccf7ea419}:speed:API:API_REQUEST:apiKey:-:3600` (and a `:1` key). Step 5's key list before any request is empty. The first five requests after `up` return `200` inside the open 3600 s window. That proves a fresh counter, not a time-based reset.
 
 **L5 (item 3a, `TWENTY_REQUIRE_FRESH`).**
 
 - Command, with the volumes from L4 still present:
   1. `TWENTY_REQUIRE_FRESH=1 node scripts/up.mjs twenty`
   2. `docker ps -a --filter name=qa-harness-twenty --format '{{.Names}}'`
-  3. `TWENTY_DOWN_VOLUMES=1 node scripts/down.mjs twenty; docker volume ls --format '{{.Name}}' | grep qa-harness-twenty`
-  4. `TWENTY_REQUIRE_FRESH=1 node scripts/up.mjs twenty; node scripts/down.mjs twenty`
+  3. `TWENTY_DOWN_VOLUMES=1 node scripts/down.mjs twenty; docker volume ls --format '{{.Name}}' | grep qa-harness-twenty`. This removes the database, so every API key from L0 and L4 is deleted with it. API keys survive only `down` without `-v`.
+  4. `TWENTY_REQUIRE_FRESH=1 node scripts/up.mjs twenty` (the trap runs `down`).
 - Expected: step 1 exits 1 and the message names `qa-harness-twenty_db-data` and `qa-harness-twenty_server-local-data`. Step 2 prints nothing. Step 3 prints nothing from grep after `down -v`. Step 4 exits 0.
 
 **L6 (item 3b, per-workspace reset, read-only SCAN plus targeted DEL).**
 
-- Command, with `$TARGET_KEY` (Apple) and `$CONTROL_KEY` (YCombinator) created in L0:
-  1. `env $RL node scripts/up.mjs twenty && node scripts/smoke.mjs twenty`.
-  2. Five requests on `$TARGET_KEY`, then one more: expected `200` x5, then `429`.
+- Command, under the trap. L5 step 3 removed the L0 keys with the database, so this check re-creates them first:
+  1. `env $RL node scripts/up.mjs twenty && node scripts/smoke.mjs twenty`, then repeat L0 to create `$TARGET_KEY` (Apple) and `$CONTROL_KEY` (YCombinator).
+  2. Five requests on `$TARGET_KEY`, then one more: expected `200` x5, then `429`, whose body contains `Rate limit exceeded for apiKey: 5 requests per 3600s.` (see L4 step 2).
   3. One request on `$CONTROL_KEY` to `/rest/people?limit=1`: expected `200`.
   4. `docker compose $TC exec -T redis redis-cli --scan --pattern 'engine:usage-limit:*'`: expected a list containing Apple's `{20202020-...}` keys and YCombinator's `{3b8e6458-...}` keys.
   5. `node scripts/reset-counters.mjs twenty 20202020-1c25-4d02-bf25-6aeccf7ea419`: expected output `matched N deleted N` with `N >= 1`, and no key value.
   6. Repeat step 4: expected Apple's `{20202020-...}` keys gone; YCombinator's `{3b8e6458-...}` keys still present; no `{server}` key deleted.
   7. Five requests on `$TARGET_KEY`: expected `200` x5 (inside the open window). Then `$CONTROL_KEY`: expected `200`, unaffected by the reset (MP:804(d) in-stack control).
-  8. `node scripts/down.mjs twenty`.
+  8. The trap runs `down`.
 - Refusals (run as separate commands, no stack needed): `node scripts/reset-counters.mjs twenty server` exits non-zero with `not a workspace UUID`; `node scripts/reset-counters.mjs twenty not-a-uuid` exits non-zero the same way.
 
-**L7 (item 4, `PRODUCTS_ROOT`).**
+**L7 (item 4, `PRODUCTS_ROOT`; no stack is started, so no trap).**
 
 - Command: `npm run build && node -e "import('./dist/config.js').then(m=>console.log(m.loadConfig().productsRoot))"` with `PRODUCTS_ROOT` unset.
 - Expected: `/home/user/products` (the repo's parent is `/home/user`; products are at `/home/user/products`).
@@ -461,9 +477,9 @@ export RL="API_RATE_LIMITING_LONG_TTL_IN_MS=3600000 API_RATE_LIMITING_LONG_LIMIT
 
 **L8 (item 5, Cal, UNPROBED in this build).**
 
-- Command: remove `<cal>/.env` (only in a disposable clone of the fork), then `node scripts/up.mjs cal`, then `stat -c %a <cal>/.env`, then `grep -c '^CALENDSO_ENCRYPTION_KEY=.' <cal>/.env`, then `grep -c 'http://localhost:3000' <cal>/.env`, then `node scripts/down.mjs cal`.
+- Command, under `trap 'node scripts/down.mjs cal' EXIT`: remove `<cal>/.env` (only in a disposable clone of the fork), then `node scripts/up.mjs cal`, then `stat -c %a <cal>/.env`, then `grep -c '^CALENDSO_ENCRYPTION_KEY=.' <cal>/.env`, then `grep -c 'http://localhost:3000' <cal>/.env`.
 - Expected: `up` writes the file (the log names the generated keys, not the values); mode `600`; the key count is `1`; the `localhost` count is `0`.
-- Volume guard: with `qa-harness-cal_db_data` present and `.env` deleted, `node scripts/up.mjs cal` exits 1 with `CAL_ENCRYPTION_KEY_VOLUME_EXISTS`.
+- Volume guard: with `qa-harness-cal_db_data` present and `.env` deleted, `node scripts/up.mjs cal` exits 1 with `CAL_ENCRYPTION_KEY_VOLUME_EXISTS`. The guard runs before `composeUp`, so no container is created.
 - Reset: `CAL_DOWN_VOLUMES=1 node scripts/down.mjs cal` exits 0, and `docker volume ls --format '{{.Name}}' | grep qa-harness-cal_db_data` prints nothing.
 - The `qa-harness-cal_db_data` name is from compose config, not a runtime observation: UNPROBED.
 
@@ -624,6 +640,15 @@ export interface EnsureCalRootEnvResult {
 
 /** Throws CAL_ENCRYPTION_KEY_VOLUME_EXISTS when a new CALENDSO_ENCRYPTION_KEY would be written over an existing volume. */
 export function ensureCalRootEnv(opts: EnsureCalRootEnvOptions): EnsureCalRootEnvResult;
+
+/**
+ * Runs the writer first, then compose up. Injected so the order is unit-tested:
+ * ensureEnv must be recorded before composeUp (see 1.5, call order).
+ */
+export async function calUpPrelude(deps: {
+  ensureEnv(): void;
+  composeUp(): Promise<void>;
+}): Promise<void>;
 
 /** ["-v"] only when CAL_DOWN_VOLUMES is exactly "1". */
 export function calDownArgs(env: NodeJS.ProcessEnv): readonly string[];
