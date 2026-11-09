@@ -23,7 +23,7 @@ Which consumer repin is needed?
 - [ ] None (no tag; `## Unreleased` in CHANGELOG only)
 - [ ] Patch / minor — version bumped in `package.json`, README, and a dated CHANGELOG section
 
-Jayami tags after merge (merge commit, not squash).
+The owner tags after merge (merge commit, not squash).
 
 ## Verification
 
