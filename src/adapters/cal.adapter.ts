@@ -1,5 +1,5 @@
 import { execFileSync, execSync, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import { platform } from "node:os";
@@ -27,6 +27,7 @@ import {
   stopRecordedCalWeb,
   writeCalWebPid,
 } from "./cal-web-pid.js";
+import { calDownArgs, calUpPrelude, CAL_DB_VOLUME, ensureCalRootEnv, type CalEnvFs } from "./cal-env.js";
 import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
 import { buildCalApiEnv, describeCalApiEnv } from "./cal-api-env.js";
 import {
@@ -43,6 +44,15 @@ import {
 import { appendNodeOptions, elPreloadFromEnv } from "./telemetry-env.js";
 
 const COMPOSE_PROJECT = "qa-harness-cal";
+
+/** The real file system for the Cal root .env writer (src/adapters/cal-env.ts). */
+const calEnvFs: CalEnvFs = {
+  existsSync: (p) => fs.existsSync(p),
+  readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
+  writeFileSync: (p, data, opts) => fs.writeFileSync(p, data, opts),
+  copyFileSync: (from, to) => fs.copyFileSync(from, to),
+  chmodSync: (p, mode) => fs.chmodSync(p, mode),
+};
 /** The fork's Postgres service. --wait must name it: the fork's one-shot postgres_is_ready container exits, and --wait fails on any exit (docker/compose#10596). */
 export const CAL_POSTGRES_SERVICE = "postgres";
 export const CAL_REDIS_SERVICE = "redis";
@@ -620,7 +630,30 @@ ${this.readLogTail(logFile)}`,
 
     // The extension needs a healthy database, so the pg_stat_statements path waits for the healthcheck.
     const pgStats = pgStatsEnabled(process.env);
-    await composeUp(this.composeOpts(), { wait: true, waitServices: [CAL_POSTGRES_SERVICE, CAL_REDIS_SERVICE] });
+    // The volume list is read once before compose up. The writer refuses a new encryption key over an existing database volume.
+    const volumeNames = (
+      await runCapture("docker", ["volume", "ls", "--format", "{{.Name}}"], { cwd: this.productRoot, timeoutMs: 60_000 })
+    ).stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    await calUpPrelude({
+      ensureEnv: () => {
+        const result = ensureCalRootEnv({
+          productRoot: this.productRoot,
+          fs: calEnvFs,
+          randomBytes,
+          calDbVolumeExists: () => volumeNames.includes(CAL_DB_VOLUME),
+        });
+        if (result.createdFromExample || result.generated.length > 0) {
+          console.log(
+            `Cal root .env: ${result.createdFromExample ? "created from .env.example; " : ""}generated ${result.generated.join(", ") || "nothing"} (values not printed).`,
+          );
+        }
+      },
+      composeUp: () =>
+        composeUp(this.composeOpts(), { wait: true, waitServices: [CAL_POSTGRES_SERVICE, CAL_REDIS_SERVICE] }),
+    });
     if (pgStats) {
       await enablePgStatsExtension({
         project: COMPOSE_PROJECT,
@@ -809,7 +842,7 @@ ${this.readLogTail(logFile)}`,
     await calDownSequence({
       stopApi: () => this.stopApi(),
       stopWeb: () => this.stopWeb(),
-      composeDown: () => composeDown(this.composeOpts()),
+      composeDown: () => composeDown(this.composeOpts(), [...calDownArgs(process.env)]),
     });
     console.log("Cal API v2 and web stopped; compose stack torn down (Postgres and Redis).");
   }
