@@ -36,6 +36,23 @@ export function twentyRuntimeOverrideFiles(): string[] {
   return fs.existsSync(file) ? [file] : [];
 }
 
+export const LOGIC_FUNCTION_TYPE_VALUES = ["DISABLED", "LAMBDA", "LOCAL"] as const;
+
+/** Undefined when unset or blank. Throws TWENTY_LOGIC_FUNCTION_TYPE_INVALID for any other value (checked after toUpperCase). */
+export function readTwentyLogicFunctionType(env: NodeJS.ProcessEnv): string | undefined {
+  const raw = env.LOGIC_FUNCTION_TYPE;
+  if (raw === undefined || raw.trim() === "") {
+    return undefined;
+  }
+  const upper = raw.toUpperCase();
+  if (!(LOGIC_FUNCTION_TYPE_VALUES as readonly string[]).includes(upper)) {
+    throw new Error(
+      `TWENTY_LOGIC_FUNCTION_TYPE_INVALID: LOGIC_FUNCTION_TYPE must be one of ${LOGIC_FUNCTION_TYPE_VALUES.join(", ")} (case-insensitive) (got "${raw}"). Unset it to keep the upstream default.`,
+    );
+  }
+  return upper;
+}
+
 /** The rate-limit environment lines for one service, in allowlist order. readTwentyRateLimitEnv has already checked each value. */
 function rateLimitEnvLines(values: Partial<Record<TwentyRateLimitEnvName, string>>): string[] {
   return TWENTY_RATE_LIMIT_ENV.flatMap((name) => {
@@ -85,6 +102,7 @@ export function writeTwentyRuntimeOverride(opts: {
   env: NodeJS.ProcessEnv;
   fs?: RuntimeOverrideFs;
 }): string | undefined {
+  readTwentyLogicFunctionType(opts.env);
   const values = readTwentyRateLimitEnv(opts.env);
   const preload = elPreloadFromEnv(opts.env);
   const yaml = twentyRuntimeOverrideYaml(values, preload, readTwentyPassthroughNames(opts.env));

@@ -74,6 +74,53 @@ describe("writeTwentyRuntimeOverride", () => {
   });
 });
 
+describe("writeTwentyRuntimeOverride with LOGIC_FUNCTION_TYPE", () => {
+  it("renders the bare key under server and worker when set to local", () => {
+    const { fake, written } = fakeFs();
+    writeTwentyRuntimeOverride({ env: { LOGIC_FUNCTION_TYPE: "local" }, fs: fake });
+    assert.equal(
+      written.get(OVERRIDE_FILE),
+      [
+        "services:",
+        "  server:",
+        "    environment:",
+        "      LOGIC_FUNCTION_TYPE:",
+        "  worker:",
+        "    environment:",
+        "      LOGIC_FUNCTION_TYPE:",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("renders no key when unset or blank", () => {
+    for (const env of [{}, { LOGIC_FUNCTION_TYPE: "" }, { LOGIC_FUNCTION_TYPE: "   " }]) {
+      const { fake, written } = fakeFs();
+      assert.equal(writeTwentyRuntimeOverride({ env, fs: fake }), undefined);
+      assert.equal(written.size, 0);
+    }
+  });
+
+  it("accepts LOCAL and local alike", () => {
+    for (const value of ["LOCAL", "local", "Lambda", "disabled"]) {
+      const { fake, written } = fakeFs();
+      writeTwentyRuntimeOverride({ env: { LOGIC_FUNCTION_TYPE: value }, fs: fake });
+      assert.match(written.get(OVERRIDE_FILE) ?? "", /^ {6}LOGIC_FUNCTION_TYPE:$/m, value);
+    }
+  });
+
+  it("throws TWENTY_LOGIC_FUNCTION_TYPE_INVALID before any file system call for a bogus value", () => {
+    const { fake, calls } = fakeFs();
+    assert.throws(
+      () => writeTwentyRuntimeOverride({ env: { LOGIC_FUNCTION_TYPE: "bogus" }, fs: fake }),
+      (err: unknown) =>
+        err instanceof Error &&
+        /^TWENTY_LOGIC_FUNCTION_TYPE_INVALID: LOGIC_FUNCTION_TYPE must be one of DISABLED, LAMBDA, LOCAL/.test(err.message),
+    );
+    assert.deepEqual(calls, []);
+  });
+});
+
 describe("writeTwentyRuntimeOverride with the event-loop preload", () => {
   let tmp: string;
   let preload: string;
