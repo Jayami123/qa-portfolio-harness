@@ -283,7 +283,7 @@ Environment variables read by `cloud-install.sh` (names only; set them in the cl
 
 **Automatic from the repo:**
 - `.claude/settings.json`: the `SessionStart` hook, and no Claude attribution lines in commits or PRs.
-- `.claude/hooks/session-start.sh` (cloud sessions only): puts `/usr/local/bin` first on `PATH`, exports `NODE24`, starts Docker, and prints `WARNING:` lines on stderr when Node 24 or the harness dependencies are missing.
+- `.claude/hooks/session-start.sh` (cloud sessions only): puts `/usr/local/bin` first on `PATH`, exports `NODE24`, starts Docker in its own session (`setsid -f`, so it keeps running after the hook ends), and prints `WARNING:` lines on stderr when Node 24 or the harness dependencies are missing.
 
 **Pasted by hand (Claude Code environment, Edit):**
 1. **Setup script:** paste the script below as it is.

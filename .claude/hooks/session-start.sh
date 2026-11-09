@@ -16,7 +16,8 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
 fi
 
 if command -v dockerd >/dev/null && ! docker info >/dev/null 2>&1; then
-  ($SUDO dockerd > /tmp/dockerd.log 2>&1 &)
+  # Own session (setsid -f) and no inherited stdio, so the hook's process-group teardown does not stop dockerd.
+  $SUDO setsid -f dockerd >/tmp/dockerd.log 2>&1 </dev/null
   for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
 fi
 if ! docker info >/dev/null 2>&1; then
