@@ -28,9 +28,11 @@ export function rewriteLocalhostToLoopback(text: string): string {
 export interface CalEnvFs {
   existsSync(p: string): boolean;
   readFileSync(p: string, encoding: "utf8"): string;
-  writeFileSync(p: string, data: string, opts: { mode: number }): void;
+  writeFileSync(p: string, data: string, opts: { mode: number; flag?: string }): void;
   copyFileSync(from: string, to: string): void;
   chmodSync(p: string, mode: number): void;
+  renameSync(from: string, to: string): void;
+  rmSync(p: string, opts: { force: boolean }): void;
 }
 
 export interface EnsureCalRootEnvOptions {
@@ -109,8 +111,20 @@ export function ensureCalRootEnv(opts: EnsureCalRootEnvOptions): EnsureCalRootEn
   if (generated.length === 0) {
     return { createdFromExample: false, generated: [] };
   }
-  opts.fs.writeFileSync(envPath, next, { mode: ENV_MODE });
-  opts.fs.chmodSync(envPath, ENV_MODE);
+  // Write a 600 temp file beside .env, then rename it over .env. A reader never sees a partial file.
+  const tmp = `${envPath}.harness-tmp-${process.pid}`;
+  let tmpStarted = false;
+  try {
+    tmpStarted = true;
+    opts.fs.writeFileSync(tmp, next, { mode: ENV_MODE, flag: "wx" });
+    opts.fs.chmodSync(tmp, ENV_MODE);
+    opts.fs.renameSync(tmp, envPath);
+  } catch (err) {
+    if (tmpStarted) {
+      opts.fs.rmSync(tmp, { force: true });
+    }
+    throw err;
+  }
   return { createdFromExample, generated };
 }
 

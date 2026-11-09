@@ -27,7 +27,10 @@ interface FakeFs extends CalEnvFs {
   readonly files: Map<string, string>;
 }
 
-function fakeFs(initial: Record<string, string>): FakeFs {
+/** The temp path the writer uses beside .env (pid-suffixed, as in cal-env.ts). */
+const TMP_PATH = `${ENV_PATH}.harness-tmp-${process.pid}`;
+
+function fakeFs(initial: Record<string, string>, opts: { renameFails?: boolean } = {}): FakeFs {
   const files = new Map<string, string>(Object.entries(initial));
   const calls: string[] = [];
   return {
@@ -41,8 +44,11 @@ function fakeFs(initial: Record<string, string>): FakeFs {
       }
       return text;
     },
-    writeFileSync: (p, data, opts) => {
-      calls.push(`write ${p} mode ${opts.mode.toString(8)}`);
+    writeFileSync: (p, data, o) => {
+      calls.push(`write ${p} mode ${o.mode.toString(8)} flag ${o.flag ?? "w"}`);
+      if (o.flag === "wx" && files.has(p)) {
+        throw new Error(`EEXIST: ${p}`);
+      }
       files.set(p, data);
     },
     copyFileSync: () => {
@@ -50,6 +56,22 @@ function fakeFs(initial: Record<string, string>): FakeFs {
     },
     chmodSync: (p, mode) => {
       calls.push(`chmod ${p} ${mode.toString(8)}`);
+    },
+    renameSync: (from, to) => {
+      calls.push(`rename ${from} ${to}`);
+      if (opts.renameFails) {
+        throw new Error("EXDEV: simulated rename failure");
+      }
+      const text = files.get(from);
+      if (text === undefined) {
+        throw new Error(`rename: no such file ${from}`);
+      }
+      files.delete(from);
+      files.set(to, text);
+    },
+    rmSync: (p, o) => {
+      calls.push(`rm ${p} force ${o.force}`);
+      files.delete(p);
     },
   };
 }
@@ -92,7 +114,12 @@ describe("ensureCalRootEnv", () => {
     const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumeAbsent });
     assert.equal(result.createdFromExample, true);
     assert.deepEqual([...result.generated], ["NEXTAUTH_SECRET", "CALENDSO_ENCRYPTION_KEY"]);
-    assert.deepEqual(fs.calls, [`write ${ENV_PATH} mode 600`, `chmod ${ENV_PATH} 600`]);
+    assert.deepEqual(fs.calls, [
+      `write ${TMP_PATH} mode 600 flag wx`,
+      `chmod ${TMP_PATH} 600`,
+      `rename ${TMP_PATH} ${ENV_PATH}`,
+    ]);
+    assert.equal(fs.calls.includes(`write ${ENV_PATH} mode 600 flag w`), false);
     const text = fs.files.get(ENV_PATH) ?? "";
     assert.equal(text.includes("localhost"), false);
     assert.equal(valueOf(text, "APP_URL"), "http://127.0.0.1:3000");
@@ -104,9 +131,31 @@ describe("ensureCalRootEnv", () => {
     const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumeAbsent });
     assert.equal(result.createdFromExample, false);
     assert.deepEqual([...result.generated], ["NEXTAUTH_SECRET", "CALENDSO_ENCRYPTION_KEY"]);
+    assert.deepEqual(fs.calls, [
+      `write ${TMP_PATH} mode 600 flag wx`,
+      `chmod ${TMP_PATH} 600`,
+      `rename ${TMP_PATH} ${ENV_PATH}`,
+    ]);
+    assert.equal(fs.files.has(TMP_PATH), false);
     const text = fs.files.get(ENV_PATH) ?? "";
     assert.equal(valueOf(text, "NEXTAUTH_SECRET"), generatedValue(32));
     assert.equal(valueOf(text, "CALENDSO_ENCRYPTION_KEY"), generatedValue(24));
+  });
+
+  it("removes the temp file and rethrows when the rename fails, leaving .env unchanged", () => {
+    const fs = fakeFs({ [ENV_PATH]: EXAMPLE }, { renameFails: true });
+    assert.throws(
+      () => ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumeAbsent }),
+      /EXDEV/,
+    );
+    assert.deepEqual(fs.calls, [
+      `write ${TMP_PATH} mode 600 flag wx`,
+      `chmod ${TMP_PATH} 600`,
+      `rename ${TMP_PATH} ${ENV_PATH}`,
+      `rm ${TMP_PATH} force true`,
+    ]);
+    assert.equal(fs.files.has(TMP_PATH), false);
+    assert.equal(fs.files.get(ENV_PATH), EXAMPLE);
   });
 
   it("does not write at all when both keys are real", () => {

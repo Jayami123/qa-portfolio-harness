@@ -52,6 +52,8 @@ const calEnvFs: CalEnvFs = {
   writeFileSync: (p, data, opts) => fs.writeFileSync(p, data, opts),
   copyFileSync: (from, to) => fs.copyFileSync(from, to),
   chmodSync: (p, mode) => fs.chmodSync(p, mode),
+  renameSync: (a, b) => fs.renameSync(a, b),
+  rmSync: (p, o) => fs.rmSync(p, o),
 };
 /** The fork's Postgres service. --wait must name it: the fork's one-shot postgres_is_ready container exits, and --wait fails on any exit (docker/compose#10596). */
 export const CAL_POSTGRES_SERVICE = "postgres";
