@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Twenty: opt-in `LOGIC_FUNCTION_TYPE` (`DISABLED`, `LAMBDA` or `LOCAL`, case-insensitive) is forwarded to the server and worker by name when set. Unset passes nothing, so the upstream default applies.
+- Medusa: opt-in `MEDUSA_FF_RBAC` (`true` or `false`) is written into the harness-generated backend `.env`. Unset leaves the file unchanged, so Medusa's default (`false`) applies.
+- Twenty: opt-in `HARNESS_TWENTY_CANARY_NAME` and `HARNESS_TWENTY_CANARY_VALUE` write one caller-named variable into the Twenty server and worker. The name must match `^[A-Z][A-Z0-9_]{2,63}$` and must not collide with a harness-owned name. The value is never logged or written to disk; it reaches the container by compose interpolation.
+
+**Upgrade note.** Unset keeps the v0.3.1 override YAML and Medusa backend `.env` unchanged. A consumer that already exports `LOGIC_FUNCTION_TYPE` in its shell will now see it forwarded to the Twenty server and worker.
+
 ## [0.3.1] - 2026-11-03
 
 - Cal: the API v2 spawn env now sets `DATABASE_URL` from `CAL_DB_URL` and passes `CALENDSO_ENCRYPTION_KEY` from the product root `.env` (shared value). Before, `POST /v2/bookings` answered 500 with "Can't reach database server at 127.0.0.1:5432" (Prisma's fallback), and `GET /v2/me` answered 500 ("CALENDSO_ENCRYPTION_KEY environment variable is not set"). `CAL_DB_URL` now defaults to `postgresql://postgres:@127.0.0.1:5450/calendso` (was `localhost`).
