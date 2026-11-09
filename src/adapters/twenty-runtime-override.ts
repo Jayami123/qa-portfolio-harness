@@ -7,9 +7,36 @@ import {
   type TwentyRateLimitEnvName,
 } from "./twenty-rate-limits.js";
 import { elPreloadFromEnv, type ElPreload } from "./telemetry-env.js";
-import { readTwentyPassthroughNames, type TwentyPassthroughName } from "./twenty-passthrough.js";
+import { readTwentyPassthroughNames, TWENTY_PASSTHROUGH_ENV, type TwentyPassthroughName } from "./twenty-passthrough.js";
+import { canaryYamlLines, CANARY_NAME_ENV, CANARY_VALUE_ENV, readTwentyCanary, type TwentyCanary } from "./twenty-canary.js";
 
 export const TWENTY_RUNTIME_OVERRIDE_FILE = "twenty.runtime.compose.yml";
+
+/** Environment keys that docker/twenty.compose.yml sets for server or worker. Harness-owned: a canary cannot use them. */
+const TWENTY_COMPOSE_SET_ENV = [
+  "SERVER_URL",
+  "IS_MULTIWORKSPACE_ENABLED",
+  "EMAIL_DRIVER",
+  "EMAIL_SMTP_HOST",
+  "EMAIL_SMTP_PORT",
+  "EMAIL_SMTP_NO_TLS",
+  "EMAIL_FROM_ADDRESS",
+  "IS_EMAIL_VERIFICATION_REQUIRED",
+] as const;
+
+/** Names a canary may not use: the passthrough and rate-limit names, the preload names, TWENTY_REQUIRE_FRESH,
+ *  the two canary names, and the compose-set keys above. */
+export const TWENTY_RESERVED_ENV: ReadonlySet<string> = new Set<string>([
+  ...TWENTY_PASSTHROUGH_ENV,
+  ...TWENTY_RATE_LIMIT_ENV,
+  "NODE_OPTIONS",
+  "HARNESS_EL_OUT",
+  "HARNESS_EL_ROLE",
+  "TWENTY_REQUIRE_FRESH",
+  CANARY_NAME_ENV,
+  CANARY_VALUE_ENV,
+  ...TWENTY_COMPOSE_SET_ENV,
+]);
 
 /** Where the preload and its out directory appear inside the Twenty containers. */
 const CONTAINER_PRELOAD = "/harness/el/preload.cjs";
@@ -67,11 +94,14 @@ export function twentyRuntimeOverrideYaml(
   values: Partial<Record<TwentyRateLimitEnvName, string>>,
   preload: ElPreload | undefined,
   passthrough: readonly TwentyPassthroughName[] = [],
+  canary?: TwentyCanary,
 ): string | undefined {
   const limitLines = rateLimitEnvLines(values);
   // Mapping form with no value: compose takes NAME from the environment of up. The value never reaches this file.
   const passLines = passthrough.map((name) => `      ${name}:`);
-  if (limitLines.length === 0 && passLines.length === 0 && preload === undefined) {
+  // The canary line is a reference to CANARY_VALUE_ENV, which compose interpolates from the environment of up.
+  const canaryLines = canaryYamlLines(canary);
+  if (limitLines.length === 0 && passLines.length === 0 && canaryLines.length === 0 && preload === undefined) {
     return undefined;
   }
   if (preload && /['\r\n]/.test(`${preload.preload}${preload.out}`)) {
@@ -79,7 +109,7 @@ export function twentyRuntimeOverrideYaml(
   }
   const out = ["services:"];
   for (const role of ["server", "worker"]) {
-    out.push(`  ${role}:`, "    environment:", ...limitLines, ...passLines);
+    out.push(`  ${role}:`, "    environment:", ...limitLines, ...passLines, ...canaryLines);
     if (preload) {
       out.push(
         `      NODE_OPTIONS: "--require=${CONTAINER_PRELOAD}"`,
@@ -104,8 +134,9 @@ export function writeTwentyRuntimeOverride(opts: {
 }): string | undefined {
   readTwentyLogicFunctionType(opts.env);
   const values = readTwentyRateLimitEnv(opts.env);
+  const canary = readTwentyCanary(opts.env, TWENTY_RESERVED_ENV);
   const preload = elPreloadFromEnv(opts.env);
-  const yaml = twentyRuntimeOverrideYaml(values, preload, readTwentyPassthroughNames(opts.env));
+  const yaml = twentyRuntimeOverrideYaml(values, preload, readTwentyPassthroughNames(opts.env), canary);
   const fsImpl = opts.fs ?? defaultRuntimeOverrideFs;
   const file = twentyRuntimeOverridePath();
 
