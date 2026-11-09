@@ -262,7 +262,7 @@ Environment variables read by `cloud-install.sh` (names only; set them in the cl
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PRODUCTS_ROOT` | `../products` | Where the forks are cloned |
+| `PRODUCTS_ROOT` | `../products` from the current directory | Where the forks are cloned. Unset or blank: `../products` next to the directory you run from, never inside `node_modules` (refused with `PRODUCTS_ROOT_DEFAULT_IN_NODE_MODULES`). |
 | `HARNESS_PRODUCTS` | `cal documenso medusa twenty` | Subset to prepare, space-separated |
 | `NODE24` | `/opt/node24/bin/node` (Cloud) | Node 24 binary. Required only when `documenso` is selected |
 

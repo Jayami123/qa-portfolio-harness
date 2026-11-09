@@ -26,6 +26,27 @@ function medusaSecondBaseUrl(primaryBaseUrl: string, secondBaseUrl: string | und
 
 const optionalString = z.preprocess(emptyToUndefined, z.string().trim().min(1).optional());
 
+/** Thrown when PRODUCTS_ROOT is unset or blank and the default resolves inside node_modules. */
+export const PRODUCTS_ROOT_DEFAULT_IN_NODE_MODULES = "PRODUCTS_ROOT_DEFAULT_IN_NODE_MODULES";
+
+/**
+ * Set: path.resolve(raw), as before (relative to the current directory).
+ * Unset or blank: path.resolve(cwd, "..", "products"). If any path segment of that result is exactly
+ * "node_modules", throw `${PRODUCTS_ROOT_DEFAULT_IN_NODE_MODULES}: ...`. Only the default is checked.
+ */
+export function resolveProductsRoot(raw: string | undefined, cwd: string): string {
+  if (raw !== undefined && raw.trim() !== "") {
+    return path.resolve(raw);
+  }
+  const resolved = path.resolve(cwd, "..", "products");
+  if (resolved.split(path.sep).includes("node_modules")) {
+    throw new Error(
+      `${PRODUCTS_ROOT_DEFAULT_IN_NODE_MODULES}: the default ../products resolves inside node_modules (${resolved}). Set PRODUCTS_ROOT to the folder that holds the product forks.`,
+    );
+  }
+  return resolved;
+}
+
 const envSchema = z.object({
   PRODUCTS_ROOT: optionalString,
   CAL_PRODUCT_DIR: optionalString,
@@ -148,7 +169,7 @@ export function loadConfig(): HarnessConfig {
   }
 
   const parsed = envSchema.parse(process.env);
-  const productsRoot = path.resolve(parsed.PRODUCTS_ROOT ?? path.join(HARNESS_ROOT, "..", "products"));
+  const productsRoot = resolveProductsRoot(parsed.PRODUCTS_ROOT, process.cwd());
 
   cached = {
     productsRoot,
