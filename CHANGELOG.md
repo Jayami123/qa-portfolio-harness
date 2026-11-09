@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.4.0] - 2026-11-10
+
 - Twenty: opt-in `LOGIC_FUNCTION_TYPE` (`DISABLED`, `LAMBDA` or `LOCAL`, case-insensitive) is forwarded to the server and worker by name when set. Unset passes nothing, so the upstream default applies.
 - Medusa: opt-in `MEDUSA_FF_RBAC` (`true` or `false`) is written into the harness-generated backend `.env`. Unset leaves the file unchanged, so Medusa's default (`false`) applies.
 - Twenty: opt-in `HARNESS_TWENTY_CANARY_NAME` and `HARNESS_TWENTY_CANARY_VALUE` write one caller-named variable into the Twenty server and worker. The name must match `^[A-Z][A-Z0-9_]{2,63}$` and must not collide with a harness-owned name. The value is never logged or written to disk; it reaches the container by compose interpolation.
@@ -142,5 +144,6 @@
 - Default Cal `up()` to `next build` then `next start`.
 - Skip `next build` when a production `.next` marker exists unless `CAL_WEB_REBUILD=1`.
 
-[Unreleased]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.0...v0.3.1
