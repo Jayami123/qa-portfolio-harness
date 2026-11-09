@@ -150,6 +150,42 @@ export function twentyHarnessVolumesExist(check: TwentyVolumeCheck, projectName 
   return names.some((name) => name === `${prefix}${TWENTY_DB_VOLUME_SUFFIX}` || name === `${prefix}${TWENTY_SERVER_VOLUME_SUFFIX}`);
 }
 
+export const TWENTY_REQUIRE_FRESH_INVALID = "TWENTY_REQUIRE_FRESH_INVALID";
+export const TWENTY_REQUIRE_FRESH_VOLUMES_EXIST = "TWENTY_REQUIRE_FRESH_VOLUMES_EXIST";
+
+/** True only for the exact value "1". Undefined or blank is false. Any other non-blank value throws TWENTY_REQUIRE_FRESH_INVALID. */
+export function readTwentyRequireFresh(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.TWENTY_REQUIRE_FRESH;
+  if (raw === undefined || raw.trim() === "") {
+    return false;
+  }
+  if (raw === "1") {
+    return true;
+  }
+  throw new Error(`${TWENTY_REQUIRE_FRESH_INVALID}: TWENTY_REQUIRE_FRESH must be 1 or unset (got "${raw}")`);
+}
+
+/** Throws, naming the existing harness volumes, when requireFresh is set and one exists. Called before composeUp. */
+export function assertTwentyFreshOrRefuse(opts: {
+  requireFresh: boolean;
+  volumes: TwentyVolumeCheck;
+  projectName?: string;
+}): void {
+  if (!opts.requireFresh) {
+    return;
+  }
+  const projectName = opts.projectName ?? "qa-harness-twenty";
+  if (!twentyHarnessVolumesExist(opts.volumes, projectName)) {
+    return;
+  }
+  const prefix = `${projectName}_`;
+  const names = opts.volumes.listVolumes();
+  const present = [`${prefix}${TWENTY_DB_VOLUME_SUFFIX}`, `${prefix}${TWENTY_SERVER_VOLUME_SUFFIX}`].filter((n) => names.includes(n));
+  throw new Error(
+    `${TWENTY_REQUIRE_FRESH_VOLUMES_EXIST}: ${present.join(" and ")} exist. Reset with TWENTY_DOWN_VOLUMES=1 npm run down -- twenty.`,
+  );
+}
+
 export interface TwentyDockerEnvFs {
   existsSync(filePath: string): boolean;
   readFileSync(filePath: string, encoding: "utf8"): string;

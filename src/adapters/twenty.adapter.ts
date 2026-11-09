@@ -7,6 +7,7 @@ import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth, waitUntilHealthy } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import {
+  assertTwentyFreshOrRefuse,
   assertTwentyImageTag,
   bootstrapTwentyDockerEnv,
   defaultTwentyFs,
@@ -15,6 +16,7 @@ import {
   extractBearerFromSignIn,
   isTwentyHealthyStatus,
   parseTwentyMetadataBody,
+  readTwentyRequireFresh,
   selectWorkspaceOrigin,
   listTwentyDockerVolumeNames,
   parseDockerVolumeList,
@@ -151,6 +153,11 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
 
   async up(): Promise<void> {
     assertTwentyImageTag(this.cfg.imageTag);
+    const requireFresh = readTwentyRequireFresh(process.env);
+    if (requireFresh) {
+      const names = await this.listDockerVolumes();
+      assertTwentyFreshOrRefuse({ requireFresh, volumes: { listVolumes: () => names }, projectName: COMPOSE_PROJECT });
+    }
     writeTwentyRuntimeOverride({ env: process.env });
     await this.prepareDockerEnvAsync();
     await composeUp(this.composeOpts(), { wait: true });
