@@ -18,6 +18,8 @@ import {
   TWENTY_FORBIDDEN_COMPOSE_FRAGMENT,
   twentyHarnessVolumesExist,
   twentyVolumeResetCommand,
+  assertTwentyFreshOrRefuse,
+  readTwentyRequireFresh,
 } from "./twenty-env.js";
 
 describe("isTwentyHealthyStatus", () => {
@@ -301,5 +303,54 @@ describe("twentyComposeFilePaths", () => {
     for (const file of files) {
       assert.doesNotMatch(file, new RegExp(TWENTY_FORBIDDEN_COMPOSE_FRAGMENT));
     }
+  });
+});
+
+describe("readTwentyRequireFresh", () => {
+  it('reads exactly "1" as on', () => {
+    assert.equal(readTwentyRequireFresh({ TWENTY_REQUIRE_FRESH: "1" }), true);
+  });
+
+  it("treats unset and blank as off", () => {
+    assert.equal(readTwentyRequireFresh({}), false);
+    assert.equal(readTwentyRequireFresh({ TWENTY_REQUIRE_FRESH: "" }), false);
+  });
+
+  it('throws TWENTY_REQUIRE_FRESH_INVALID for "true", "0" and " 1"', () => {
+    for (const raw of ["true", "0", " 1"]) {
+      assert.throws(() => readTwentyRequireFresh({ TWENTY_REQUIRE_FRESH: raw }), /TWENTY_REQUIRE_FRESH_INVALID/);
+    }
+  });
+});
+
+describe("assertTwentyFreshOrRefuse", () => {
+  const volumes = (names: string[]) => ({ listVolumes: () => names });
+  const DB = "qa-harness-twenty_db-data";
+  const SERVER = "qa-harness-twenty_server-local-data";
+
+  it("throws naming both volumes when both exist", () => {
+    assert.throws(
+      () => assertTwentyFreshOrRefuse({ requireFresh: true, volumes: volumes([DB, SERVER]) }),
+      (err: Error) => err.message.includes(DB) && err.message.includes(SERVER) && err.message.includes("TWENTY_REQUIRE_FRESH_VOLUMES_EXIST"),
+    );
+  });
+
+  it("names only the volume that exists", () => {
+    assert.throws(
+      () => assertTwentyFreshOrRefuse({ requireFresh: true, volumes: volumes([SERVER]) }),
+      (err: Error) => err.message.includes(SERVER) && !err.message.includes(DB),
+    );
+    assert.throws(
+      () => assertTwentyFreshOrRefuse({ requireFresh: true, volumes: volumes([DB]) }),
+      (err: Error) => err.message.includes(DB) && !err.message.includes(SERVER),
+    );
+  });
+
+  it("does not throw when no harness volume exists", () => {
+    assert.doesNotThrow(() => assertTwentyFreshOrRefuse({ requireFresh: true, volumes: volumes(["other_volume"]) }));
+  });
+
+  it("does not throw when requireFresh is false, even with volumes present", () => {
+    assert.doesNotThrow(() => assertTwentyFreshOrRefuse({ requireFresh: false, volumes: volumes([DB, SERVER]) }));
   });
 });
