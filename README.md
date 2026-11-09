@@ -392,6 +392,8 @@ Limits of this script: Claude Code snapshots an environment only when its setup 
 
 Honest gaps:
 
+- **Cal** `up cal` writes the root `.env` when it is missing, with generated `NEXTAUTH_SECRET` and `CALENDSO_ENCRYPTION_KEY`, mode 600. Values are never printed. Real values are never overwritten. If the Cal database volume exists, `up` refuses to create a new encryption key; reset with `CAL_DOWN_VOLUMES=1 npm run down -- cal`. `scripts/cloud-install.sh` still writes the same file at install time; it exits early when the file exists.
+- **Cal** `CAL_DOWN_VOLUMES=1` (exactly `1`) removes the Cal database volume on `down`; anything else keeps it.
 - **Cal** `up()` starts Postgres and will spawn the web process unless the app is already healthy or `CAL_SKIP_WEB_START=1`. Default web mode is `next start` after `next build` (tRPC types first; skip only when `.next` matches product HEAD). `CAL_WEB_MODE=dev` keeps next-dev (Windows webpack via `CAL_WEB_BUNDLER`).
 - **Cal** web has no `/api/health` in this fork. Health falls back to `GET /` (any HTTP &lt; 500). API v2 exposes `GET /health` (unauthenticated — smoke does **not** treat that as proof of the API key).
 - **Cal** `authenticate()` **requires** `CAL_API_KEY`. It no longer hardcodes the seed key from `scripts/seed.ts`.
