@@ -172,6 +172,15 @@ describe("writeTwentyRuntimeOverride with LOGIC_FUNCTION_TYPE", () => {
     }
   });
 
+  it("does not trim a non-blank value: a padded local is refused with zero fs calls", () => {
+    const { fake, calls } = fakeFs();
+    assert.throws(
+      () => writeTwentyRuntimeOverride({ env: { LOGIC_FUNCTION_TYPE: " local " }, fs: fake }),
+      /TWENTY_LOGIC_FUNCTION_TYPE_INVALID/,
+    );
+    assert.deepEqual(calls, []);
+  });
+
   it("throws TWENTY_LOGIC_FUNCTION_TYPE_INVALID before any file system call for a bogus value", () => {
     const { fake, calls } = fakeFs();
     assert.throws(
