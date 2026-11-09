@@ -1,9 +1,66 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { MedusaConfig } from "../config.js";
 import { MedusaAdapter } from "./medusa.adapter.js";
+
+describe("MedusaAdapter writeBackendEnv with MEDUSA_FF_RBAC", () => {
+  const realLog = console.log;
+  let productRoot: string;
+  let envPath: string;
+  let savedFlag: string | undefined;
+
+  beforeEach(() => {
+    console.log = () => {};
+    productRoot = fs.mkdtempSync(path.join(os.tmpdir(), "medusa-backend-env-"));
+    const backend = path.join(productRoot, "apps", "backend");
+    fs.mkdirSync(backend, { recursive: true });
+    fs.writeFileSync(path.join(backend, ".env.template"), "JWT_SECRET=fixture-jwt\nDATABASE_URL=\nDB_NAME=medusa-backend\n");
+    envPath = path.join(backend, ".env");
+    savedFlag = process.env.MEDUSA_FF_RBAC;
+    delete process.env.MEDUSA_FF_RBAC;
+  });
+
+  afterEach(() => {
+    console.log = realLog;
+    if (savedFlag === undefined) {
+      delete process.env.MEDUSA_FF_RBAC;
+    } else {
+      process.env.MEDUSA_FF_RBAC = savedFlag;
+    }
+    fs.rmSync(productRoot, { recursive: true, force: true });
+  });
+
+  function writeBackendEnv(): void {
+    const adapter = new MedusaAdapter({
+      productRoot,
+      dbUrl: "postgres://medusa:medusa@127.0.0.1:5433/medusa",
+      baseUrl: "http://127.0.0.1:9000",
+    } as MedusaConfig);
+    (adapter as unknown as { writeBackendEnv: () => void }).writeBackendEnv();
+  }
+
+  it("writes MEDUSA_FF_RBAC=true into the backend .env when the variable is true", () => {
+    process.env.MEDUSA_FF_RBAC = "true";
+    writeBackendEnv();
+    assert.equal(fs.readFileSync(envPath, "utf8").split("\n").includes("MEDUSA_FF_RBAC=true"), true);
+  });
+
+  it("leaves the line out when the variable is unset", () => {
+    writeBackendEnv();
+    assert.equal(fs.readFileSync(envPath, "utf8").includes("MEDUSA_FF_RBAC"), false);
+  });
+
+  it("writes nothing when the variable is invalid", () => {
+    process.env.MEDUSA_FF_RBAC = "yes";
+    assert.throws(() => writeBackendEnv(), /MEDUSA_FF_RBAC_INVALID/);
+    assert.equal(fs.existsSync(envPath), false);
+  });
+});
 
 describe("MedusaAdapter already-healthy branch", () => {
   const realLog = console.log;
