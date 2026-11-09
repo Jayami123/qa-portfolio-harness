@@ -38,6 +38,7 @@ import {
   assertMedusaNodeVersion,
   assertMedusaPnpmVersion,
   buildMedusaBackendEnvFile,
+  readMedusaFfRbac,
   buildMedusaStorefrontEnvLocal,
   classifyMedusaProbe,
   decideMedusaBuildSkip,
@@ -266,6 +267,7 @@ export class MedusaAdapter extends BaseAdapter<MedusaConfig> {
         stripeWebhookSecret: switches.stripe
           ? this.cfg.stripeWebhookSecret
           : undefined,
+        ffRbac: readMedusaFfRbac(process.env),
       },
     );
     const envPath = path.join(this.backendDir(), ".env");

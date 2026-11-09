@@ -203,12 +203,28 @@ export function medusaComposeFileNames(switches: MedusaHarnessSwitches): readonl
   return files;
 }
 
+export const MEDUSA_FF_RBAC_VALUES = ["true", "false"] as const;
+
+/** Undefined when unset or blank. Throws MEDUSA_FF_RBAC_INVALID for any value other than exactly "true" or "false". */
+export function readMedusaFfRbac(env: Record<string, string | undefined>): "true" | "false" | undefined {
+  const raw = env.MEDUSA_FF_RBAC;
+  if (raw === undefined || raw.trim() === "") {
+    return undefined;
+  }
+  if (raw === "true" || raw === "false") {
+    return raw;
+  }
+  throw new Error(`MEDUSA_FF_RBAC_INVALID: MEDUSA_FF_RBAC must be exactly "true" or "false" (got "${raw}"). Unset it to keep Medusa's default.`);
+}
+
 export interface MedusaBackendEnvInput {
   databaseUrl: string;
   /** Set when `MEDUSA_REDIS=1`. */
   redisUrl?: string;
   stripeApiKey?: string;
   stripeWebhookSecret?: string;
+  /** Written only when defined. Unset leaves the template line as it is. */
+  ffRbac?: "true" | "false";
 }
 
 function splitLines(text: string): string[] {
@@ -238,12 +254,21 @@ function upsertEnvLine(lines: string[], key: string, value: string | undefined):
   }
 }
 
+/** Like upsertEnvLine, but never deletes: undefined is a no-op, so a template line survives an unset value. */
+function setEnvLineIfDefined(lines: string[], key: string, value: string | undefined): void {
+  if (value === undefined) {
+    return;
+  }
+  upsertEnvLine(lines, key, value);
+}
+
 export function buildMedusaBackendEnvFile(template: string, input: MedusaBackendEnvInput): string {
   const lines = splitLines(template);
   upsertEnvLine(lines, "DATABASE_URL", input.databaseUrl);
   upsertEnvLine(lines, "REDIS_URL", input.redisUrl);
   upsertEnvLine(lines, "STRIPE_API_KEY", input.stripeApiKey);
   upsertEnvLine(lines, "STRIPE_WEBHOOK_SECRET", input.stripeWebhookSecret);
+  setEnvLineIfDefined(lines, "MEDUSA_FF_RBAC", input.ffRbac);
   const body = lines.join("\n");
   return body.endsWith("\n") ? body : `${body}\n`;
 }

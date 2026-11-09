@@ -23,6 +23,7 @@ import {
   parseMedusaEnvFile,
   parseMedusaHarnessBuildGitSha,
   parseMedusaHarnessSwitches,
+  readMedusaFfRbac,
   redactMedusaText,
   redactPublishableKey,
   renderServerMedusaConfigJs,
@@ -143,6 +144,96 @@ describe("buildMedusaBackendEnvFile", () => {
     assert.equal(
       parseMedusaEnvFile(file).STRIPE_WEBHOOK_SECRET,
       "whsec_fixture",
+    );
+  });
+});
+
+describe("readMedusaFfRbac", () => {
+  it("returns undefined when unset or blank", () => {
+    assert.equal(readMedusaFfRbac({}), undefined);
+    assert.equal(readMedusaFfRbac({ MEDUSA_FF_RBAC: "" }), undefined);
+    assert.equal(readMedusaFfRbac({ MEDUSA_FF_RBAC: "   " }), undefined);
+  });
+
+  it("returns the value for exactly true or false", () => {
+    assert.equal(readMedusaFfRbac({ MEDUSA_FF_RBAC: "true" }), "true");
+    assert.equal(readMedusaFfRbac({ MEDUSA_FF_RBAC: "false" }), "false");
+  });
+
+  it("throws MEDUSA_FF_RBAC_INVALID for any other value", () => {
+    for (const value of ["yes", "TRUE", "1", " true"]) {
+      assert.throws(() => readMedusaFfRbac({ MEDUSA_FF_RBAC: value }), /MEDUSA_FF_RBAC_INVALID/, value);
+    }
+  });
+});
+
+describe("buildMedusaBackendEnvFile with MEDUSA_FF_RBAC", () => {
+  it("writes MEDUSA_FF_RBAC=true when the input is true", () => {
+    const file = buildMedusaBackendEnvFile(TEMPLATE, { databaseUrl: DATABASE_URL, ffRbac: "true" });
+    assert.equal(file.split("\n").includes("MEDUSA_FF_RBAC=true"), true);
+    assert.equal(parseMedusaEnvFile(file).MEDUSA_FF_RBAC, "true");
+  });
+
+  it("writes MEDUSA_FF_RBAC=false when the input is false", () => {
+    const file = buildMedusaBackendEnvFile(TEMPLATE, { databaseUrl: DATABASE_URL, ffRbac: "false" });
+    assert.equal(file.split("\n").includes("MEDUSA_FF_RBAC=false"), true);
+  });
+
+  it("leaves a template MEDUSA_FF_RBAC line untouched when the input is unset", () => {
+    const template = `${TEMPLATE}MEDUSA_FF_RBAC=x\n`;
+    const file = buildMedusaBackendEnvFile(template, { databaseUrl: DATABASE_URL });
+    assert.equal(file.split("\n").includes("MEDUSA_FF_RBAC=x"), true);
+    assert.equal(parseMedusaEnvFile(file).MEDUSA_FF_RBAC, "x");
+  });
+
+  it("replaces a template MEDUSA_FF_RBAC line when the input is defined", () => {
+    const template = `${TEMPLATE}MEDUSA_FF_RBAC=x\n`;
+    const file = buildMedusaBackendEnvFile(template, { databaseUrl: DATABASE_URL, ffRbac: "true" });
+    assert.equal(parseMedusaEnvFile(file).MEDUSA_FF_RBAC, "true");
+    assert.equal(file.includes("=x"), false);
+  });
+});
+
+describe("buildMedusaBackendEnvFile golden output without MEDUSA_FF_RBAC", () => {
+  it("equals the v0.3.1 output for the same template and upserts (DATABASE_URL set, REDIS_URL dropped)", () => {
+    // Template with DATABASE_URL replaced in place and REDIS_URL removed, the other template lines kept in order.
+    const expected = [
+      "STORE_CORS=http://localhost:8000",
+      "ADMIN_CORS=http://localhost:9000",
+      "AUTH_CORS=http://localhost:9000",
+      "JWT_SECRET=fixture-jwt",
+      "COOKIE_SECRET=fixture-cookie",
+      `DATABASE_URL=${DATABASE_URL}`,
+      "DB_NAME=medusa-backend",
+      "",
+    ].join("\n");
+    assert.equal(buildMedusaBackendEnvFile(TEMPLATE, { databaseUrl: DATABASE_URL }), expected);
+  });
+
+  it("equals the v0.3.1 output when the four optional upserts are all set", () => {
+    // REDIS_URL replaces the template line in place; the Stripe keys are not in the template, so they are appended after its trailing blank line.
+    const expected = [
+      "STORE_CORS=http://localhost:8000",
+      "ADMIN_CORS=http://localhost:9000",
+      "AUTH_CORS=http://localhost:9000",
+      "REDIS_URL=redis://127.0.0.1:6380",
+      "JWT_SECRET=fixture-jwt",
+      "COOKIE_SECRET=fixture-cookie",
+      `DATABASE_URL=${DATABASE_URL}`,
+      "DB_NAME=medusa-backend",
+      "",
+      "STRIPE_API_KEY=sk_test_fixture",
+      "STRIPE_WEBHOOK_SECRET=whsec_fixture",
+      "",
+    ].join("\n");
+    assert.equal(
+      buildMedusaBackendEnvFile(TEMPLATE, {
+        databaseUrl: DATABASE_URL,
+        redisUrl: "redis://127.0.0.1:6380",
+        stripeApiKey: "sk_test_fixture",
+        stripeWebhookSecret: "whsec_fixture",
+      }),
+      expected,
     );
   });
 });
