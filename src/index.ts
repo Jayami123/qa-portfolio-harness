@@ -20,4 +20,4 @@ export {
   TWENTY_DEV_SEED_PASSWORD,
 } from "./adapters/twenty-env.js";
 
-export { documensoMailApiUrl } from "./config.js";
+export { documensoMailApiUrl, twentyMailApiUrl } from "./config.js";

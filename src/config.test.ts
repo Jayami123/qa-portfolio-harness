@@ -10,6 +10,7 @@ import {
   loadConfig,
   resetConfigCache,
   resolveProductsRoot,
+  twentyMailApiUrl,
 } from "./config.js";
 import { HARNESS_ROOT } from "./paths.js";
 
@@ -139,6 +140,15 @@ describe("documensoMailApiUrl", () => {
     const port = /"127\.0\.0\.1:(\d+):9000"/.exec(compose);
     assert.ok(port, "inbucket REST port mapping not found in documenso.compose.yml");
     assert.equal(documensoMailApiUrl, `http://127.0.0.1:${port[1]}/api/v1/mailbox`);
+  });
+});
+
+describe("twentyMailApiUrl", () => {
+  it("points at the Mailpit host port published by docker/twenty.compose.yml", () => {
+    const compose = fs.readFileSync(path.join(HARNESS_ROOT, "docker", "twenty.compose.yml"), "utf8");
+    const port = /"(?:127\.0\.0\.1:)?(\d+):8025"/.exec(compose);
+    assert.ok(port, "Mailpit UI port mapping (8025) not found in twenty.compose.yml");
+    assert.equal(twentyMailApiUrl, `http://127.0.0.1:${port[1]}/api/v1`);
   });
 });
 
