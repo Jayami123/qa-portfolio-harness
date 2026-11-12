@@ -30,7 +30,7 @@ import {
 import { calDownArgs, calUpPrelude, CAL_DB_VOLUME, ensureCalRootEnv, type CalEnvFs } from "./cal-env.js";
 import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
 import { buildCalApiEnv, describeCalApiEnv } from "./cal-api-env.js";
-import { CAL_MAIL_SMTP_HOST, CAL_MAIL_SMTP_PORT, CAL_MAIL_UI_PORT } from "./cal-mail.js";
+import { CAL_MAIL_SERVICE, CAL_MAIL_SMTP_HOST, CAL_MAIL_SMTP_PORT, CAL_MAIL_UI_PORT } from "./cal-mail.js";
 import {
   assertApiListenerIsRecorded,
   calApiSpawnSpec,
@@ -59,6 +59,8 @@ const calEnvFs: CalEnvFs = {
 /** The fork's Postgres service. --wait must name it: the fork's one-shot postgres_is_ready container exits, and --wait fails on any exit (docker/compose#10596). */
 export const CAL_POSTGRES_SERVICE = "postgres";
 export const CAL_REDIS_SERVICE = "redis";
+/** Services `up cal` names for --wait. compose starts only these, so the mail catcher must be listed to be created. */
+export const CAL_UP_WAIT_SERVICES: string[] = [CAL_POSTGRES_SERVICE, CAL_REDIS_SERVICE, CAL_MAIL_SERVICE];
 const CAL_WEB_STOP_WAIT_MS = 30_000;
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
 const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
@@ -656,7 +658,7 @@ ${this.readLogTail(logFile)}`,
         }
       },
       composeUp: () =>
-        composeUp(this.composeOpts(), { wait: true, waitServices: [CAL_POSTGRES_SERVICE, CAL_REDIS_SERVICE] }),
+        composeUp(this.composeOpts(), { wait: true, waitServices: CAL_UP_WAIT_SERVICES }),
     });
     if (pgStats) {
       await enablePgStatsExtension({

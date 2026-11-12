@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { CAL_MAIL_EXAMPLE_HOST, CAL_MAIL_EXAMPLE_PORT, CAL_MAIL_SMTP_HOST, CAL_MAIL_SMTP_PORT, CAL_MAIL_UI_PORT } from "./cal-mail.js";
+import { composeUpArgs } from "../internal/compose.js";
+import { CAL_UP_WAIT_SERVICES } from "./cal.adapter.js";
+import {
+  CAL_MAIL_EXAMPLE_HOST,
+  CAL_MAIL_EXAMPLE_PORT,
+  CAL_MAIL_SERVICE,
+  CAL_MAIL_SMTP_HOST,
+  CAL_MAIL_SMTP_PORT,
+  CAL_MAIL_UI_PORT,
+} from "./cal-mail.js";
 import { HARNESS_ROOT } from "../paths.js";
 
 const overlay = fs.readFileSync(path.join(HARNESS_ROOT, "docker", "cal.mail.compose.yml"), "utf8");
@@ -37,5 +46,18 @@ describe("Cal mail catcher ports", () => {
     assert.equal(CAL_MAIL_SMTP_HOST, "127.0.0.1");
     assert.equal(CAL_MAIL_EXAMPLE_HOST, "localhost");
     assert.equal(CAL_MAIL_EXAMPLE_PORT, "1025");
+  });
+
+  it("the overlay defines the service that up names for --wait", () => {
+    assert.match(overlay, new RegExp(`^  ${CAL_MAIL_SERVICE}:$`, "m"));
+  });
+
+  it("up names the mail service, so compose creates it", () => {
+    const args = composeUpArgs(
+      { projectName: "qa-harness-cal", files: ["base.yml", "cal.mail.compose.yml"], cwd: "/" },
+      { wait: true, waitServices: CAL_UP_WAIT_SERVICES },
+    );
+    assert.ok(args.includes(CAL_MAIL_SERVICE), `up args must name ${CAL_MAIL_SERVICE}: ${args.join(" ")}`);
+    assert.ok(args.includes("postgres") && args.includes("redis"));
   });
 });

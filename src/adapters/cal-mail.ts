@@ -3,6 +3,8 @@
  * Host ports are chosen to avoid the other products: 1025 and 8025 (Twenty Mailpit), 2525 and 9003 (Documenso Inbucket).
  * The catcher binds 127.0.0.1 only.
  */
+/** The service key in docker/cal.mail.compose.yml. `up` must name it: compose starts only the services it is given under --wait. */
+export const CAL_MAIL_SERVICE = "mailpit";
 export const CAL_MAIL_SMTP_HOST = "127.0.0.1";
 export const CAL_MAIL_SMTP_PORT = 1026;
 export const CAL_MAIL_UI_PORT = 8026;
