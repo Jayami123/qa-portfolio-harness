@@ -21,3 +21,5 @@ export {
 } from "./adapters/twenty-env.js";
 
 export { calMailApiUrl, documensoMailApiUrl, twentyMailApiUrl } from "./config.js";
+
+export { calApiKeyRateLimit } from "./adapters/cal-api-env.js";

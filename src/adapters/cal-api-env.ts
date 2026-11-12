@@ -87,8 +87,49 @@ export function buildCalApiEnv(input: CalApiEnvInput): Record<string, string> {
         `Set them in the environment of up, or in the Cal product .env. Names only; no value is printed.`,
     );
   }
+  for (const key of CAL_RATE_LIMIT_KEYS) {
+    const forwarded = readRateLimitValue(input.processEnv[key], key);
+    if (forwarded !== undefined) {
+      env[key] = forwarded;
+    }
+  }
   env.DATABASE_URL = input.dbUrl;
   return env;
+}
+
+/**
+ * The rate-limit keys the harness forwards from its own process env, only when set (fork: apps/api/v2/src/lib/throttler-guard.ts:34-36
+ * and apps/api/v2/src/env.ts:25-26; the fork falls back to 120 requests and 60000 ms). A blank value counts as unset.
+ * The harness never sets a default: unset means the fork's own default applies.
+ */
+export const CAL_RATE_LIMIT_KEYS = ["RATE_LIMIT_DEFAULT_LIMIT_API_KEY", "RATE_LIMIT_DEFAULT_TTL_MS"] as const;
+
+/** A positive whole number, as a string. Returns undefined for unset or blank. Throws naming the key (never the value) otherwise. */
+function readRateLimitValue(raw: string | undefined, key?: string): string | undefined {
+  if (raw === undefined || raw.trim() === "") {
+    return undefined;
+  }
+  const value = raw.trim();
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new Error(`${key ?? "rate limit"} must be a positive whole number. Name only; no value is printed.`);
+  }
+  return value;
+}
+
+/**
+ * The effective API-key limit the Cal API v2 process is started with: the forwarded RATE_LIMIT_DEFAULT_LIMIT_API_KEY, as a number.
+ * Reads the same env the spawn env is built from. Throws by name when unset, so the fork's 120 is never reported as effective
+ * without the harness having set it.
+ */
+export function calApiKeyRateLimit(processEnv: NodeJS.ProcessEnv = process.env): number {
+  const key = "RATE_LIMIT_DEFAULT_LIMIT_API_KEY";
+  const value = readRateLimitValue(processEnv[key], key);
+  if (value === undefined) {
+    throw new Error(
+      `${key} is not set in the harness environment, so the Cal API v2 limit is the fork default and is not reported as effective. Set it before up cal.`,
+    );
+  }
+  return Number(value);
 }
 
 /** Keys whose values are safe to print: the port, the local Redis address, and the mode. Everything else is redacted. */
