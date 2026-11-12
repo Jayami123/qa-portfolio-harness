@@ -3,8 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { getAdapter } from "./adapters/registry.js";
 import {
   documensoMailApiUrl,
+  getProductConfig,
   loadConfig,
   resetConfigCache,
   resolveProductsRoot,
@@ -168,5 +170,73 @@ describe("CAL_DB_URL default", () => {
       resetConfigCache();
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("lazy product roots (getProductConfig, getAdapter)", () => {
+  const saved = new Map<string, string | undefined>();
+  let root = "";
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "harness-lazy-roots-"));
+    for (const key of [...PRODUCT_DIR_KEYS, "PRODUCTS_ROOT"]) {
+      saved.set(key, process.env[key]);
+      delete process.env[key];
+    }
+    process.env.PRODUCTS_ROOT = root;
+    resetConfigCache();
+  });
+
+  afterEach(() => {
+    for (const [key, value] of saved) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    saved.clear();
+    resetConfigCache();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("only documenso exists: getProductConfig('documenso') returns its root", () => {
+    fs.mkdirSync(path.join(root, "documenso"));
+    assert.equal(getProductConfig("documenso").productRoot, path.resolve(root, "documenso"));
+  });
+
+  it("only documenso exists: getProductConfig('cal') throws the Cal root error", () => {
+    fs.mkdirSync(path.join(root, "documenso"));
+    assert.throws(() => getProductConfig("cal"), /Cal product root does not exist/);
+  });
+
+  it("only documenso exists: getAdapter('documenso') builds without the sibling roots", () => {
+    fs.mkdirSync(path.join(root, "documenso"));
+    assert.equal(getAdapter("documenso").id, "documenso");
+  });
+
+  it("only documenso exists: getAdapter('cal') throws the Cal root error", () => {
+    fs.mkdirSync(path.join(root, "documenso"));
+    assert.throws(() => getAdapter("cal"), /Cal product root does not exist/);
+  });
+
+  it("only cal exists: getProductConfig('cal') returns its root", () => {
+    fs.mkdirSync(path.join(root, "cal"));
+    assert.equal(getProductConfig("cal").productRoot, path.resolve(root, "cal"));
+  });
+
+  it("only cal exists: getProductConfig('documenso') throws the Documenso root error", () => {
+    fs.mkdirSync(path.join(root, "cal"));
+    assert.throws(() => getProductConfig("documenso"), /Documenso product root does not exist/);
+  });
+
+  it("only cal exists: getAdapter('cal') builds without the sibling roots", () => {
+    fs.mkdirSync(path.join(root, "cal"));
+    assert.equal(getAdapter("cal").id, "cal");
+  });
+
+  it("loadConfig() stays eager: with only documenso, it still throws the Cal root error", () => {
+    fs.mkdirSync(path.join(root, "documenso"));
+    assert.throws(() => loadConfig(), /Cal product root does not exist/);
   });
 });

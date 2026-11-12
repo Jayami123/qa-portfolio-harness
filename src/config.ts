@@ -161,6 +161,81 @@ function resolveExistingDir(label: string, dir: string): string {
   return resolved;
 }
 
+type ParsedEnv = z.infer<typeof envSchema>;
+
+/*
+ * One builder per product. Each resolves only its own root (resolveExistingDir), so a missing sibling
+ * fork cannot fail a different product's lookup. loadConfig() calls all four (eager, unchanged);
+ * loadProductConfig() calls one.
+ */
+
+function buildCalConfig(parsed: ParsedEnv, productsRoot: string): CalConfig {
+  return {
+    id: "cal",
+    productRoot: resolveExistingDir("Cal product root", parsed.CAL_PRODUCT_DIR ?? path.join(productsRoot, "cal")),
+    baseUrl: parsed.CAL_BASE_URL.replace(/\/$/, ""),
+    apiBaseUrl: parsed.CAL_API_BASE_URL.replace(/\/$/, ""),
+    dbUrl: parsed.CAL_DB_URL,
+    webhookSecret: parsed.CAL_WEBHOOK_SECRET,
+    apiKey: parsed.CAL_API_KEY,
+  };
+}
+
+function buildDocumensoConfig(parsed: ParsedEnv, productsRoot: string): DocumensoConfig {
+  return {
+    id: "documenso",
+    productRoot: resolveExistingDir(
+      "Documenso product root",
+      parsed.DOCUMENSO_PRODUCT_DIR ?? path.join(productsRoot, "documenso"),
+    ),
+    baseUrl: parsed.DOCUMENSO_BASE_URL.replace(/\/$/, ""),
+    dbUrl: parsed.DOCUMENSO_DB_URL,
+    publicUrl: parsed.DOCUMENSO_PUBLIC_URL
+      ? parseDocumensoPublicUrl(
+          parsed.DOCUMENSO_PUBLIC_URL,
+          documensoListen(parsed.DOCUMENSO_BASE_URL.replace(/\/$/, "")).port,
+        )
+      : undefined,
+    apiToken: parsed.DOCUMENSO_API_TOKEN,
+  };
+}
+
+function buildMedusaConfig(parsed: ParsedEnv, productsRoot: string): MedusaConfig {
+  return {
+    id: "medusa",
+    productRoot: resolveExistingDir(
+      "Medusa product root",
+      parsed.MEDUSA_PRODUCT_DIR ?? path.join(productsRoot, "medusa-dtc-starter"),
+    ),
+    baseUrl: parsed.MEDUSA_BASE_URL.replace(/\/$/, ""),
+    secondBaseUrl: medusaSecondBaseUrl(parsed.MEDUSA_BASE_URL.replace(/\/$/, ""), parsed.MEDUSA_SECOND_BASE_URL),
+    storefrontUrl: parsed.MEDUSA_STOREFRONT_URL.replace(/\/$/, ""),
+    dbUrl: parsed.MEDUSA_DB_URL,
+    adminEmail: parsed.MEDUSA_ADMIN_EMAIL,
+    adminPassword: parsed.MEDUSA_ADMIN_PASSWORD,
+    publishableApiKey: parsed.MEDUSA_PUBLISHABLE_API_KEY,
+    stripeApiKey: parsed.STRIPE_API_KEY,
+    stripeWebhookSecret: parsed.STRIPE_WEBHOOK_SECRET,
+    stripePublishableKey: parsed.NEXT_PUBLIC_STRIPE_KEY,
+  };
+}
+
+function buildTwentyConfig(parsed: ParsedEnv, productsRoot: string): TwentyConfig {
+  return {
+    id: "twenty",
+    productRoot: resolveExistingDir(
+      "Twenty product root",
+      parsed.TWENTY_PRODUCT_DIR ?? path.join(productsRoot, "twenty-CRM"),
+    ),
+    baseUrl: parsed.TWENTY_BASE_URL.replace(/\/$/, ""),
+    dbUrl: parsed.TWENTY_DB_URL,
+    email: parsed.TWENTY_EMAIL,
+    password: parsed.TWENTY_PASSWORD,
+    apiKey: parsed.TWENTY_API_KEY,
+    imageTag: parsed.TWENTY_IMAGE_TAG,
+  };
+}
+
 let cached: HarnessConfig | undefined;
 
 export function loadConfig(): HarnessConfig {
@@ -173,75 +248,51 @@ export function loadConfig(): HarnessConfig {
 
   cached = {
     productsRoot,
-    cal: {
-      id: "cal",
-      productRoot: resolveExistingDir(
-        "Cal product root",
-        parsed.CAL_PRODUCT_DIR ?? path.join(productsRoot, "cal"),
-      ),
-      baseUrl: parsed.CAL_BASE_URL.replace(/\/$/, ""),
-      apiBaseUrl: parsed.CAL_API_BASE_URL.replace(/\/$/, ""),
-      dbUrl: parsed.CAL_DB_URL,
-      webhookSecret: parsed.CAL_WEBHOOK_SECRET,
-      apiKey: parsed.CAL_API_KEY,
-    },
-    documenso: {
-      id: "documenso",
-      productRoot: resolveExistingDir(
-        "Documenso product root",
-        parsed.DOCUMENSO_PRODUCT_DIR ?? path.join(productsRoot, "documenso"),
-      ),
-      baseUrl: parsed.DOCUMENSO_BASE_URL.replace(/\/$/, ""),
-      dbUrl: parsed.DOCUMENSO_DB_URL,
-      publicUrl: parsed.DOCUMENSO_PUBLIC_URL
-        ? parseDocumensoPublicUrl(
-            parsed.DOCUMENSO_PUBLIC_URL,
-            documensoListen(parsed.DOCUMENSO_BASE_URL.replace(/\/$/, "")).port,
-          )
-        : undefined,
-      apiToken: parsed.DOCUMENSO_API_TOKEN,
-    },
-    medusa: {
-      id: "medusa",
-      productRoot: resolveExistingDir(
-        "Medusa product root",
-        parsed.MEDUSA_PRODUCT_DIR ?? path.join(productsRoot, "medusa-dtc-starter"),
-      ),
-      baseUrl: parsed.MEDUSA_BASE_URL.replace(/\/$/, ""),
-      secondBaseUrl: medusaSecondBaseUrl(
-        parsed.MEDUSA_BASE_URL.replace(/\/$/, ""),
-        parsed.MEDUSA_SECOND_BASE_URL,
-      ),
-      storefrontUrl: parsed.MEDUSA_STOREFRONT_URL.replace(/\/$/, ""),
-      dbUrl: parsed.MEDUSA_DB_URL,
-      adminEmail: parsed.MEDUSA_ADMIN_EMAIL,
-      adminPassword: parsed.MEDUSA_ADMIN_PASSWORD,
-      publishableApiKey: parsed.MEDUSA_PUBLISHABLE_API_KEY,
-      stripeApiKey: parsed.STRIPE_API_KEY,
-      stripeWebhookSecret: parsed.STRIPE_WEBHOOK_SECRET,
-      stripePublishableKey: parsed.NEXT_PUBLIC_STRIPE_KEY,
-    },
-    twenty: {
-      id: "twenty",
-      productRoot: resolveExistingDir(
-        "Twenty product root",
-        parsed.TWENTY_PRODUCT_DIR ?? path.join(productsRoot, "twenty-CRM"),
-      ),
-      baseUrl: parsed.TWENTY_BASE_URL.replace(/\/$/, ""),
-      dbUrl: parsed.TWENTY_DB_URL,
-      email: parsed.TWENTY_EMAIL,
-      password: parsed.TWENTY_PASSWORD,
-      apiKey: parsed.TWENTY_API_KEY,
-      imageTag: parsed.TWENTY_IMAGE_TAG,
-    },
+    cal: buildCalConfig(parsed, productsRoot),
+    documenso: buildDocumensoConfig(parsed, productsRoot),
+    medusa: buildMedusaConfig(parsed, productsRoot),
+    twenty: buildTwentyConfig(parsed, productsRoot),
   };
 
   return cached;
 }
 
+/**
+ * Config for one product only. Resolves PRODUCTS_ROOT and that product's root; the other products' roots
+ * are not checked, so a missing sibling fork does not fail this call. Env values are still validated in full,
+ * as loadConfig does. Does not write the shared cache (it holds the full config).
+ */
+export function loadProductConfig(id: "cal"): CalConfig;
+export function loadProductConfig(id: "documenso"): DocumensoConfig;
+export function loadProductConfig(id: "medusa"): MedusaConfig;
+export function loadProductConfig(id: "twenty"): TwentyConfig;
+export function loadProductConfig(id: ProductId): ProductConfig;
+export function loadProductConfig(id: ProductId): ProductConfig {
+  if (cached) {
+    return cached[id];
+  }
+
+  const parsed = envSchema.parse(process.env);
+  const productsRoot = resolveProductsRoot(parsed.PRODUCTS_ROOT, process.cwd());
+
+  switch (id) {
+    case "cal":
+      return buildCalConfig(parsed, productsRoot);
+    case "documenso":
+      return buildDocumensoConfig(parsed, productsRoot);
+    case "medusa":
+      return buildMedusaConfig(parsed, productsRoot);
+    case "twenty":
+      return buildTwentyConfig(parsed, productsRoot);
+    default: {
+      const exhaustive: never = id;
+      throw new Error(`Unknown product id: ${String(exhaustive)}`);
+    }
+  }
+}
+
 export function getProductConfig(id: ProductId): ProductConfig {
-  const config = loadConfig();
-  return config[id];
+  return loadProductConfig(id);
 }
 
 /** Reset cached config (used by smoke dry-run after env changes). */
