@@ -58,7 +58,7 @@ qa-portfolio-harness/
 | Medusa    | `../products/medusa-dtc-starter`          | backend **9000**, pg **5433** (harness compose) |
 | Twenty    | `../products/twenty-CRM`                  | app **3002**, pg 5434          |
 
-Cal defaults to web **3000**. `up cal` also starts the Cal API v2 on **127.0.0.1:5555** (health `GET /health` → `OK`, not `/v2/health`) and Redis on **127.0.0.1:6381** (`REDIS_URL`); `down cal` stops both. If port 5555 or 3000 is held by a process the harness did not start, `up` stops and names it. Documenso is started by the harness on **127.0.0.1:3001**. Twenty’s compose overlay publishes **3002**. This harness does **not** change product defaults.
+Cal defaults to web **3000**. `up cal` also starts the Cal API v2 on **127.0.0.1:5555** (health `GET /health` → `OK`, not `/v2/health`) and Redis on **127.0.0.1:6381** (`REDIS_URL`); `up cal` also starts a Mailpit catcher on **127.0.0.1:1026** (SMTP) and **127.0.0.1:8026** (UI and REST API, `calMailApiUrl`). `down cal` stops all three. The root `.env` SMTP pair (`EMAIL_SERVER_HOST`, `EMAIL_SERVER_PORT`) is pointed at the catcher only when both are unset or still the fork's example (`localhost`, `1025`); a real host or port is never overwritten. The Cal API key limit is forwarded from `RATE_LIMIT_DEFAULT_LIMIT_API_KEY` and `RATE_LIMIT_DEFAULT_TTL_MS` when set; `calApiKeyRateLimit()` returns the effective limit and throws when it is unset. If port 5555 or 3000 is held by a process the harness did not start, `up` stops and names it. Documenso is started by the harness on **127.0.0.1:3001**. Twenty’s compose overlay publishes **3002**. This harness does **not** change product defaults.
 
 ## Setup
 
