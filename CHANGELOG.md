@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `up`, `down` and `smoke` for one product resolve only that product's root (and `PRODUCTS_ROOT`). Before, every run checked all four forks, so `down documenso` failed with `Cal product root does not exist` when the Cal fork was absent. `loadConfig()` still checks all four.
+
 ## [0.4.0] - 2026-11-10
 
 - Twenty: opt-in `LOGIC_FUNCTION_TYPE` (`DISABLED`, `LAMBDA` or `LOCAL`, case-insensitive) is forwarded to the server and worker by name when set. Unset passes nothing, so the upstream default applies.
