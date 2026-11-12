@@ -1,0 +1,10 @@
+# Harness overlay: a loopback Mailpit catcher for Cal's SMTP.
+# Merged after docker/cal.compose.yml in the qa-harness-cal project. Host ports 1026 (SMTP) and 8026 (UI and REST API)
+# bind 127.0.0.1 only; 1025 and 8025 belong to Twenty (docker/twenty.compose.yml), 2525 and 9003 to Documenso.
+# The image is the same version as the Twenty overlay, pinned by tag and index digest.
+services:
+  mailpit:
+    image: axllent/mailpit:v1.22.3@sha256:f7f7c31de4de59540ad6515a0ca057a77525bca2069b6e747d873ca66c10fe08
+    ports:
+      - "127.0.0.1:1026:1025"
+      - "127.0.0.1:8026:8025"
