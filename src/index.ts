@@ -18,6 +18,8 @@ export * from "./data/factories.js";
 export {
   TWENTY_DEFAULT_ADMIN_EMAIL,
   TWENTY_DEV_SEED_PASSWORD,
+  TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN,
+  TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN,
 } from "./adapters/twenty-env.js";
 
 export { calMailApiUrl, documensoMailApiUrl, twentyMailApiUrl } from "./config.js";
