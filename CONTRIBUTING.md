@@ -11,7 +11,7 @@ Thank you for helping improve the QA portfolio harness. This package is consumed
 ## Merge and releases
 
 - Merge with **Create a merge commit**. Do **not** squash: release tags must sit on commits that remain in `main` history.
-- Releases: bump `version` in `package.json`, add a dated section in `CHANGELOG.md`, update README if needed, then Jayami tags `vX.Y.Z` on `main`.
+- Releases: bump `version` in `package.json`, add a dated section in `CHANGELOG.md`, update README if needed, then the owner tags `vX.Y.Z` on `main`.
 
 ## Before you push
 

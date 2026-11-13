@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/github/license/Jayami123/qa-portfolio-harness)](LICENSE)
 [![tag](https://img.shields.io/github/v/tag/Jayami123/qa-portfolio-harness?label=latest%20tag)](https://github.com/Jayami123/qa-portfolio-harness/tags)
 
-Shared TypeScript package for Jayami’s QA portfolio. This is the **only** place that knows how to start each product, wait until it is healthy, seed a test user, mint an auth token, and open a **read-only** Postgres connection.
+Shared TypeScript package for the owner’s QA portfolio. This is the **only** place that knows how to start each product, wait until it is healthy, seed a test user, mint an auth token, and open a **read-only** Postgres connection.
 
 Consumers: **P1** (web e2e), **P2** (backend/webhooks), **P5** (appsec), **P6** (load). Mobile (P3) and AI (P4) are out of scope.
 
@@ -63,7 +63,7 @@ Cal defaults to web **3000**. `up cal` also starts the Cal API v2 on **127.0.0.1
 ## Setup
 
 ```powershell
-cd D:\Jayami\Portfolio\qa-portfolio-harness
+cd D:\<owner>\Portfolio\qa-portfolio-harness
 copy .env.example .env
 # Fill placeholders in .env — never commit it
 npm i
@@ -127,9 +127,9 @@ nvm install 24
 nvm use 24
 node -v    # expect v24.x or newer
 npm -v     # expect 11.17.0 or newer
-cd /d/Jayami/Portfolio/products/documenso
+cd /d/<owner>/Portfolio/products/documenso
 npm ci     # once, under Node 24
-cd /d/Jayami/Portfolio/qa-portfolio-harness
+cd /d/<owner>/Portfolio/qa-portfolio-harness
 node scripts/up.mjs documenso
 nvm use 22 # switch back for the harness
 ```
@@ -188,7 +188,7 @@ Before `next build`, the adapter runs `yarn turbo run build --filter=@calcom/trp
 Skip a rebuild only when `apps/web/.next/required-server-files.json` exists **and** `apps/web/.next/harness-build.json` records the same `gitSha` as `git rev-parse HEAD` in the Cal product root. Uncommitted changes in the Cal working tree are **not** detected (skip is keyed on HEAD only); set `CAL_WEB_REBUILD=1` after local Cal edits. Otherwise the adapter logs why and rebuilds. `npm run smoke -- cal` calls `up()` first. Override the dev bundler with `CAL_WEB_BUNDLER=webpack` or `turbopack`.
 
 ```powershell
-cd D:\Jayami\Portfolio\qa-portfolio-harness
+cd D:\<owner>\Portfolio\qa-portfolio-harness
 copy .env.example .env
 npm i
 npm run build
@@ -198,7 +198,7 @@ npm run smoke -- cal
 First-time Cal fork setup (once):
 
 ```powershell
-cd D:\Jayami\Portfolio\products\cal
+cd D:\<owner>\Portfolio\products\cal
 yarn
 # copy .env.example → .env; set NEXTAUTH_SECRET and CALENDSO_ENCRYPTION_KEY
 ```
@@ -208,7 +208,7 @@ Docker Desktop must be running. Set `CAL_SKIP_WEB_START=1` to keep `up()` Postgr
 Optional API v2:
 
 ```powershell
-cd D:\Jayami\Portfolio\products\cal\apps\api\v2
+cd D:\<owner>\Portfolio\products\cal\apps\api\v2
 yarn dev         # http://localhost:5555/health → OK
 ```
 
@@ -217,7 +217,7 @@ Copy the `Created seeded API Key: cal_…` line from `yarn db-seed` into harness
 Then:
 
 ```powershell
-cd D:\Jayami\Portfolio\qa-portfolio-harness
+cd D:\<owner>\Portfolio\qa-portfolio-harness
 npm run smoke -- cal
 ```
 

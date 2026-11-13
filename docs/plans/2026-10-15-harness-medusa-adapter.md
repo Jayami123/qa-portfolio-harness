@@ -3,10 +3,10 @@
 ## 1 Header
 
 - Repo: `qa-portfolio-harness` · [Jayami123/qa-portfolio-harness](https://github.com/Jayami123/qa-portfolio-harness) · harness
-- Branch: `feat/2026-10-15-harness-medusa-adapter` from `main` at **742c651**. Do not commit on `main`. Target **v0.2.9**. Do not merge, tag, or open a PR without Jayami's go-ahead.
+- Branch: `feat/2026-10-15-harness-medusa-adapter` from `main` at **742c651**. Do not commit on `main`. Target **v0.2.9**. Do not merge, tag, or open a PR without the owner's go-ahead.
 - Package version today: `0.2.8`. Tag `v0.2.8` is two docs commits behind HEAD.
-- Product (read-only, never edit): `D:\Jayami\Portfolio\products\medusa-dtc-starter` · [Jayami123/medusa-dtc-starter](https://github.com/Jayami123/medusa-dtc-starter) HEAD **`f677db438f27294fc50e4c7c6612e71ff38eeff5`** (`f677db4`, 2026-10-09, upstream `fix/remove-static-params`). Pin this SHA in the README when the adapter lands.
-- Engine fork `D:\Jayami\Portfolio\products\medusa` stays untouched. After this rewrite the adapter must not read `scripts/portfolio-validation`, MinIO, or that folder.
+- Product (read-only, never edit): `D:\<owner>\Portfolio\products\medusa-dtc-starter` · [Jayami123/medusa-dtc-starter](https://github.com/Jayami123/medusa-dtc-starter) HEAD **`f677db438f27294fc50e4c7c6612e71ff38eeff5`** (`f677db4`, 2026-10-09, upstream `fix/remove-static-params`). Pin this SHA in the README when the adapter lands.
+- Engine fork `D:\<owner>\Portfolio\products\medusa` stays untouched. After this rewrite the adapter must not read `scripts/portfolio-validation`, MinIO, or that folder.
 - Date: 2026-10-15. Probe ran against a scratch clone of the same SHA; that scratch clone is deleted after this plan commit. Task 2 landed (adapter up/down, fake Redis ADR `docs/adr/0001-medusa-fake-redis.md`, harness-build marker under `.medusa/server/`). Branch head after task 2 fixes: **`14587db`**.
 - Start and stop Medusa only through `node scripts/up.mjs medusa` and `node scripts/down.mjs medusa` once the adapter exists. Reset volumes with a documented `down -v`, not by editing the fork.
 
@@ -23,9 +23,9 @@ Labels in this file: **verified** (this session's probe, 2026-10-15), **inferred
 - Idempotent **full seed** (section 4 `seed()`).
 - **Opt-in switches** (section 4): `MEDUSA_REDIS=1`, `MEDUSA_STRIPE=1` (harness `.env`, default off).
 - **Config overlay** without editing tracked fork files (section 4); prove `git status --short` empty in the product after `up`.
-- Storefront on :8000; `npm run smoke -- medusa` with switches on and off; `proveAuth`; CHANGELOG; README including **Which project turns on what**; version **0.2.9**; tag after Jayami merge.
+- Storefront on :8000; `npm run smoke -- medusa` with switches on and off; `proveAuth`; CHANGELOG; README including **Which project turns on what**; version **0.2.9**; tag after the owner merges.
 
-**Out of scope:** tracked edits under `medusa-dtc-starter`; Cal/Documenso/Twenty adapters; P1 Playwright in this repo; harness CI Docker live smoke; real Stripe live keys; CodeRabbit CLI; merge, tag, or PR without Jayami.
+**Out of scope:** tracked edits under `medusa-dtc-starter`; Cal/Documenso/Twenty adapters; P1 Playwright in this repo; harness CI Docker live smoke; real Stripe live keys; CodeRabbit CLI; merge, tag, or PR without the owner.
 
 ## 3 Probe results (2026-10-15)
 
@@ -367,7 +367,7 @@ Spawn storefront on 8000. Gitignored `.env.local` (backend URL, publishable key,
 
 ### Task 6: proveAuth, smoke matrix, release
 
-`proveAuth()`: `GET /admin/users/me`, email matches. Run `npm run smoke -- medusa` with switches **off**, then **Redis on**, then **Redis + Stripe on** (and off again if needed for regression). CHANGELOG; README polish; `package.json` **0.2.9**. Two fresh/kept volume smokes for the default (off) path. Prepare tag commands; Jayami tags after merge. Push branch when asked.
+`proveAuth()`: `GET /admin/users/me`, email matches. Run `npm run smoke -- medusa` with switches **off**, then **Redis on**, then **Redis + Stripe on** (and off again if needed for regression). CHANGELOG; README polish; `package.json` **0.2.9**. Two fresh/kept volume smokes for the default (off) path. Prepare tag commands; the owner tags after merge. Push branch when asked.
 
 ## 7 Files to touch (tasks 3–6)
 
@@ -419,7 +419,7 @@ No commit on `main`.
 
 ## 11 Will not do
 
-Fork edits (dtc-starter and engine). Default `down -v`. Harness CI Docker live smoke. Real Stripe keys. Printing the publishable key. CodeRabbit CLI. Merge, tag, or PR without Jayami.
+Fork edits (dtc-starter and engine). Default `down -v`. Harness CI Docker live smoke. Real Stripe keys. Printing the publishable key. CodeRabbit CLI. Merge, tag, or PR without the owner.
 
 ## 12 Open questions
 
