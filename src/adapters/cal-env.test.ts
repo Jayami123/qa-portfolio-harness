@@ -160,12 +160,13 @@ describe("ensureCalRootEnv", () => {
 
   it("does not write at all when both keys are real", () => {
     const fs = fakeFs({
-      [ENV_PATH]: "NEXTAUTH_SECRET=real-secret\nCALENDSO_ENCRYPTION_KEY=real-key\n",
+      [ENV_PATH]: "NEXTAUTH_SECRET=real-secret\nCALENDSO_ENCRYPTION_KEY=real-key\nEMAIL_SERVER_HOST=smtp.example.test\nEMAIL_SERVER_PORT=587\n",
     });
     const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumePresent });
     assert.deepEqual(fs.calls, []);
     assert.deepEqual([...result.generated], []);
     assert.equal(result.createdFromExample, false);
+    assert.equal(result.smtpRouted, false);
   });
 
   it("replaces only the placeholder when one key is real and one is a placeholder", () => {
@@ -232,6 +233,85 @@ describe("ensureCalRootEnv", () => {
     const ok = ensureCalRootEnv({ productRoot: ROOT, fs: fakeFs({ [EXAMPLE_PATH]: EXAMPLE }), randomBytes: fixedRandom, calDbVolumeExists: volumeAbsent });
     assert.equal(JSON.stringify(ok).includes(secret), false);
     assert.equal(JSON.stringify(ok).includes(generatedValue(32)), false);
+  });
+});
+
+describe("ensureCalRootEnv SMTP routing", () => {
+  const SECRETS = "NEXTAUTH_SECRET=real-secret\nCALENDSO_ENCRYPTION_KEY=real-key\n";
+  const hostLines = (text: string) => text.split("\n").filter((l) => l.startsWith("EMAIL_SERVER_HOST=")).length;
+
+  it("routes missing EMAIL keys to the harness catcher without touching a real secret", () => {
+    const fs = fakeFs({ [ENV_PATH]: SECRETS });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumePresent });
+    assert.equal(result.smtpRouted, true);
+    assert.deepEqual([...result.generated], []);
+    const text = fs.files.get(ENV_PATH) ?? "";
+    assert.equal(valueOf(text, "EMAIL_SERVER_HOST"), "127.0.0.1");
+    assert.equal(valueOf(text, "EMAIL_SERVER_PORT"), "1026");
+    assert.equal(valueOf(text, "NEXTAUTH_SECRET"), "real-secret");
+  });
+
+  it("routes the fork's quoted example defaults and leaves one line per key", () => {
+    const fs = fakeFs({ [ENV_PATH]: `${SECRETS}EMAIL_SERVER_HOST='localhost'\nEMAIL_SERVER_PORT=1025\n` });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumePresent });
+    assert.equal(result.smtpRouted, true);
+    const text = fs.files.get(ENV_PATH) ?? "";
+    assert.equal(hostLines(text), 1);
+    assert.equal(valueOf(text, "EMAIL_SERVER_HOST"), "127.0.0.1");
+    assert.equal(valueOf(text, "EMAIL_SERVER_PORT"), "1026");
+  });
+
+  it("routes the SMTP lines of a file created from the example", () => {
+    const fs = fakeFs({ [EXAMPLE_PATH]: `${EXAMPLE}EMAIL_SERVER_HOST='localhost'\nEMAIL_SERVER_PORT=1025\n` });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumeAbsent });
+    assert.equal(result.createdFromExample, true);
+    assert.equal(result.smtpRouted, true);
+    const text = fs.files.get(ENV_PATH) ?? "";
+    assert.equal(hostLines(text), 1);
+    assert.equal(valueOf(text, "EMAIL_SERVER_PORT"), "1026");
+  });
+
+  it("treats an empty host as unset and routes when the port is the example default", () => {
+    const fs = fakeFs({ [ENV_PATH]: `${SECRETS}EMAIL_SERVER_HOST=\nEMAIL_SERVER_PORT=1025\n` });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumePresent });
+    assert.equal(result.smtpRouted, true);
+    assert.equal(valueOf(fs.files.get(ENV_PATH) ?? "", "EMAIL_SERVER_HOST"), "127.0.0.1");
+  });
+
+  it("never overwrites a real host, even when the port is the example default", () => {
+    const before = `${SECRETS}EMAIL_SERVER_HOST=smtp.example.test\nEMAIL_SERVER_PORT=1025\n`;
+    const fs = fakeFs({ [ENV_PATH]: before });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumePresent });
+    assert.equal(result.smtpRouted, false);
+    assert.deepEqual(fs.calls, []);
+    assert.equal(fs.files.get(ENV_PATH), before);
+  });
+
+  it("never overwrites a real port, even when the host is the example default", () => {
+    const before = `${SECRETS}EMAIL_SERVER_HOST=localhost\nEMAIL_SERVER_PORT=2525\n`;
+    const fs = fakeFs({ [ENV_PATH]: before });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumePresent });
+    assert.equal(result.smtpRouted, false);
+    assert.deepEqual(fs.calls, []);
+    assert.equal(fs.files.get(ENV_PATH), before);
+  });
+
+  it("writes a generated secret and leaves a real SMTP pair alone", () => {
+    const fs = fakeFs({ [ENV_PATH]: "NEXTAUTH_SECRET=\nCALENDSO_ENCRYPTION_KEY=real-key\nEMAIL_SERVER_HOST=smtp.example.test\nEMAIL_SERVER_PORT=587\n" });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumeAbsent });
+    assert.deepEqual([...result.generated], ["NEXTAUTH_SECRET"]);
+    assert.equal(result.smtpRouted, false);
+    const text = fs.files.get(ENV_PATH) ?? "";
+    assert.equal(valueOf(text, "EMAIL_SERVER_HOST"), "smtp.example.test");
+    assert.equal(valueOf(text, "EMAIL_SERVER_PORT"), "587");
+  });
+
+  it("never returns an SMTP value in the result", () => {
+    const fs = fakeFs({ [ENV_PATH]: SECRETS });
+    const result = ensureCalRootEnv({ productRoot: ROOT, fs, randomBytes: fixedRandom, calDbVolumeExists: volumePresent });
+    const shown = JSON.stringify(result);
+    assert.equal(shown.includes("127.0.0.1"), false);
+    assert.equal(shown.includes("1026"), false);
   });
 });
 

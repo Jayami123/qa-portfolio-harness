@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `twentyMailApiUrl` (`http://127.0.0.1:8025/api/v1`) is exported, next to `documensoMailApiUrl`. A test checks its host port against `docker/twenty.compose.yml`.
+- `up cal` starts a loopback Mailpit catcher (`docker/cal.mail.compose.yml`, image `axllent/mailpit:v1.22.3` pinned by digest): SMTP on `127.0.0.1:1026`, UI and REST API on `127.0.0.1:8026`. `down cal` removes it. `calMailApiUrl` (`http://127.0.0.1:8026/api/v1`) is exported.
+- Cal root `.env`: `EMAIL_SERVER_HOST` and `EMAIL_SERVER_PORT` are set to the catcher (`127.0.0.1`, `1026`) only when both are unset or still the fork's example values (`localhost`, `1025`). A real host or port is never overwritten, and no secret is generated for SMTP.
+- Cal API v2: `RATE_LIMIT_DEFAULT_LIMIT_API_KEY` and `RATE_LIMIT_DEFAULT_TTL_MS` are forwarded from the harness environment into the API spawn env when set (positive whole numbers; an invalid value fails `up cal` by name). Unset keeps the fork default. `calApiKeyRateLimit()` is exported and returns the effective limit, throwing by name when it is unset. Values are never logged.
+
 - `up`, `down` and `smoke` for one product resolve only that product's root (and `PRODUCTS_ROOT`). Before, every run checked all four forks, so `down documenso` failed with `Cal product root does not exist` when the Cal fork was absent. `loadConfig()` still checks all four.
 
 ## [0.4.0] - 2026-11-10

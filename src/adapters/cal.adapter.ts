@@ -30,6 +30,7 @@ import {
 import { calDownArgs, calUpPrelude, CAL_DB_VOLUME, ensureCalRootEnv, type CalEnvFs } from "./cal-env.js";
 import { calWebStopDeps, listenerPids, readWebStartArgs, resolveNextBin } from "./cal-web-process.js";
 import { buildCalApiEnv, describeCalApiEnv } from "./cal-api-env.js";
+import { CAL_MAIL_SERVICE, CAL_MAIL_SMTP_HOST, CAL_MAIL_SMTP_PORT, CAL_MAIL_UI_PORT } from "./cal-mail.js";
 import {
   assertApiListenerIsRecorded,
   calApiSpawnSpec,
@@ -58,6 +59,8 @@ const calEnvFs: CalEnvFs = {
 /** The fork's Postgres service. --wait must name it: the fork's one-shot postgres_is_ready container exits, and --wait fails on any exit (docker/compose#10596). */
 export const CAL_POSTGRES_SERVICE = "postgres";
 export const CAL_REDIS_SERVICE = "redis";
+/** Services `up cal` names for --wait. compose starts only these, so the mail catcher must be listed to be created. */
+export const CAL_UP_WAIT_SERVICES: string[] = [CAL_POSTGRES_SERVICE, CAL_REDIS_SERVICE, CAL_MAIL_SERVICE];
 const CAL_WEB_STOP_WAIT_MS = 30_000;
 const COPY_STATIC_TIMEOUT_MS = 3 * 60_000;
 const TRPC_BUILD_TIMEOUT_MS = 10 * 60_000;
@@ -171,6 +174,7 @@ export class CalAdapter extends BaseAdapter<CalConfig> {
         this.productComposeFile(),
         harnessComposeFile("cal.compose.yml"),
         harnessComposeFile("cal.redis.compose.yml"),
+        harnessComposeFile("cal.mail.compose.yml"),
         ...pgStatsComposeFilePaths({ env: process.env, product: "cal" }),
       ],
       cwd: this.prismaDir(),
@@ -647,14 +651,14 @@ ${this.readLogTail(logFile)}`,
           randomBytes,
           calDbVolumeExists: () => volumeNames.includes(CAL_DB_VOLUME),
         });
-        if (result.createdFromExample || result.generated.length > 0) {
+        if (result.createdFromExample || result.generated.length > 0 || result.smtpRouted) {
           console.log(
-            `Cal root .env: ${result.createdFromExample ? "created from .env.example; " : ""}generated ${result.generated.join(", ") || "nothing"} (values not printed).`,
+            `Cal root .env: ${result.createdFromExample ? "created from .env.example; " : ""}generated ${result.generated.join(", ") || "nothing"}${result.smtpRouted ? "; SMTP pointed at the harness mail catcher" : ""} (values not printed).`,
           );
         }
       },
       composeUp: () =>
-        composeUp(this.composeOpts(), { wait: true, waitServices: [CAL_POSTGRES_SERVICE, CAL_REDIS_SERVICE] }),
+        composeUp(this.composeOpts(), { wait: true, waitServices: CAL_UP_WAIT_SERVICES }),
     });
     if (pgStats) {
       await enablePgStatsExtension({
@@ -667,6 +671,9 @@ ${this.readLogTail(logFile)}`,
       });
     }
     console.log("Cal Postgres compose is up (host port 5450, db calendso).");
+    console.log(
+      `Cal mail catcher: SMTP ${CAL_MAIL_SMTP_HOST}:${String(CAL_MAIL_SMTP_PORT)}, UI and API http://127.0.0.1:${String(CAL_MAIL_UI_PORT)}.`,
+    );
 
     const state = await this.readyState();
     if (state.web === "ok" && state.api === "ok") {

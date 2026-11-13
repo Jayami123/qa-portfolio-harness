@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildCalApiEnv,
   CAL_API_NO_FALLBACK_KEYS,
+  calApiKeyRateLimit,
   describeCalApiEnv,
   generateTestSecret,
 } from "./cal-api-env.js";
@@ -144,5 +145,84 @@ describe("DATABASE_URL and CALENDSO_ENCRYPTION_KEY in the API spawn env", () => 
     const described = describeCalApiEnv(env);
     assert.doesNotMatch(described, /s3cret-pass/);
     assert.match(described, /DATABASE_URL=<redacted>/);
+  });
+});
+
+describe("rate-limit forwarding into the API spawn env", () => {
+  const withRate = (rate: Record<string, string>) =>
+    input({ processEnv: { STRIPE_API_KEY: EXTERNAL.STRIPE_API_KEY, ...rate } as NodeJS.ProcessEnv });
+
+  it("forwards RATE_LIMIT_DEFAULT_LIMIT_API_KEY and RATE_LIMIT_DEFAULT_TTL_MS when set", () => {
+    const env = buildCalApiEnv(
+      withRate({ RATE_LIMIT_DEFAULT_LIMIT_API_KEY: "121", RATE_LIMIT_DEFAULT_TTL_MS: "60000" }),
+    );
+    assert.equal(env.RATE_LIMIT_DEFAULT_LIMIT_API_KEY, "121");
+    assert.equal(env.RATE_LIMIT_DEFAULT_TTL_MS, "60000");
+  });
+
+  it("omits both keys when unset, so the fork default applies", () => {
+    const env = buildCalApiEnv(input());
+    assert.equal("RATE_LIMIT_DEFAULT_LIMIT_API_KEY" in env, false);
+    assert.equal("RATE_LIMIT_DEFAULT_TTL_MS" in env, false);
+  });
+
+  it("treats a blank value as unset", () => {
+    const env = buildCalApiEnv(withRate({ RATE_LIMIT_DEFAULT_LIMIT_API_KEY: "  ", RATE_LIMIT_DEFAULT_TTL_MS: "" }));
+    assert.equal("RATE_LIMIT_DEFAULT_LIMIT_API_KEY" in env, false);
+    assert.equal("RATE_LIMIT_DEFAULT_TTL_MS" in env, false);
+  });
+
+  for (const bad of ["0", "-3", "1.5", "7x9q", "abc"]) {
+    it(`throws naming the key, not the value, for ${JSON.stringify(bad)}`, () => {
+      assert.throws(
+        () => buildCalApiEnv(withRate({ RATE_LIMIT_DEFAULT_LIMIT_API_KEY: bad })),
+        (err: Error) =>
+          err.message.includes("RATE_LIMIT_DEFAULT_LIMIT_API_KEY") && !err.message.includes(bad),
+      );
+    });
+  }
+
+  it("names the TTL key, not its value, when it is invalid", () => {
+    assert.throws(
+      () => buildCalApiEnv(withRate({ RATE_LIMIT_DEFAULT_TTL_MS: "soon-7q" })),
+      (err: Error) => err.message.includes("RATE_LIMIT_DEFAULT_TTL_MS") && !err.message.includes("soon-7q"),
+    );
+  });
+
+  it("describeCalApiEnv redacts the forwarded limit and TTL", () => {
+    const env = buildCalApiEnv(
+      withRate({ RATE_LIMIT_DEFAULT_LIMIT_API_KEY: "7331", RATE_LIMIT_DEFAULT_TTL_MS: "424242" }),
+    );
+    const shown = describeCalApiEnv(env);
+    assert.equal(shown.includes("7331"), false);
+    assert.equal(shown.includes("424242"), false);
+    assert.ok(shown.includes("RATE_LIMIT_DEFAULT_LIMIT_API_KEY=<redacted>"));
+  });
+});
+
+describe("calApiKeyRateLimit", () => {
+  it("returns the numeric limit the harness environment sets", () => {
+    assert.equal(calApiKeyRateLimit({ RATE_LIMIT_DEFAULT_LIMIT_API_KEY: "121" } as NodeJS.ProcessEnv), 121);
+  });
+
+  it("throws by name when the limit is unset, and never reports the fork default as effective", () => {
+    assert.throws(
+      () => calApiKeyRateLimit({} as NodeJS.ProcessEnv),
+      /RATE_LIMIT_DEFAULT_LIMIT_API_KEY is not set/,
+    );
+  });
+
+  it("throws by name when the limit is blank", () => {
+    assert.throws(
+      () => calApiKeyRateLimit({ RATE_LIMIT_DEFAULT_LIMIT_API_KEY: " " } as NodeJS.ProcessEnv),
+      /RATE_LIMIT_DEFAULT_LIMIT_API_KEY is not set/,
+    );
+  });
+
+  it("throws by name, not the value, when the limit is not a positive whole number", () => {
+    assert.throws(
+      () => calApiKeyRateLimit({ RATE_LIMIT_DEFAULT_LIMIT_API_KEY: "12x" } as NodeJS.ProcessEnv),
+      (err: Error) => err.message.includes("RATE_LIMIT_DEFAULT_LIMIT_API_KEY") && !err.message.includes("12x"),
+    );
   });
 });

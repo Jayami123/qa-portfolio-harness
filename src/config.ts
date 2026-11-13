@@ -13,6 +13,12 @@ loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
 /** Inbucket REST mailbox base for Documenso e-mail checks. Must match the host port in docker/documenso.compose.yml (9003). */
 export const documensoMailApiUrl = "http://127.0.0.1:9003/api/v1/mailbox";
 
+/** Mailpit REST API base for Twenty e-mail checks. Must match the host port of the mailpit service in docker/twenty.compose.yml (8025). */
+export const twentyMailApiUrl = "http://127.0.0.1:8025/api/v1";
+
+/** Mailpit REST API base for the Cal catcher that `up cal` starts. Must match the host UI port in docker/cal.mail.compose.yml (8026). */
+export const calMailApiUrl = "http://127.0.0.1:8026/api/v1";
+
 const emptyToUndefined = (value: unknown) => (value === "" || value === undefined ? undefined : value);
 
 function medusaSecondBaseUrl(primaryBaseUrl: string, secondBaseUrl: string | undefined): string | undefined {
