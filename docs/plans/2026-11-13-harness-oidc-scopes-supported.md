@@ -51,3 +51,69 @@ Working checkout at the start was `claude/clever-cerf-bct4dh` (also at `9cddd68`
 - Image inspection: `docker save` of the pinned digest, then the classes layer extracted and searched (read-only; no container started). Tag 2.2.0 pulled by digest and inspected the same way, then removed (`docker image rm`).
 - Not run: no Documenso login was attempted, since the blocker is upstream of login. No unit test was added, because no config change was made. `npm run check` runs before the record commit, as CLAUDE.md requires.
 - Outcome: the fix is blocked on an owner decision (D-HAR-F3). The P5 failure (run 43400737495) is external and was not re-run.
+
+## D-HAR-F4: owner decision: replace the mock with a standards-complete OIDC provider
+
+- Context: the owner chose option 1 of D-HAR-F3. The pinned mock cannot publish `scopes_supported` (D-HAR-F2). The new provider must publish it and must support the controls in the brief.
+- Options considered: Dex and Keycloak (the owner's list). Both are official images.
+- Choice: evaluate both live, then choose the lighter one that meets every requirement (see D-HAR-F5 and F6).
+- Reason: the owner asked for this comparison and for the lighter one to win.
+- Evidence: F5 and F6 below.
+
+## D-HAR-F5: candidate tags and digests (resolved from the registries)
+
+- Dex: `ghcr.io/dexidp/dex:v2.45.0@sha256:b8469881d3cb3a73001506f0d3aaefecb9c45d2311c1e0f405d8ac538316c59d` (newest tag that resolved; `v2.44.0`, `v2.43.0` and `v2.41.1` also resolve).
+- Keycloak: `quay.io/keycloak/keycloak:26.5.0@sha256:5fdd7cda82e58775ed124294c7e16fabc33166d38dfc4aabebda7d64e7a964bf` (newest tag that resolved; `26.4.7` and `26.4.0` also resolve).
+- The GitHub API for `dexidp/dex` is not enabled in this session, so release notes were not read. Tag resolution and live probes are the evidence.
+
+## D-HAR-F6: live comparison, Dex v2.45.0 and Keycloak 26.5.0
+
+Probes ran as standalone containers named `qa-probe-dex` and `qa-probe-kc` on `127.0.0.1:18081`, removed afterwards, with the flow driven by a scratch script (PKCE S256, `state`, `nonce`, the login form, the token endpoint). Values are not recorded; claim names and booleans only.
+
+| Requirement | Dex v2.45.0 | Keycloak 26.5.0 |
+|---|---|---|
+| Discovery 200, `scopes_supported` present | yes: `openid`, `email`, `groups`, `profile`, `offline_access` | yes: includes `openid`, `email`, `profile` (plus others) |
+| Static confidential client, exact redirect URI | yes (static client, secret, redirect list) | yes; unregistered `redirect_uri` at authorize: 400 |
+| Per-user `email_verified` `true` | yes | yes |
+| Per-user `email_verified` `false` | **no**: both users returned `email_verified: true` | **yes**: the seeded user with `emailVerified: false` returned `false` |
+| `state` echoed, `nonce` in id_token | yes, yes | yes, yes |
+| Code single-use | yes (second use 400) | yes (second use 400) |
+| Wrong client secret | 401 | 401 |
+| Wrong PKCE verifier | 400 | 400 |
+| Wrong redirect at token | 400 | 400 |
+| Idle memory (`docker stats`) | about 8.5 MiB | about 656 MiB |
+| Image size (`docker image ls`) | 211 MB | 730 MB |
+| Client secret and user passwords set per run without a file | not tested: a static client secret needs a config value; Dex's `${VAR}` placeholder was not expanded (a literal secret was needed) | yes: set through the admin REST API after start (client `PUT` with `secret`, `reset-password` for each user); the realm file holds no secret |
+
+- Dex: the static-password users cannot be `email_verified: false`. The owner's requirement needs both values, so Dex does not meet it, however light it is.
+- Keycloak: meets every requirement. It is heavier (about 80 times the idle memory and about 3.5 times the image size of Dex).
+- Choice: Keycloak 26.5.0. The "lighter one that supports" the full list is Keycloak, because Dex does not support the `false` case.
+
+## D-HAR-F7: how the Keycloak test provider is configured
+
+- Context: Keycloak's realm import does not substitute `${env.VAR}` in the client secret or the user passwords (the placeholder was stored literally, and a login with the literal placeholder as the password succeeded). A per-run secret therefore cannot go into the realm file.
+- Options considered: (a) a realm file with a fixed or per-run secret and password written to disk (violates CLAUDE.md and B7); (b) set the client secret, the redirect URIs and the two user passwords through the admin REST API after the realm imports; (c) keep the mock.
+- Choice: (b). The realm file (`docker/documenso-oidc/qa-realm.json`) holds no secret and no password. The adapter generates the admin password, the client secret and the two user passwords per run, passes the admin password to the container through compose interpolation, and sets the rest over the admin API. Values are held in memory only and never logged or written.
+- Reason: the brief forbids secrets in files, and option (b) keeps the public interface (`DOCUMENSO_OIDC=1`, port 8081) unchanged.
+- Evidence: the probe in D-HAR-F6 (admin API `PUT` 204, `reset-password` 204 twice, then the login and token checks passed with the per-run values).
+- Residual (for the P5 PR): the two test-user passwords exist only in the `up` process memory. A P5 test in another process cannot log in until a channel for them is decided. Recorded here for the owner; this PR does not choose it.
+- Residual (dev mode): `start-dev` serves HTTP on loopback with the dev-mode defaults. It is a test provider, not a production configuration.
+
+## Stale dist/ (build log only)
+
+- Observation: `dist/` predated the OIDC code, so `npm run up -- documenso` ignored `DOCUMENSO_OIDC=1` with no error (`scripts/lib.mjs` loads `dist/index.js`). The fix was `npm run build`. This is recorded here only, not in the README or CHANGELOG, as the owner asked.
+
+## D-HAR-F8: the B3/B4 probes re-run on the new provider
+
+- Context: the owner asked for the B3 and B4 probes to be re-run on the replacement image. B3 (discovery, authorize with PKCE, token exchange, client-secret, redirect and PKCE checks, code reuse) and B4 (per-user `email_verified` through login).
+- Choice: run the probes through the harness. A driver process called `getAdapter("documenso").up()` with `DOCUMENSO_OIDC=1`, read the per-run client secret and user passwords through the in-process accessor `oidcTestAccess()` (never printed), ran the flow with them passed as child-process environment variables (never written), and called `down()` in a `finally`.
+- Results (booleans and claim names only):
+  - Discovery 200, issuer `http://127.0.0.1:8081/realms/qa`, `scopes_supported` present and includes `openid`, `email`, `profile`.
+  - Verified user: code issued, `state` echoed, redirect is the Documenso callback, token 200, `email_verified` true, `nonce` matches, `aud` is `qa-documenso`, access token and refresh token present. Second use of the same code 400. Wrong secret 401. Wrong PKCE verifier 400. Wrong redirect at token 400.
+  - Unverified user: the same results, with `email_verified` false.
+  - Unregistered redirect at authorize: 400.
+  - Earlier standalone runs of the same checks (D-HAR-F6) matched.
+- Deviation: the candidate comparison (D-HAR-F6) ran as standalone containers, because the harness had no adapter for Dex or Keycloak until this change. This record is the only place those candidate probes are recorded.
+- Harness up and down, real path (`DOCUMENSO_OIDC=1 npm run up -- documenso`, then `npm run down -- documenso`): `up` exit 0; the provider and the Documenso web both answered 200; `down` exit 0; no `qa-harness-*` container left; nothing listening on 127.0.0.1:3001.
+- Observation (harness down, not changed here): the driver's `down()` failed with `DocumensoWebStopError` ("still listening on 127.0.0.1:3001"). The pid record held `10785`, which was already dead (the wrapper), while the listener was a child process `node build/server/main.js` from `/home/user/products/documenso/apps/remix`. The listener was stopped by hand (SIGTERM to that process chain), then `npm run down -- documenso` exited 0. The shell path (`npm run up` / `npm run down`) did not hit this. Cause not established; the owner should decide whether `down` should walk the child tree. Recorded here only.
+- Residual (P5 PR): the per-run test-user passwords and client secret are in memory of the `up` process. A P5 test in another process cannot log in until a channel is chosen (D-HAR-F7).
