@@ -355,7 +355,7 @@ ${this.portOwnerReport(port)}
   }
 
   /**
-   * Diagnostic only. Lists the listener PID and executable so Jayami can decide.
+   * Diagnostic only. Lists the listener PID and executable so the owner can decide.
    * Never stops anything: no taskkill, no kill signal.
    */
   private portOwnerReport(port: string): string {
