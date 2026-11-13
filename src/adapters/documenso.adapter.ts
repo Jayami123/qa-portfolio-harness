@@ -19,6 +19,11 @@ import {
   type DocumensoOidcRun,
   waitForOidcWellKnown,
 } from "./documenso-oidc.js";
+import {
+  documensoOidcRunStateFile,
+  removeDocumensoOidcRunState,
+  writeDocumensoOidcRunState,
+} from "./documenso-oidc-run-state.js";
 import { run } from "../internal/run.js";
 import { isPidRunning, resolveNpm, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
@@ -502,6 +507,8 @@ ${this.portOwnerReport(port)}
 
     // Invalid DOCUMENSO_OIDC throws here, before compose, and names the variable.
     const oidc = documensoOidcEnabled(process.env);
+    // A stale run-state file from an earlier run is removed before anything new is generated (D-HAR-F9).
+    removeDocumensoOidcRunState(documensoOidcRunStateFile());
     if (oidc) {
       this.oidcRun = newDocumensoOidcRun();
     }
@@ -518,7 +525,18 @@ ${this.portOwnerReport(port)}
         run: this.oidcRun,
         webappUrl: this.cfg.publicUrl ?? this.cfg.baseUrl,
       });
+      writeDocumensoOidcRunState(documensoOidcRunStateFile(), {
+        version: 1,
+        clientId: DOCUMENSO_OIDC_CLIENT_ID,
+        clientSecret: this.oidcRun.clientSecret,
+        redirectUri: `${this.cfg.publicUrl ?? this.cfg.baseUrl}${DOCUMENSO_OIDC_CALLBACK_PATH}`,
+        users: {
+          verified: { ...DOCUMENSO_OIDC_TEST_USERS[0], password: this.oidcRun.userPasswords.verified },
+          unverified: { ...DOCUMENSO_OIDC_TEST_USERS[1], password: this.oidcRun.userPasswords.unverified },
+        },
+      });
       console.log(`Documenso OIDC provider (Keycloak) answers 200 and is configured: ${DOCUMENSO_OIDC_WELL_KNOWN_URL}`);
+      console.log("Documenso OIDC test users are in the run-state file (not printed).");
     }
     if (pgStatsEnabled(process.env)) {
       await enablePgStatsExtension({
@@ -610,32 +628,9 @@ ${this.portOwnerReport(port)}
     this.webProcess.unref();
   }
 
-  /**
-   * In-process only: the OIDC test access after up() has configured the provider (client id, client secret, redirect URI
-   * and the seeded users with their per-run passwords). Undefined when the flag is off or up() has not run in this
-   * process. Values are never printed or written.
-   */
-  oidcTestAccess():
-    | {
-        clientId: string;
-        clientSecret: string;
-        redirectUri: string;
-        users: Array<{ username: string; email: string; emailVerified: boolean; password: string }>;
-      }
-    | undefined {
-    if (this.oidcRun === undefined) {
-      return undefined;
-    }
-    const run = this.oidcRun;
-    return {
-      clientId: DOCUMENSO_OIDC_CLIENT_ID,
-      clientSecret: run.clientSecret,
-      redirectUri: `${this.cfg.publicUrl ?? this.cfg.baseUrl}${DOCUMENSO_OIDC_CALLBACK_PATH}`,
-      users: DOCUMENSO_OIDC_TEST_USERS.map((u) => ({ ...u, password: run.userPasswords[u.username] })),
-    };
-  }
-
   async down(): Promise<void> {
+    // First, so the credentials go even when a later step fails (D-HAR-F9).
+    removeDocumensoOidcRunState(documensoOidcRunStateFile());
     const { host, port } = documensoListen(this.cfg.baseUrl);
     await this.stopListeningWeb(host, port);
     this.webProcess = undefined;
