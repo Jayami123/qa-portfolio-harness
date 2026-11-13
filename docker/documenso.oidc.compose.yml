@@ -1,16 +1,20 @@
 # Opt-in overlay, added only when DOCUMENSO_OIDC=1 (src/adapters/documenso-oidc.ts, src/adapters/documenso.adapter.ts).
-# A mock OIDC provider on 127.0.0.1:8081 for Documenso sign-in tests. Pinned by tag and digest.
-# Interactive login: the login form takes a username and a JSON claims object, so a test sets email_verified per login.
-# The provider does not check the client secret or the redirect URI. Documenso's own checks are the system under test.
-# The JSON below must equal DOCUMENSO_OIDC_IDP_CONFIG in src/adapters/documenso-oidc.ts (a unit test checks it).
+# Keycloak 26.5.0 (official image, pinned by tag and digest) as the test OIDC provider on 127.0.0.1:8081.
+# The realm file (docker/documenso-oidc/qa-realm.json) holds no secret and no password. The adapter sets the client
+# secret, the redirect URI and the two user passwords through the admin REST API after the realm imports.
+# DOCUMENSO_OIDC_ADMIN_PASSWORD is generated per run by the adapter and passed through the process env (never written).
 #
 #   docker compose -p qa-harness-documenso -f docker/documenso.compose.yml -f docker/documenso.oidc.compose.yml up -d --wait
 
 services:
   oidc:
-    image: ghcr.io/navikt/mock-oauth2-server:2.1.11@sha256:d1ab58574b6fd50e27575bb1626db4d1bc5cb91d797d6efc61951d79789e969d
+    image: quay.io/keycloak/keycloak:26.5.0@sha256:5fdd7cda82e58775ed124294c7e16fabc33166d38dfc4aabebda7d64e7a964bf
     container_name: qa-harness-documenso-oidc
+    command: ["start-dev", "--import-realm", "--hostname=http://127.0.0.1:8081", "--hostname-strict=false", "--http-enabled=true"]
     environment:
-      JSON_CONFIG: '{"interactiveLogin":true,"tokenCallbacks":[{"issuerId":"default","tokenExpiry":3600,"requestMappings":[{"requestParam":"code","match":"*","claims":{"sub":"qa-verified","email":"verified@qa.test","email_verified":true,"name":"QA Verified"}}]}]}'
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${DOCUMENSO_OIDC_ADMIN_PASSWORD}
+    volumes:
+      - ./documenso-oidc/qa-realm.json:/opt/keycloak/data/import/qa-realm.json:ro
     ports:
       - "127.0.0.1:8081:8080"

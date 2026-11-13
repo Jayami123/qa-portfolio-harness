@@ -7,13 +7,23 @@ import type { DocumensoConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
 import {
+  DOCUMENSO_OIDC_ADMIN_PASSWORD_ENV,
+  DOCUMENSO_OIDC_CALLBACK_PATH,
   DOCUMENSO_OIDC_CLIENT_ID,
+  DOCUMENSO_OIDC_TEST_USERS,
   DOCUMENSO_OIDC_WELL_KNOWN_URL,
-  documensoOidcClientSecret,
+  configureOidcProvider,
   documensoOidcEnabled,
   documensoOidcOverlayFiles,
+  newDocumensoOidcRun,
+  type DocumensoOidcRun,
   waitForOidcWellKnown,
 } from "./documenso-oidc.js";
+import {
+  documensoOidcRunStateFile,
+  removeDocumensoOidcRunState,
+  writeDocumensoOidcRunState,
+} from "./documenso-oidc-run-state.js";
 import { run } from "../internal/run.js";
 import { isPidRunning, resolveNpm, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
@@ -82,8 +92,8 @@ interface DocumensoProbe {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
-  /** The client secret for the mock OIDC provider. Generated once per process, set only in the app env, never logged. */
-  private oidcClientSecret: string | undefined;
+  /** Per-run OIDC values (admin password, client secret, user passwords). In memory only; never logged or written. */
+  private oidcRun: DocumensoOidcRun | undefined;
 
   readonly id = "documenso" as const;
   private seedResult?: SeedResult;
@@ -131,7 +141,7 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     const gotenberg = documensoGotenbergEnabled(process.env);
     const oidc = documensoOidcEnabled(process.env);
     if (oidc) {
-      this.oidcClientSecret ??= documensoOidcClientSecret();
+      this.oidcRun ??= newDocumensoOidcRun();
     }
     const base = documensoAppEnvWithPreload(
       withDocumensoHeap(
@@ -139,11 +149,11 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
           ...this.cfg,
           documentConversionUrl: gotenberg ? DOCUMENSO_GOTENBERG_URL : undefined,
           oidc:
-            oidc && this.oidcClientSecret !== undefined
+            oidc && this.oidcRun !== undefined
               ? {
                   wellKnownUrl: DOCUMENSO_OIDC_WELL_KNOWN_URL,
                   clientId: DOCUMENSO_OIDC_CLIENT_ID,
-                  clientSecret: this.oidcClientSecret,
+                  clientSecret: this.oidcRun.clientSecret,
                 }
               : undefined,
         }),
@@ -497,10 +507,36 @@ ${this.portOwnerReport(port)}
 
     // Invalid DOCUMENSO_OIDC throws here, before compose, and names the variable.
     const oidc = documensoOidcEnabled(process.env);
-    await composeUp(this.composeOpts(oidc), { wait: true });
+    // A stale run-state file from an earlier run is removed before anything new is generated (D-HAR-F9).
+    removeDocumensoOidcRunState(documensoOidcRunStateFile());
     if (oidc) {
+      this.oidcRun = newDocumensoOidcRun();
+    }
+    const upOpts = this.composeOpts(oidc);
+    await composeUp(
+      oidc && this.oidcRun !== undefined
+        ? { ...upOpts, env: { ...process.env, [DOCUMENSO_OIDC_ADMIN_PASSWORD_ENV]: this.oidcRun.adminPassword } }
+        : upOpts,
+      { wait: true },
+    );
+    if (oidc && this.oidcRun !== undefined) {
       await waitForOidcWellKnown(DOCUMENSO_OIDC_WELL_KNOWN_URL);
-      console.log(`Documenso mock OIDC provider answers 200: ${DOCUMENSO_OIDC_WELL_KNOWN_URL}`);
+      await configureOidcProvider({
+        run: this.oidcRun,
+        webappUrl: this.cfg.publicUrl ?? this.cfg.baseUrl,
+      });
+      writeDocumensoOidcRunState(documensoOidcRunStateFile(), {
+        version: 1,
+        clientId: DOCUMENSO_OIDC_CLIENT_ID,
+        clientSecret: this.oidcRun.clientSecret,
+        redirectUri: `${this.cfg.publicUrl ?? this.cfg.baseUrl}${DOCUMENSO_OIDC_CALLBACK_PATH}`,
+        users: {
+          verified: { ...DOCUMENSO_OIDC_TEST_USERS[0], password: this.oidcRun.userPasswords.verified },
+          unverified: { ...DOCUMENSO_OIDC_TEST_USERS[1], password: this.oidcRun.userPasswords.unverified },
+        },
+      });
+      console.log(`Documenso OIDC provider (Keycloak) answers 200 and is configured: ${DOCUMENSO_OIDC_WELL_KNOWN_URL}`);
+      console.log("Documenso OIDC test users are in the run-state file (not printed).");
     }
     if (pgStatsEnabled(process.env)) {
       await enablePgStatsExtension({
@@ -593,6 +629,8 @@ ${this.portOwnerReport(port)}
   }
 
   async down(): Promise<void> {
+    // First, so the credentials go even when a later step fails (D-HAR-F9).
+    removeDocumensoOidcRunState(documensoOidcRunStateFile());
     const { host, port } = documensoListen(this.cfg.baseUrl);
     await this.stopListeningWeb(host, port);
     this.webProcess = undefined;

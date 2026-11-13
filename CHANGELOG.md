@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Documenso: `DOCUMENSO_OIDC=1` writes the per-run test credentials to `.harness/documenso-oidc-run.json` (gitignored, mode `0600`, removed by `down`). The file holds the client id and secret, the redirect URI and the two seeded users' usernames and passwords. It is never logged or printed. Read it with the new typed reader `documensoOidcTestUsers()`, which returns `{ verified, unverified }` usernames and passwords. It throws `DOCUMENSO_OIDC_NOT_ENABLED` when the flag is not `1`, and `DOCUMENSO_OIDC_RUN_STATE_MISSING` when the file is absent (naming the path, never a value). Consumers must never upload, print, commit or log this file or the values it holds.
+
+- Documenso: `DOCUMENSO_OIDC=1` now starts Keycloak 26.5.0 (`quay.io/keycloak/keycloak`, pinned by tag and digest) instead of `navikt/mock-oauth2-server`. The discovery document publishes `scopes_supported` (`openid`, `email`, `profile`), which Documenso needs before login can succeed. The provider is a confidential client with PKCE S256 and the exact Documenso redirect URI, codes are single-use, and two seeded users cover `email_verified` true and false. Port `127.0.0.1:8081` and the flag are unchanged. The client secret, admin password and user passwords are generated per run and held in memory only; the realm file holds no secret.
+- Documenso: `DOCUMENSO_OIDC_WELL_KNOWN_URL` changes to `http://127.0.0.1:8081/realms/qa/.well-known/openid-configuration`. `DOCUMENSO_OIDC_CLIENT_ID` (`qa-documenso`) is unchanged. The internal constants `DOCUMENSO_OIDC_IDP_CONFIG` and `DOCUMENSO_OIDC_ISSUER_ID` are removed (not exported from the index).
+- Upgrade note: a `DOCUMENSO_OIDC=1` run pulls a new image (`quay.io`, about 730 MB) and uses about 650 MiB of memory at idle. Keycloak is heavier than the mock, and the image needs `quay.io` reachable.
+
 ## [0.5.0] - 2026-11-13
 
 - Documenso: opt-in `DOCUMENSO_OIDC=1` (exact value) starts a mock OIDC provider, `navikt/mock-oauth2-server:2.1.11` pinned by digest, on `127.0.0.1:8081`, waits until its well-known endpoint answers 200, and sets Documenso's `NEXT_PRIVATE_OIDC_*` env with a per-run client secret (never logged or written). `NEXT_PRIVATE_OIDC_SKIP_VERIFY` is set empty so the `email_verified` check stays on. Unset starts no provider and sets no OIDC env. Any other set value fails `up` with `DOCUMENSO_OIDC_INVALID`. `down` stops the provider. Exports: `DOCUMENSO_OIDC_WELL_KNOWN_URL` and `DOCUMENSO_OIDC_CLIENT_ID`.
