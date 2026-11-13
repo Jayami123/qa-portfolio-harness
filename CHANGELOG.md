@@ -2,11 +2,13 @@
 
 ## Unreleased
 
-- Documenso: `DOCUMENSO_OIDC=1` writes the per-run test credentials to `.harness/documenso-oidc-run.json` (gitignored, mode `0600`, removed by `down`). The file holds the client id and secret, the redirect URI and the two seeded users' usernames and passwords. It is never logged or printed. Read it with the new typed reader `documensoOidcTestUsers()`, which returns `{ verified, unverified }` usernames and passwords. It throws `DOCUMENSO_OIDC_NOT_ENABLED` when the flag is not `1`, and `DOCUMENSO_OIDC_RUN_STATE_MISSING` when the file is absent (naming the path, never a value). Consumers must never upload, print, commit or log this file or the values it holds.
+## [0.5.1] - 2026-11-13
 
-- Documenso: `DOCUMENSO_OIDC=1` now starts Keycloak 26.5.0 (`quay.io/keycloak/keycloak`, pinned by tag and digest) instead of `navikt/mock-oauth2-server`. The discovery document publishes `scopes_supported` (`openid`, `email`, `profile`), which Documenso needs before login can succeed. The provider is a confidential client with PKCE S256 and the exact Documenso redirect URI, codes are single-use, and two seeded users cover `email_verified` true and false. Port `127.0.0.1:8081` and the flag are unchanged. The client secret, admin password and user passwords are generated per run and held in memory only; the realm file holds no secret.
-- Documenso: `DOCUMENSO_OIDC_WELL_KNOWN_URL` changes to `http://127.0.0.1:8081/realms/qa/.well-known/openid-configuration`. `DOCUMENSO_OIDC_CLIENT_ID` (`qa-documenso`) is unchanged. The internal constants `DOCUMENSO_OIDC_IDP_CONFIG` and `DOCUMENSO_OIDC_ISSUER_ID` are removed (not exported from the index).
-- Upgrade note: a `DOCUMENSO_OIDC=1` run pulls a new image (`quay.io`, about 730 MB) and uses about 650 MiB of memory at idle. Keycloak is heavier than the mock, and the image needs `quay.io` reachable.
+- Documenso: `DOCUMENSO_OIDC=1` now starts Keycloak 26.5.0 (`quay.io/keycloak/keycloak`, pinned by tag and digest) instead of `navikt/mock-oauth2-server`, on `127.0.0.1:8081`. The discovery document publishes `scopes_supported` (`openid`, `email`, `profile`), which Documenso needs before login can succeed. The provider is a confidential client with PKCE S256 and the exact Documenso redirect URI, codes are single-use, and two seeded users cover `email_verified` true and false.
+- Documenso: `DOCUMENSO_OIDC_WELL_KNOWN_URL` is `http://127.0.0.1:8081/realms/qa/.well-known/openid-configuration`. `DOCUMENSO_OIDC_CLIENT_ID` (`qa-documenso`) is unchanged. The internal constants `DOCUMENSO_OIDC_IDP_CONFIG` and `DOCUMENSO_OIDC_ISSUER_ID` are removed (not exported from the index).
+- Documenso: `DOCUMENSO_OIDC=1` writes the per-run client values and the two seeded users' usernames and passwords to `.harness/documenso-oidc-run.json` (gitignored, mode `0600`, removed by `down`). The typed reader `documensoOidcTestUsers()` returns `{ verified, unverified }` usernames and passwords. It throws `DOCUMENSO_OIDC_NOT_ENABLED` when the flag is not `1`, and `DOCUMENSO_OIDC_RUN_STATE_MISSING` when the file is absent (naming the path, never a value). Nothing in the harness logs or prints these values.
+
+**Upgrade note.** A `DOCUMENSO_OIDC=1` run pulls the Keycloak image (about 730 MB) on first use and uses about 650 MiB of memory at idle, and `quay.io` must be reachable. Unset keeps the default stack unchanged, with no pull and no provider. Consumers must never upload, print, commit or log `.harness/documenso-oidc-run.json` or the values it holds.
 
 ## [0.5.0] - 2026-11-13
 
@@ -174,7 +176,8 @@
 - Default Cal `up()` to `next build` then `next start`.
 - Skip `next build` when a production `.next` marker exists unless `CAL_WEB_REBUILD=1`.
 
-[Unreleased]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.0...v0.3.1
