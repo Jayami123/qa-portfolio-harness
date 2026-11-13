@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Twenty: `IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS` and `IS_CONFIG_VARIABLES_IN_DB_ENABLED` are forwarded to the server and worker when set (upstream defaults `true` and `true`, `config-variables.ts:566` and `:1465` at `7cbdfec6`). Unset passes nothing. Each accepts only exactly `true` or `false`; any other value fails `up twenty` before compose with `TWENTY_FLAG_INVALID`, naming the variable and not the value. Both names are reserved for the canary.
+- Twenty: `TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN` (`apple`) and `TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN` (`yc`) are exported from the index, read from the fork's dev seeder (`seeder-workspaces.constant.ts:38` and `:47` at `7cbdfec6`).
+- Twenty: the multi-workspace recipe (`TWENTY_BASE_URL=http://lvh.me:3002`, `IS_MULTIWORKSPACE_ENABLED=true`, `IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS=false`) is documented in the README and `.env.example`. Unset keeps the single-workspace default. `server-2` does not receive the new passthroughs (residual).
+
 - `twentyMailApiUrl` (`http://127.0.0.1:8025/api/v1`) is exported, next to `documensoMailApiUrl`. A test checks its host port against `docker/twenty.compose.yml`.
 - `up cal` starts a loopback Mailpit catcher (`docker/cal.mail.compose.yml`, image `axllent/mailpit:v1.22.3` pinned by digest): SMTP on `127.0.0.1:1026`, UI and REST API on `127.0.0.1:8026`. `down cal` removes it. `calMailApiUrl` (`http://127.0.0.1:8026/api/v1`) is exported.
 - Cal root `.env`: `EMAIL_SERVER_HOST` and `EMAIL_SERVER_PORT` are set to the catcher (`127.0.0.1`, `1026`) only when both are unset or still the fork's example values (`localhost`, `1025`). A real host or port is never overwritten, and no secret is generated for SMTP.
