@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
+  TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN,
+  TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN,
   assertTwentyImageTag,
   bootstrapTwentyDockerEnv,
   classifyTwentySecretValue,
@@ -354,3 +356,29 @@ describe("assertTwentyFreshOrRefuse", () => {
     assert.doesNotThrow(() => assertTwentyFreshOrRefuse({ requireFresh: false, volumes: volumes([DB, SERVER]) }));
   });
 });
+
+/** The two seed workspace lines copied verbatim from the fork's dev seeder at 7cbdfec6 (seeder-workspaces.constant.ts:36-47).
+ *  Copied, not read from disk: the fork is not present in CI, and the harness never edits it. */
+const SEEDER_FIXTURE = `
+    displayName: 'Apple',
+    subdomain: 'apple',
+    inviteHash: 'apple.dev-invite-hash',
+  },
+  [SEED_YCOMBINATOR_WORKSPACE_ID]: {
+    displayName: 'YCombinator',
+    subdomain: 'yc',
+    inviteHash: 'yc.dev-invite-hash',
+`;
+
+describe("seed workspace subdomains", () => {
+  it("match the seeder at the 7cbdfec6 pin, in Apple then YCombinator order", () => {
+    const found = [...SEEDER_FIXTURE.matchAll(/subdomain: '([a-z0-9-]+)'/g)].map((m) => m[1]);
+    assert.deepEqual(found, [TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN, TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN]);
+  });
+
+  it("are the exact seeded strings (no guess)", () => {
+    assert.equal(TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN, "apple");
+    assert.equal(TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN, "yc");
+  });
+});
+

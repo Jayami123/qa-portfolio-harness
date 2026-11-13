@@ -7,7 +7,12 @@ import {
   type TwentyRateLimitEnvName,
 } from "./twenty-rate-limits.js";
 import { elPreloadFromEnv, type ElPreload } from "./telemetry-env.js";
-import { readTwentyPassthroughNames, TWENTY_PASSTHROUGH_ENV, type TwentyPassthroughName } from "./twenty-passthrough.js";
+import {
+  assertTwentyBooleanPassthrough,
+  readTwentyPassthroughNames,
+  TWENTY_PASSTHROUGH_ENV,
+  type TwentyPassthroughName,
+} from "./twenty-passthrough.js";
 import { canaryYamlLines, CANARY_NAME_ENV, CANARY_VALUE_ENV, readTwentyCanary, type TwentyCanary } from "./twenty-canary.js";
 
 export const TWENTY_RUNTIME_OVERRIDE_FILE = "twenty.runtime.compose.yml";
@@ -133,6 +138,7 @@ export function writeTwentyRuntimeOverride(opts: {
   fs?: RuntimeOverrideFs;
 }): string | undefined {
   readTwentyLogicFunctionType(opts.env);
+  assertTwentyBooleanPassthrough(opts.env);
   const values = readTwentyRateLimitEnv(opts.env);
   const canary = readTwentyCanary(opts.env, TWENTY_RESERVED_ENV);
   const preload = elPreloadFromEnv(opts.env);

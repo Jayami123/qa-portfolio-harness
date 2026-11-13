@@ -11,6 +11,15 @@ export const TWENTY_IMAGE_REPO = "twentycrm/twenty";
 export const TWENTY_DEV_SEED_PASSWORD = "tim@apple.dev";
 
 export const TWENTY_DEFAULT_ADMIN_EMAIL = "jane.austen@apple.dev";
+
+/**
+ * Seed workspace subdomains, from the fork's dev seeder at 7cbdfec6:
+ * packages/twenty-server/src/engine/workspace-manager/dev-seeder/core/constants/seeder-workspaces.constant.ts:38 (Apple) and :47 (YCombinator).
+ * With IS_MULTIWORKSPACE_ENABLED=true the workspace origin is `<subdomain>.<host of SERVER_URL>`
+ * (workspace-domains.service.ts:240-245). Use a wildcard hostname (for example lvh.me), not 127.0.0.1.
+ */
+export const TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN = "apple";
+export const TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN = "yc";
 export const TWENTY_SEED_PRESENCE_EMAIL = TWENTY_DEFAULT_ADMIN_EMAIL;
 
 export const TWENTY_DB_VOLUME_SUFFIX = "db-data";
