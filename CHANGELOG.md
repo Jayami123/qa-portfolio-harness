@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.0] - 2026-11-13
+
 - Documenso: opt-in `DOCUMENSO_OIDC=1` (exact value) starts a mock OIDC provider, `navikt/mock-oauth2-server:2.1.11` pinned by digest, on `127.0.0.1:8081`, waits until its well-known endpoint answers 200, and sets Documenso's `NEXT_PRIVATE_OIDC_*` env with a per-run client secret (never logged or written). `NEXT_PRIVATE_OIDC_SKIP_VERIFY` is set empty so the `email_verified` check stays on. Unset starts no provider and sets no OIDC env. Any other set value fails `up` with `DOCUMENSO_OIDC_INVALID`. `down` stops the provider. Exports: `DOCUMENSO_OIDC_WELL_KNOWN_URL` and `DOCUMENSO_OIDC_CLIENT_ID`.
 - Twenty: `IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS` and `IS_CONFIG_VARIABLES_IN_DB_ENABLED` are forwarded to the server and worker when set (upstream defaults `true` and `true`, `config-variables.ts:566` and `:1465` at `7cbdfec6`). Unset passes nothing. Each accepts only exactly `true` or `false`; any other value fails `up twenty` before compose with `TWENTY_FLAG_INVALID`, naming the variable and not the value. Both names are reserved for the canary.
 - Twenty: `TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN` (`apple`) and `TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN` (`yc`) are exported from the index, read from the fork's dev seeder (`seeder-workspaces.constant.ts:38` and `:47` at `7cbdfec6`).
@@ -13,6 +15,16 @@
 - Cal API v2: `RATE_LIMIT_DEFAULT_LIMIT_API_KEY` and `RATE_LIMIT_DEFAULT_TTL_MS` are forwarded from the harness environment into the API spawn env when set (positive whole numbers; an invalid value fails `up cal` by name). Unset keeps the fork default. `calApiKeyRateLimit()` is exported and returns the effective limit, throwing by name when it is unset. Values are never logged.
 
 - `up`, `down` and `smoke` for one product resolve only that product's root (and `PRODUCTS_ROOT`). Before, every run checked all four forks, so `down documenso` failed with `Cal product root does not exist` when the Cal fork was absent. `loadConfig()` still checks all four.
+
+**Upgrade note.** Unset opt-in variables keep v0.4.0 behaviour, with these exceptions.
+
+- Cal: `up cal` now starts a loopback Mailpit catcher on `127.0.0.1:1026` (SMTP) and `127.0.0.1:8026` (UI). It also points the root `.env` `EMAIL_SERVER_HOST` and `EMAIL_SERVER_PORT` at the catcher when both are unset or still the example values (`localhost`, `1025`). A real host or port is never overwritten. This is not opt-in: a checkout with the example `.env` sees the change on its first `up cal`.
+- Single-product runs: `getAdapter`, `getProductConfig`, `up`, `down` and `smoke` resolve only the named product's root. `loadConfig()` is unchanged and stays eager: it still checks all four roots, so a caller of `loadConfig()` still needs all four.
+- Invalid values now fail `up` by name, and each is checked only when set. `DOCUMENSO_OIDC` must be exactly `1`. `IS_WORKSPACE_CREATION_LIMITED_TO_SERVER_ADMINS` and `IS_CONFIG_VARIABLES_IN_DB_ENABLED` must be exactly `true` or `false`. `RATE_LIMIT_DEFAULT_LIMIT_API_KEY` and `RATE_LIMIT_DEFAULT_TTL_MS` must be positive whole numbers. Unset or blank does nothing for each.
+- New loopback ports: `127.0.0.1:1026` and `127.0.0.1:8026` (Cal, with `up cal`), and `127.0.0.1:8081` (Documenso OIDC, only with `DOCUMENSO_OIDC=1`).
+- Opt-in features: `DOCUMENSO_OIDC=1` starts the mock OIDC provider. Twenty multi-workspace needs `IS_MULTIWORKSPACE_ENABLED=true` (the compose default stays `false`) and the recipe in the README. Both stay off unless set.
+- Additions only: `twentyMailApiUrl`, `calMailApiUrl`, `calApiKeyRateLimit`, `DOCUMENSO_OIDC_WELL_KNOWN_URL`, `DOCUMENSO_OIDC_CLIENT_ID`, `TWENTY_SEED_APPLE_WORKSPACE_SUBDOMAIN` and `TWENTY_SEED_YC_WORKSPACE_SUBDOMAIN`.
+- Consumer GitHub pins are not bumped by this release. Each consumer bumps its own pin in a separate PR after the tag is pushed.
 
 ## [0.4.0] - 2026-11-10
 
@@ -156,6 +168,7 @@
 - Default Cal `up()` to `next build` then `next start`.
 - Skip `next build` when a production `.next` marker exists unless `CAL_WEB_REBUILD=1`.
 
-[Unreleased]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Jayami123/qa-portfolio-harness/compare/v0.3.0...v0.3.1
