@@ -270,6 +270,8 @@ export function buildDocumensoAppEnv(cfg: {
   publicUrl?: string;
   /** Set only when Gotenberg is on. Unset leaves NEXT_PRIVATE_DOCUMENT_CONVERSION_URL out of the env. */
   documentConversionUrl?: string;
+  /** Set only when DOCUMENSO_OIDC=1 (src/adapters/documenso-oidc.ts). Unset leaves every NEXT_PRIVATE_OIDC_* name out of the env. */
+  oidc?: { wellKnownUrl: string; clientId: string; clientSecret: string };
 }): Record<string, string> {
   const { port } = documensoListen(cfg.baseUrl);
   return {
@@ -294,6 +296,17 @@ export function buildDocumensoAppEnv(cfg: {
     NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: documensoLocalSigningCertPath(cfg.productRoot),
     NEXT_PRIVATE_SIGNING_PASSPHRASE: "",
     ...(cfg.documentConversionUrl ? { NEXT_PRIVATE_DOCUMENT_CONVERSION_URL: cfg.documentConversionUrl } : {}),
+    ...(cfg.oidc
+      ? {
+          NEXT_PRIVATE_OIDC_WELL_KNOWN: cfg.oidc.wellKnownUrl,
+          NEXT_PRIVATE_OIDC_CLIENT_ID: cfg.oidc.clientId,
+          NEXT_PRIVATE_OIDC_CLIENT_SECRET: cfg.oidc.clientSecret,
+          NEXT_PRIVATE_OIDC_PROVIDER_LABEL: "Mock OIDC",
+          // Set explicitly to an empty value (= false). dotenv does not override a key already set here, so a product
+          // .env with SKIP_VERIFY=true cannot turn off the email_verified check (handle-oauth-callback-url.ts:260).
+          NEXT_PRIVATE_OIDC_SKIP_VERIFY: "",
+        }
+      : {}),
     ...(process.env.DANGEROUS_BYPASS_RATE_LIMITS === "true"
       ? { DANGEROUS_BYPASS_RATE_LIMITS: "true" }
       : {}),

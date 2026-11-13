@@ -24,4 +24,6 @@ export {
 
 export { calMailApiUrl, documensoMailApiUrl, twentyMailApiUrl } from "./config.js";
 
+export { DOCUMENSO_OIDC_CLIENT_ID, DOCUMENSO_OIDC_WELL_KNOWN_URL } from "./adapters/documenso-oidc.js";
+
 export { calApiKeyRateLimit } from "./adapters/cal-api-env.js";
