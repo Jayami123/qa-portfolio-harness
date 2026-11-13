@@ -6,6 +6,14 @@ import path from "node:path";
 import type { DocumensoConfig } from "../config.js";
 import { createPgClient } from "../db/pg.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
+import {
+  DOCUMENSO_OIDC_CLIENT_ID,
+  DOCUMENSO_OIDC_WELL_KNOWN_URL,
+  documensoOidcClientSecret,
+  documensoOidcEnabled,
+  documensoOidcOverlayFiles,
+  waitForOidcWellKnown,
+} from "./documenso-oidc.js";
 import { run } from "../internal/run.js";
 import { isPidRunning, resolveNpm, spawnLogged } from "../internal/spawn-detached.js";
 import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
@@ -74,6 +82,9 @@ interface DocumensoProbe {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
+  /** The client secret for the mock OIDC provider. Generated once per process, set only in the app env, never logged. */
+  private oidcClientSecret: string | undefined;
+
   readonly id = "documenso" as const;
   private seedResult?: SeedResult;
   private webProcess?: ChildProcess;
@@ -102,12 +113,14 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
     return path.join(HARNESS_ROOT, ".harness", "documenso-web.log");
   }
 
-  private composeOpts() {
+  /** `oidc` adds the mock OIDC overlay. up() passes the flag; down() passes false, and --remove-orphans removes the provider. */
+  private composeOpts(oidc: boolean) {
     return {
       projectName: COMPOSE_PROJECT,
       files: [
         harnessComposeFile("documenso.compose.yml"),
         ...(documensoGotenbergEnabled(process.env) ? [harnessComposeFile("documenso.gotenberg.compose.yml")] : []),
+        ...documensoOidcOverlayFiles(oidc).map((name) => harnessComposeFile(name)),
         ...pgStatsComposeFilePaths({ env: process.env, product: "documenso" }),
       ],
       cwd: HARNESS_DOCKER_DIR,
@@ -116,9 +129,24 @@ export class DocumensoAdapter extends BaseAdapter<DocumensoConfig> {
 
   private appEnv(): Record<string, string> {
     const gotenberg = documensoGotenbergEnabled(process.env);
+    const oidc = documensoOidcEnabled(process.env);
+    if (oidc) {
+      this.oidcClientSecret ??= documensoOidcClientSecret();
+    }
     const base = documensoAppEnvWithPreload(
       withDocumensoHeap(
-        buildDocumensoAppEnv({ ...this.cfg, documentConversionUrl: gotenberg ? DOCUMENSO_GOTENBERG_URL : undefined }),
+        buildDocumensoAppEnv({
+          ...this.cfg,
+          documentConversionUrl: gotenberg ? DOCUMENSO_GOTENBERG_URL : undefined,
+          oidc:
+            oidc && this.oidcClientSecret !== undefined
+              ? {
+                  wellKnownUrl: DOCUMENSO_OIDC_WELL_KNOWN_URL,
+                  clientId: DOCUMENSO_OIDC_CLIENT_ID,
+                  clientSecret: this.oidcClientSecret,
+                }
+              : undefined,
+        }),
         process.env.NODE_OPTIONS,
       ),
       process.env,
@@ -327,7 +355,7 @@ ${this.portOwnerReport(port)}
   }
 
   /**
-   * Diagnostic only. Lists the listener PID and executable so Jayami can decide.
+   * Diagnostic only. Lists the listener PID and executable so the owner can decide.
    * Never stops anything: no taskkill, no kill signal.
    */
   private portOwnerReport(port: string): string {
@@ -467,11 +495,17 @@ ${this.portOwnerReport(port)}
       await assertDocumensoPublicHostResolvesToLoopback(new URL(this.cfg.publicUrl).hostname);
     }
 
-    await composeUp(this.composeOpts(), { wait: true });
+    // Invalid DOCUMENSO_OIDC throws here, before compose, and names the variable.
+    const oidc = documensoOidcEnabled(process.env);
+    await composeUp(this.composeOpts(oidc), { wait: true });
+    if (oidc) {
+      await waitForOidcWellKnown(DOCUMENSO_OIDC_WELL_KNOWN_URL);
+      console.log(`Documenso mock OIDC provider answers 200: ${DOCUMENSO_OIDC_WELL_KNOWN_URL}`);
+    }
     if (pgStatsEnabled(process.env)) {
       await enablePgStatsExtension({
         project: COMPOSE_PROJECT,
-        files: this.composeOpts().files,
+        files: this.composeOpts(oidc).files,
         service: "postgres",
         user: "documenso",
         db: "documenso",
@@ -563,7 +597,7 @@ ${this.portOwnerReport(port)}
     await this.stopListeningWeb(host, port);
     this.webProcess = undefined;
     // --remove-orphans: the opt-in Gotenberg container must go even when DOCUMENSO_GOTENBERG is unset at down time.
-    await composeDown(this.composeOpts(), ["--remove-orphans"]);
+    await composeDown(this.composeOpts(false), ["--remove-orphans"]);
     console.log("Documenso web stopped and compose stack torn down.");
   }
 
