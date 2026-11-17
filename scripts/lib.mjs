@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const PRODUCT_IDS = ["cal", "documenso", "medusa", "twenty"];
+export const PRODUCT_IDS = ["cal", "documenso", "medusa", "twenty", "nextcloud", "outline", "penpot", "mattermost"];
 
 export const HARNESS_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

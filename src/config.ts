@@ -6,7 +6,7 @@ import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-e
 import { assertMedusaSecondBaseUrl } from "./adapters/medusa-env.js";
 import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
 import { HARNESS_ROOT } from "./paths.js";
-import type { ProductId } from "./types.js";
+import { isForkProductId, type ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
 
@@ -105,6 +105,24 @@ const envSchema = z.object({
     .default(TWENTY_DEV_SEED_PASSWORD),
   TWENTY_API_KEY: optionalString,
   TWENTY_IMAGE_TAG: z.string().trim().min(1).default("v2.44.0"),
+  /** Exactly "1" starts the Twenty MCP credential and readiness step (P4). Anything else is off. */
+  TWENTY_MCP: optionalString,
+  /** Readiness budget for the P4 products in ms. Unset uses the default in each adapter. */
+  P4_WAIT_MS: optionalString,
+
+  // P4 products (image-only). Database passwords are NOT in these defaults: each compose run generates its own
+  // and writes it to .harness/<product>-run.json (CLAUDE.md: no passwords in committed files).
+  NEXTCLOUD_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8080"),
+  NEXTCLOUD_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8765/mcp"),
+  NEXTCLOUD_DB_URL: z.string().trim().min(1).default("postgres://nextcloud@127.0.0.1:5460/nextcloud"),
+  OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3010"),
+  OUTLINE_DB_URL: z.string().trim().min(1).default("postgres://outline@127.0.0.1:5461/outline"),
+  PENPOT_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:9001"),
+  PENPOT_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:4401/mcp"),
+  PENPOT_DB_URL: z.string().trim().min(1).default("postgres://penpot@127.0.0.1:5462/penpot"),
+  MATTERMOST_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8065"),
+  MATTERMOST_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8066/mcp"),
+  MATTERMOST_DB_URL: z.string().trim().min(1).default("postgres://mattermost@127.0.0.1:5463/mattermost"),
 });
 
 export interface ProductConfig {
@@ -148,6 +166,30 @@ export interface TwentyConfig extends ProductConfig {
   apiKey?: string;
   imageTag: string;
 }
+
+/** P4 products. productRoot is .harness/<product> (ADR 0006, D1); no fork is read. */
+export interface NextcloudConfig extends ProductConfig {
+  id: "nextcloud";
+  mcpUrl: string;
+}
+
+export interface OutlineConfig extends ProductConfig {
+  id: "outline";
+  /** Outline's built-in MCP lives on the app origin at /mcp (ADR 0006). */
+  mcpUrl: string;
+}
+
+export interface PenpotConfig extends ProductConfig {
+  id: "penpot";
+  mcpUrl: string;
+}
+
+export interface MattermostConfig extends ProductConfig {
+  id: "mattermost";
+  mcpUrl: string;
+}
+
+export type P4Config = NextcloudConfig | OutlineConfig | PenpotConfig | MattermostConfig;
 
 export interface HarnessConfig {
   productsRoot: string;
@@ -242,6 +284,52 @@ function buildTwentyConfig(parsed: ParsedEnv, productsRoot: string): TwentyConfi
   };
 }
 
+/** D1: every P4 product keeps its state under the harness folder. Nothing here requires that folder to exist. */
+function p4ProductRoot(id: "nextcloud" | "outline" | "penpot" | "mattermost"): string {
+  return path.join(HARNESS_ROOT, ".harness", id);
+}
+
+function buildNextcloudConfig(parsed: ParsedEnv): NextcloudConfig {
+  return {
+    id: "nextcloud",
+    productRoot: p4ProductRoot("nextcloud"),
+    baseUrl: parsed.NEXTCLOUD_BASE_URL.replace(/\/$/, ""),
+    dbUrl: parsed.NEXTCLOUD_DB_URL,
+    mcpUrl: parsed.NEXTCLOUD_MCP_URL.replace(/\/$/, ""),
+  };
+}
+
+function buildOutlineConfig(parsed: ParsedEnv): OutlineConfig {
+  const baseUrl = parsed.OUTLINE_BASE_URL.replace(/\/$/, "");
+  return {
+    id: "outline",
+    productRoot: p4ProductRoot("outline"),
+    baseUrl,
+    dbUrl: parsed.OUTLINE_DB_URL,
+    mcpUrl: `${baseUrl}/mcp`,
+  };
+}
+
+function buildPenpotConfig(parsed: ParsedEnv): PenpotConfig {
+  return {
+    id: "penpot",
+    productRoot: p4ProductRoot("penpot"),
+    baseUrl: parsed.PENPOT_BASE_URL.replace(/\/$/, ""),
+    dbUrl: parsed.PENPOT_DB_URL,
+    mcpUrl: parsed.PENPOT_MCP_URL.replace(/\/$/, ""),
+  };
+}
+
+function buildMattermostConfig(parsed: ParsedEnv): MattermostConfig {
+  return {
+    id: "mattermost",
+    productRoot: p4ProductRoot("mattermost"),
+    baseUrl: parsed.MATTERMOST_BASE_URL.replace(/\/$/, ""),
+    dbUrl: parsed.MATTERMOST_DB_URL,
+    mcpUrl: parsed.MATTERMOST_MCP_URL.replace(/\/$/, ""),
+  };
+}
+
 let cached: HarnessConfig | undefined;
 
 export function loadConfig(): HarnessConfig {
@@ -272,9 +360,14 @@ export function loadProductConfig(id: "cal"): CalConfig;
 export function loadProductConfig(id: "documenso"): DocumensoConfig;
 export function loadProductConfig(id: "medusa"): MedusaConfig;
 export function loadProductConfig(id: "twenty"): TwentyConfig;
+export function loadProductConfig(id: "nextcloud"): NextcloudConfig;
+export function loadProductConfig(id: "outline"): OutlineConfig;
+export function loadProductConfig(id: "penpot"): PenpotConfig;
+export function loadProductConfig(id: "mattermost"): MattermostConfig;
 export function loadProductConfig(id: ProductId): ProductConfig;
 export function loadProductConfig(id: ProductId): ProductConfig {
-  if (cached) {
+  // Only the four fork products are cached (loadConfig holds them). P4 products never touch the cache.
+  if (cached && isForkProductId(id)) {
     return cached[id];
   }
 
@@ -290,6 +383,14 @@ export function loadProductConfig(id: ProductId): ProductConfig {
       return buildMedusaConfig(parsed, productsRoot);
     case "twenty":
       return buildTwentyConfig(parsed, productsRoot);
+    case "nextcloud":
+      return buildNextcloudConfig(parsed);
+    case "outline":
+      return buildOutlineConfig(parsed);
+    case "penpot":
+      return buildPenpotConfig(parsed);
+    case "mattermost":
+      return buildMattermostConfig(parsed);
     default: {
       const exhaustive: never = id;
       throw new Error(`Unknown product id: ${String(exhaustive)}`);
