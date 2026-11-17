@@ -1,0 +1,89 @@
+# P4 adapters stack (ADR 0006). Starts Nextcloud, Outline, Penpot, Mattermost and Twenty (with MCP) through the harness
+# scripts, waits for readiness (app health and a real MCP tools/list), measures memory, and uploads evidence/ram-probe.json.
+#
+# Advisory, not a required check (owner's decision, question Q5). It pulls public images and builds the Mattermost MCP
+# binary from a pinned commit, so it is slow and depends on public registries. It uploads only the RAM report. The
+# .harness/ folder (run-state credentials) is never uploaded.
+name: P4 adapters
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/adapters/**"
+      - "src/config.ts"
+      - "src/types.ts"
+      - "docker/nextcloud*.yml"
+      - "docker/outline*"
+      - "docker/penpot*"
+      - "docker/mattermost*"
+      - "docker/twenty*.yml"
+      - "scripts/p4-*"
+      - "scripts/ready.mjs"
+      - "docs/pins/p4.md"
+      - ".github/workflows/p4-adapters.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  p4-stack:
+    name: five products, readiness and RAM
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Twenty's MCP is opt-in. The probe script also sets TWENTY_MCP=1 for the Twenty step.
+      TWENTY_MCP: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Free runner disk space
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+
+      - name: Install harness and clone the Twenty fork at its pin
+        run: |
+          set -euo pipefail
+          npm ci
+          HARNESS_PRODUCTS=twenty bash scripts/cloud-install.sh
+          npm run build
+
+      - name: Start, wait for readiness, measure memory
+        run: |
+          set -euo pipefail
+          bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty
+
+      - name: Upload RAM evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ram-probe
+          path: evidence/ram-probe.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: No harness containers left
+        if: always()
+        run: |
+          set -euo pipefail
+          docker ps -a --filter name=qa-harness --format '{{.Names}}' | tee left.txt
+          test ! -s left.txt
