@@ -5,6 +5,7 @@ import { DocumensoAdapter } from "./documenso.adapter.js";
 import { MedusaAdapter } from "./medusa.adapter.js";
 import { UnimplementedAdapter } from "./base.js";
 import { NextcloudAdapter } from "./nextcloud.adapter.js";
+import { MattermostAdapter } from "./mattermost.adapter.js";
 import { OutlineAdapter } from "./outline.adapter.js";
 import { PenpotAdapter } from "./penpot.adapter.js";
 import { TwentyAdapter } from "./twenty.adapter.js";
@@ -27,9 +28,8 @@ export function getAdapter(id: ProductId): ProductAdapter {
       return new OutlineAdapter(loadProductConfig("outline"));
     case "penpot":
       return new PenpotAdapter(loadProductConfig("penpot"));
-    // Mattermost arrives in Task 6. Until then it fails loudly with NotImplementedError.
     case "mattermost":
-      return new UnimplementedAdapter(id, loadProductConfig("mattermost"));
+      return new MattermostAdapter(loadProductConfig("mattermost"));
     default: {
       const exhaustive: never = id;
       throw new Error(`Unknown product id: ${String(exhaustive)}`);
