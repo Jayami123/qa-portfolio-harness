@@ -864,3 +864,22 @@ Branch commits, small and in order (lowercase Conventional Commits, `git add` by
 2. After approval: tasks 1 to 10 as named above, one commit each. The owner merges with a merge commit and tags.
 
 Will not do: edit any product fork; bump the Twenty pin; touch the Cal, Documenso or Medusa adapters or defaults; add LibreChat, OpenClaw, LiteLLM, a stub model or a Gemma proof; use an LLM key; print or commit a secret; run CodeRabbit; merge, tag, squash, rebase or force-push; use the Bridge-bss account.
+
+## 16 Approval decisions (2026-11-18)
+
+The reviewer approved the plan with the answers below. **Where this section conflicts with sections 3 to 15, this section wins.**
+
+| Question | Decision |
+|---|---|
+| Q1 Outline | Keep Outline. Licence **BSL 1.1**. Reason, recorded in ADR 0006: BSL 1.1 allows non-production self-hosted use, and a local QA harness is that use. |
+| Q2 Mattermost | Use the **standalone `mattermost-mcp-server`** built from a pinned commit of `mattermost/mattermost-plugin-agents`: **`96ecd17ce4d4b6cbcec1abcd2a9173759b4e85e1`** (master at approval). Build it with a harness-owned multi-stage `docker/mattermost-mcp.Dockerfile` whose base images are pinned by digest. Bind to **127.0.0.1 only**. No Enterprise licence, no embedded endpoint. ADR 0006 records: "development-only binary, used for local testing". |
+| Q3 Nextcloud | Use `cbcoutinho/nextcloud-mcp-server` at the pinned digest. **Run the D9 pass-through spike first.** Prefer authenticated pass-through over an unauthenticated `/mcp`. `docs/pins/p4.md` gets one line: an official Nextcloud MCP app was checked and is **UNVERIFIED** (appstore unreachable). |
+| Q4 D1 `productRoot = .harness/<product>` | Accepted. Document it in ADR 0006. Add a unit test proving the four fork products still resolve exactly as before. |
+| Q5 CI job | **Advisory**, not a required check. |
+| Q6 Twenty digest | Do **not** change `docker/twenty.compose.yml` or any Twenty default. Record the observed digest in `docs/pins/p4.md` only. |
+
+**Extra requirement, Penpot plugin spike:** Penpot MCP tool calls need a browser with the MCP plugin connected. A headless Playwright (Chromium) run must log in as the seeded user, open a file, connect the MCP plugin, then `tools/call` `high_level_overview` must return a non-error result. If headless cannot connect the plugin, **stop and report. Do not fake it.** Record the result as VERIFIED or FAILED.
+
+**Order:** (1) Outline seeding spike, (2) Penpot plugin spike, (3) Nextcloud D9 pass-through spike, (4) Mattermost auth spike, then Tasks 1 to 10. Each task is its own commit. The PR stays a draft. Spike outcomes are reported before any build that depends on them.
+
+**Spike method note:** the adapters do not exist until Tasks 3 to 6, so the spikes use raw `docker compose` files kept in the session scratchpad, not `npm run up`. Those files are not committed. The CI job and the adapters use only harness scripts.
