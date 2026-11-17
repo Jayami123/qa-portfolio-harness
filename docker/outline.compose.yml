@@ -1,0 +1,73 @@
+# Harness-owned Outline stack (ADR 0006). Outline's built-in MCP is served on the app origin at /mcp (BSL 1.1 licence,
+# accepted for local QA use; see ADR 0006). Secrets are generated per run by the adapter and passed through the
+# environment. No password or key is written in this file.
+#
+#   node scripts/up.mjs outline   (starts db, redis, mail; migrates; starts outline; seeds; waits for /mcp)
+name: qa-harness-outline
+
+services:
+  db:
+    image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
+    environment:
+      POSTGRES_USER: outline
+      POSTGRES_PASSWORD: ${OUTLINE_DB_PASSWORD:?set by the adapter}
+      POSTGRES_DB: outline
+    ports:
+      - "127.0.0.1:5461:5432"
+    volumes:
+      - outline_harness_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U outline -d outline"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  redis:
+    # Pinned by version and digest (ADR 0005). Not published to the host.
+    image: redis:8.10.3@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  mail:
+    image: axllent/mailpit:v1.22.3@sha256:f7f7c31de4de59540ad6515a0ca057a77525bca2069b6e747d873ca66c10fe08
+    ports:
+      - "127.0.0.1:8027:8025"
+
+  outline:
+    image: outlinewiki/outline:1.13.0@sha256:4583bb244dbb4464d8a632c75044d3b2f9fe44382b6a4b84d97995f473b823e4
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mail:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3010:3000"
+    environment:
+      # ENVIRONMENT is derived from NODE_ENV; it must be "production" for the server to start.
+      NODE_ENV: production
+      SECRET_KEY: ${OUTLINE_SECRET_KEY:?set by the adapter}
+      UTILS_SECRET: ${OUTLINE_UTILS_SECRET:?set by the adapter}
+      DATABASE_URL: postgres://outline:${OUTLINE_DB_PASSWORD:?set by the adapter}@db:5432/outline
+      PGSSLMODE: disable
+      REDIS_URL: redis://redis:6379
+      URL: http://127.0.0.1:3010
+      PORT: "3000"
+      FORCE_HTTPS: "false"
+      FILE_STORAGE: local
+      FILE_STORAGE_LOCAL_ROOT_DIR: /var/lib/outline/data
+      SMTP_HOST: mail
+      SMTP_PORT: "1025"
+      SMTP_FROM_EMAIL: outline@p4.test
+      SMTP_SECURE: "false"
+    volumes:
+      - outline_harness_data:/var/lib/outline/data
+      - ./outline-seed.cjs:/opt/harness/outline-seed.cjs:ro
+
+volumes:
+  outline_harness_pg: {}
+  outline_harness_data: {}
