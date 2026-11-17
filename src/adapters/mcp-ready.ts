@@ -161,6 +161,19 @@ function reasonOf(error: unknown): string {
  * Polls the MCP endpoint with real calls until tools/list succeeds, or until timeoutMs is spent.
  * On timeout it throws one line: `MCP_NOT_READY: <product> MCP at <url> not ready after <ms> ms (last: <reason>)`.
  */
+/** Per-product convenience: one Authorization value, one budget. The header value is never logged. */
+export function mcpReadinessFor(
+  product: string,
+  opts: { url: string; authorization?: string; timeoutMs: number; minTools?: number },
+): Promise<McpReadiness> {
+  return waitForMcp(product, {
+    url: opts.url,
+    headers: opts.authorization === undefined ? undefined : { authorization: opts.authorization },
+    timeoutMs: opts.timeoutMs,
+    minTools: opts.minTools,
+  });
+}
+
 export async function waitForMcp(product: string, opts: McpProbeOptions): Promise<McpReadiness> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
