@@ -903,3 +903,53 @@ Spikes ran with raw `docker compose` files in the session scratchpad (not commit
 - Penpot needs the nginx overlay file (`docker/penpot-mcp-ws.conf`, a harness file, not a fork edit) and the two extra flags.
 - Nextcloud needs `MCP_DEPLOYMENT_MODE=multi_user_basic` and no server-side password. The readiness check uses the owner's app password, not an unauthenticated call.
 - Twenty MCP (Task 7) does not depend on any spike.
+
+## 18 Build results and deviations (2026-11-18)
+
+### 18.1 RAM probe (local run, real numbers)
+
+`bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty` on the build session (4 vCPU, 15.7 GiB RAM). All five products stayed up together, which is the worst case. Source: `evidence/ram-probe.json` (not committed; CI uploads the same file as the `ram-probe` artifact).
+
+| Measure | Value |
+|---|---|
+| Budget (committed, `RAM_BUDGET_MIB`) | 14336 MiB (14 GiB) |
+| Peak of the per-instant sum across containers | **4901.4 MiB** (about 4.8 GiB) |
+| Sum of each container's own peak (reported, not checked) | 5495.0 MiB |
+| Host memory used, peak (`free -m`) | 5610 MiB |
+| Time from first `up` to all five ready | 237.4 s |
+| Fit | **true** (headroom about 9.4 GiB) |
+| Largest containers (peak) | penpot-backend 1028 MiB (JVM `-Xmx1g`), twenty-server 1047 MiB, twenty-worker 1040 MiB, penpot-exporter 725 MiB, outline-outline 380 MiB, nextcloud-mcp 193 MiB |
+
+**Disk, the binding constraint.** The probe's disk reading was 1 GiB free at the end. The build session had only that much left, because images from the spikes filled its allowance. The images were then pruned, which is safe because all of them re-pull by digest. The disk figure measured here is therefore a property of this session, not of the CI runner. CI's public runner has about 14 GB free after the job's cleanup step. Estimated image footprint for the five products, from the local `docker images` sizes: about 9 GB. This is INFERRED for CI, not measured there.
+
+### 18.2 Readiness (local run, all five ready)
+
+| Product | Health | MCP | tools/list count |
+|---|---|---|---|
+| nextcloud | ok (status.php installed) | ok, pass-through credential | 110 |
+| outline | ok (`/_health`) | ok, API key | 20 |
+| penpot | ok (`/`) | ok, single-user | 5 (4 at the spike; the required `execute_code` is present) |
+| mattermost | ok (`/api/v4/system/ping`) | ok, member PAT | 121 |
+| twenty | ok (`/healthz`) | ok, scoped API key | 7 |
+
+### 18.3 Deviations from the plan, and why
+
+- **Spike method.** The spikes used raw compose files in the scratchpad, since the adapters did not exist. The adapters use only harness scripts (CLAUDE.md).
+- **Outline seeding.** Plan B (magic link) cannot bootstrap a fresh stack, because email sign-in needs an existing team and user. The adapter uses Plan A through Outline's models, in `docker/outline-seed.cjs`. Its key is masked in the console echo.
+- **Outline environment.** `NODE_ENV` must be `production` for the server (`ENVIRONMENT` derives from it). The migration uses `production-ssl-disabled`. The plan's earlier note was wrong.
+- **Nextcloud auth.** The spike gave 400 for "no credentials", not 401 as the plan said. The adapter's readiness uses the owner's app password, so it does not depend on that code.
+- **Penpot flags.** Two flags are required that the plan did not list: `disable-admin-console` and `enable-prepl-server` (the owner-creation CLI). `PENPOT_DISABLE_IPV6_LISTEN=true` is needed on hosts without IPv6 sockets.
+- **Penpot MCP mode.** Single-user, not multi-user. The plugin UI sends no token. The run state holds `mcpAuthorization: null` for Penpot, and the readers accept null for that product only.
+- **DB passwords.** Generated per run and kept in `.harness/<product>/secrets.json`. The plan's defaults with literal passwords were dropped, because `CLAUDE.md` forbids them in committed files.
+- **Mattermost CA.** The sandbox's TLS proxy CA is passed as a file (`MATTERMOST_EXTRA_CA_FILE`), not an environment variable. An environment variable is limited to 128 KB, and the first attempt failed with `E2BIG`.
+- **Twenty.** `TWENTY_MCP=1` uses the loginToken exchange. The plan's `authenticate()` path is not used for MCP.
+- **Test additions beyond the plan.** `src/config-p4.test.ts` (D1 regression), `src/adapters/p4-pins.test.ts` (pin drift), `src/adapters/p4-wait.test.ts`, and the Transit decoder for Penpot.
+
+### 18.4 Not done in this PR (honest status)
+
+- **Real CI run.** The `P4 adapters` job has not run in GitHub Actions. The probe ran locally, and the job is advisory.
+- **actionlint.** Not run locally: the sandbox classifier blocked fetching the installer. The repository's `actionlint` job in `ci.yml` lints the new workflow on the PR.
+- **Playwright browser step.** The Penpot plugin spike ran once, in the scratchpad. It is not in the harness or in CI.
+- **Mattermost MCP headless OAuth.** Only PAT bearer was verified (dev binary).
+- **Outline tool calls.** `tools/list` is verified. The `list_documents` tool call is not.
+- **Nextcloud apps.** Calendar, Contacts and Mail are not installed (appstore unreachable). UNVERIFIED.

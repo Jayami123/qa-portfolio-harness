@@ -460,6 +460,34 @@ Switches live in the harness `.env` and default off.
 - Unit tests for pure modules (config parsing, timeouts, URL handling, redaction) plus a `test` script and CI job.
 - Bump `package.json` `engines.node` to `>=22` (Node 20 reached end-of-life in April 2026; CI uses Node 22 via `.nvmrc`).
 
+## P4 products (Nextcloud, Outline, Penpot, Mattermost, Twenty MCP)
+
+These four products are image-only: no fork is read. Each has a harness-owned compose file under `docker/`, a pinned image digest in [`docs/pins/p4.md`](docs/pins/p4.md), and an adapter. Decisions are in [ADR 0006](docs/adr/0006-p4-products.md).
+
+```bash
+npm run up -- nextcloud     # then: npm run down -- nextcloud
+npm run up -- outline
+npm run up -- penpot
+npm run up -- mattermost
+TWENTY_MCP=1 npm run up -- twenty
+node scripts/ready.mjs nextcloud outline penpot mattermost   # app health and a real MCP tools/list
+bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty   # writes evidence/ram-probe.json
+```
+
+| Product | App (127.0.0.1) | MCP (127.0.0.1) | MCP auth | Notes |
+|---|---|---|---|---|
+| Nextcloud | 8080 | 8765 `/mcp` | app password, pass-through (`multi_user_basic`) | The MCP holds no Nextcloud credential. Calendar, Contacts and Mail app installs are unverified (the appstore was unreachable). |
+| Outline | 3010 | 3010 `/mcp` (built in) | API key bearer | BSL 1.1 licence, accepted for local QA use. Owner and team are created through Outline's models. |
+| Penpot | 9001 | 4401 `/mcp` (single-user) | none | The MCP plugin connects from a browser. A design edit needs that browser session; readiness checks `tools/list` only. |
+| Mattermost | 8065 | 8066 `/mcp` | PAT of a member account with no admin role | **The MCP binary is development-only upstream**, built from a pinned commit. No Enterprise licence. |
+| Twenty | 3002 | 3002 `/mcp` | scoped API key (opt-in `TWENTY_MCP=1`) | The Twenty stack and its defaults are unchanged. |
+
+**Run state.** Each product writes `.harness/<product>-run.json` (mode 0600) with the MCP URL and the Authorization value. Read it only through `readP4McpCredentials()`. Never print or upload it. `npm run down -- <product>` removes it and keeps volumes. `<PRODUCT>_DOWN_VOLUMES=1` also removes the volumes and the per-run secrets (`.harness/<product>/secrets.json`).
+
+**Secrets.** Database and product passwords are generated per run. None is written to a committed file.
+
+**Memory.** The probe's budget is 14 GiB of a 16 GB runner (`RAM_BUDGET_MIB`, committed). The CI job `P4 adapters` is advisory, and it uploads `ram-probe.json` as the `ram-probe` artifact.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.
