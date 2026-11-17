@@ -31,6 +31,21 @@ import {
 } from "./twenty-env.js";
 import { enablePgStatsExtension, pgStatsComposeFilePaths, pgStatsEnabled } from "./pg-stats.js";
 import { twentyRuntimeOverrideFiles, writeTwentyRuntimeOverride } from "./twenty-runtime-override.js";
+import { mcpReadinessFor } from "./mcp-ready.js";
+import { p4RunStateFile, readP4McpCredentials, removeP4RunState, requireMcpAuthorization, writeP4RunState } from "./p4-run-state.js";
+import { p4WaitBudgetMs } from "./p4-wait.js";
+import {
+  apiKeyExpiry,
+  type ApiKeyRole,
+  CREATE_API_KEY,
+  extractApiKeyToken,
+  GENERATE_API_KEY_TOKEN,
+  GET_API_KEY_ROLES,
+  selectApiKeyRole,
+  twentyMcpEnabled,
+  twentyMcpUrl,
+} from "./twenty-mcp.js";
+import type { McpReadiness } from "./types.js";
 
 const COMPOSE_PROJECT = "qa-harness-twenty";
 const DEFAULT_WAIT_MS = 10 * 60 * 1000;
@@ -173,6 +188,11 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
       });
     }
     await this.assertRunningServerImage();
+    // Opt-in (TWENTY_MCP=1 exactly). Off by default, so the defaults above are unchanged.
+    if (twentyMcpEnabled(process.env)) {
+      await this.prepareMcp();
+      await this.waitMcp();
+    }
     console.log(`
 Twenty stack is up (image ${twentyImageRef(this.cfg.imageTag)}).
   App:      ${this.healthUrl()} (HTTP 200)
@@ -185,6 +205,8 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
   }
 
   async down(): Promise<void> {
+    // The MCP run state is removed whether or not TWENTY_MCP was set (a missing file is not an error).
+    removeP4RunState(this.mcpRunStateFile());
     const opts = this.composeOpts();
     if (process.env.TWENTY_DOWN_VOLUMES === "1") {
       await run("docker", ["compose", "-p", opts.projectName, ...opts.files.flatMap((f) => ["-f", f]), "down", "-v"], {
@@ -205,6 +227,88 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     await waitUntilHealthy(this.healthUrl(), {
       timeoutMs: timeoutMs ?? this.waitBudgetMs(),
       isOk: isTwentyHealthyStatus,
+    });
+  }
+
+  mcpRunStateFile(): string {
+    return p4RunStateFile("twenty");
+  }
+
+  /**
+   * The workspace token from the loginToken exchange. The plain signIn token is workspace-agnostic: /mcp rejects it and
+   * createApiKey refuses it (probe, 2026-11-17). So the MCP path always takes the exchange route.
+   */
+  private async workspaceToken(): Promise<string> {
+    const signIn = await this.metadataGraphql<SignInResultShape>(
+      SIGN_IN_MUTATION,
+      { email: this.cfg.email, password: this.cfg.password },
+      "mcp signIn",
+    );
+    const workspace = (signIn.signIn?.availableWorkspaces?.availableWorkspacesForSignIn ?? [])[0];
+    if (!workspace?.loginToken) {
+      throw new Error("TWENTY_MCP_NO_WORKSPACE: signIn returned no workspace loginToken. Check that seed has run.");
+    }
+    const origin = selectWorkspaceOrigin(workspace, this.cfg.baseUrl);
+    const exchanged = await this.metadataGraphql<LoginTokenExchangeShape>(
+      EXCHANGE_LOGIN_TOKEN_MUTATION,
+      { loginToken: workspace.loginToken, origin },
+      "mcp getAuthTokensFromLoginToken",
+    );
+    const token = extractBearerFromLoginTokenExchange(exchanged);
+    if (!token) {
+      throw new Error("TWENTY_MCP_NO_WORKSPACE_TOKEN: the loginToken exchange returned no access token");
+    }
+    return token;
+  }
+
+  /** Authenticated GraphQL on /metadata. metadataGraphql above sends no Authorization, so this one does. */
+  private async authedGraphql<T>(token: string, query: string, variables: Record<string, unknown>, context: string): Promise<T> {
+    const response = await fetch(`${this.cfg.baseUrl}/metadata`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ query, variables }),
+    });
+    const body = (await response.json()) as { data?: T; errors?: { message: string }[] };
+    return parseTwentyMetadataBody(response.status, body, context);
+  }
+
+  /** Mints a least-privilege API key, exchanges it for the MCP bearer, and writes the run state (mode 0600). */
+  private async prepareMcp(): Promise<void> {
+    const token = await this.workspaceToken();
+    const roles = await this.authedGraphql<{ getApiKeyRoles: ApiKeyRole[] }>(token, GET_API_KEY_ROLES, {}, "mcp getApiKeyRoles");
+    const role = selectApiKeyRole(roles.getApiKeyRoles);
+    const expiresAt = apiKeyExpiry(new Date());
+    const created = await this.authedGraphql<{ createApiKey: { id: string } }>(
+      token,
+      CREATE_API_KEY,
+      { input: { name: "qa-harness-mcp", expiresAt, roleId: role.id } },
+      "mcp createApiKey",
+    );
+    const generated = await this.authedGraphql<{ generateApiKeyToken: { token: string } }>(
+      token,
+      GENERATE_API_KEY_TOKEN,
+      { apiKeyId: created.createApiKey.id, expiresAt },
+      "mcp generateApiKeyToken",
+    );
+    const apiKeyToken = extractApiKeyToken({ data: generated });
+    writeP4RunState(this.mcpRunStateFile(), {
+      version: 1,
+      product: "twenty",
+      mcpUrl: twentyMcpUrl(this.cfg.baseUrl),
+      mcpAuthorization: `Bearer ${apiKeyToken}`,
+      owner: { username: this.cfg.email, email: this.cfg.email },
+    });
+    console.log(`Twenty MCP credential written (role ${role.label}, expires ${expiresAt}). It is not printed.`);
+  }
+
+  /** MCP readiness: a real handshake and tools/list with the scoped key. The key is not printed. */
+  async waitMcp(timeoutMs?: number): Promise<McpReadiness> {
+    const creds = readP4McpCredentials("twenty", this.mcpRunStateFile());
+    return mcpReadinessFor("twenty", {
+      url: creds.mcpUrl,
+      authorization: requireMcpAuthorization(creds, "twenty"),
+      timeoutMs: timeoutMs ?? p4WaitBudgetMs(),
+      minTools: 1,
     });
   }
 
