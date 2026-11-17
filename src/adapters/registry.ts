@@ -6,6 +6,7 @@ import { MedusaAdapter } from "./medusa.adapter.js";
 import { UnimplementedAdapter } from "./base.js";
 import { NextcloudAdapter } from "./nextcloud.adapter.js";
 import { OutlineAdapter } from "./outline.adapter.js";
+import { PenpotAdapter } from "./penpot.adapter.js";
 import { TwentyAdapter } from "./twenty.adapter.js";
 import type { ProductAdapter } from "./types.js";
 
@@ -25,7 +26,8 @@ export function getAdapter(id: ProductId): ProductAdapter {
     case "outline":
       return new OutlineAdapter(loadProductConfig("outline"));
     case "penpot":
-      return new UnimplementedAdapter(id, loadProductConfig("penpot"));
+      return new PenpotAdapter(loadProductConfig("penpot"));
+    // Mattermost arrives in Task 6. Until then it fails loudly with NotImplementedError.
     case "mattermost":
       return new UnimplementedAdapter(id, loadProductConfig("mattermost"));
     default: {

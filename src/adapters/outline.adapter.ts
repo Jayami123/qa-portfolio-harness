@@ -24,7 +24,13 @@ import {
   parseAuthInfoEmail,
   parseOutlineSeedOutput,
 } from "./outline-seed.js";
-import { p4RunStateFile, readP4McpCredentials, removeP4RunState, writeP4RunState } from "./p4-run-state.js";
+import {
+  p4RunStateFile,
+  readP4McpCredentials,
+  removeP4RunState,
+  requireMcpAuthorization,
+  writeP4RunState,
+} from "./p4-run-state.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
 import type { McpReadiness } from "./types.js";
 
@@ -177,7 +183,7 @@ export class OutlineAdapter extends BaseAdapter<OutlineConfig> {
     return {
       product: this.id,
       baseUrl: this.cfg.baseUrl,
-      authorizationHeader: creds.mcpAuthorization,
+      authorizationHeader: requireMcpAuthorization(creds, "outline"),
       raw: { source: "run-state" },
     };
   }
@@ -199,7 +205,7 @@ export class OutlineAdapter extends BaseAdapter<OutlineConfig> {
     const creds = readP4McpCredentials("outline", this.mcpRunStateFile());
     const readiness = await mcpReadinessFor("outline", {
       url: creds.mcpUrl,
-      authorization: creds.mcpAuthorization,
+      authorization: requireMcpAuthorization(creds, "outline"),
       timeoutMs: timeoutMs ?? p4WaitBudgetMs(),
       minTools: 1,
     });

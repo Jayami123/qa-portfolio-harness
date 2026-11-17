@@ -17,11 +17,20 @@ export interface P4RunState {
   mcpUrl: string;
   /**
    * The full Authorization header value the MCP client sends, for example `Bearer <key>` or
-   * `Basic <base64(user:app-password)>`. The scheme depends on the product (see ADR 0006).
+   * `Basic <base64(user:app-password)>`. The scheme depends on the product (see ADR 0006). `null` means the MCP
+   * takes no credential: Penpot runs in single-user mode on loopback, and its plugin sends no token (spike, 2026-11-17).
    */
-  mcpAuthorization: string;
+  mcpAuthorization: string | null;
   /** Fake owner identity. No password is stored here. */
   owner: { username: string; email: string };
+}
+
+/** For products that always take a credential (Nextcloud, Outline, Mattermost): throws when the state has none. */
+export function requireMcpAuthorization(creds: { mcpAuthorization: string | null }, product: string): string {
+  if (creds.mcpAuthorization === null) {
+    throw new Error(`${P4_RUN_STATE_INVALID}: ${product} run state has no MCP credential (content not printed).`);
+  }
+  return creds.mcpAuthorization;
 }
 
 export function p4RunStateFile(product: string, harnessRoot: string = HARNESS_ROOT): string {
@@ -47,7 +56,7 @@ export function removeP4RunState(file: string): void {
 export function readP4McpCredentials(
   product: string,
   file: string = p4RunStateFile(product),
-): { mcpUrl: string; mcpAuthorization: string } {
+): { mcpUrl: string; mcpAuthorization: string | null } {
   let text: string;
   try {
     text = fs.readFileSync(file, "utf8");
@@ -68,8 +77,7 @@ export function readP4McpCredentials(
     parsed.product !== product ||
     typeof parsed.mcpUrl !== "string" ||
     !/^https?:\/\//.test(parsed.mcpUrl) ||
-    typeof parsed.mcpAuthorization !== "string" ||
-    parsed.mcpAuthorization.trim() === ""
+    !(parsed.mcpAuthorization === null || (typeof parsed.mcpAuthorization === "string" && parsed.mcpAuthorization.trim() !== ""))
   ) {
     throw new Error(`${P4_RUN_STATE_INVALID}: ${file} does not have the expected shape (content not printed).`);
   }

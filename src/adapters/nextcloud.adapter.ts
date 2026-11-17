@@ -19,7 +19,13 @@ import {
   parseNextcloudStatus,
 } from "./nextcloud-env.js";
 import { mcpReadinessFor } from "./mcp-ready.js";
-import { p4RunStateFile, readP4McpCredentials, removeP4RunState, writeP4RunState } from "./p4-run-state.js";
+import {
+  p4RunStateFile,
+  readP4McpCredentials,
+  removeP4RunState,
+  requireMcpAuthorization,
+  writeP4RunState,
+} from "./p4-run-state.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
 import type { McpReadiness } from "./types.js";
 
@@ -162,7 +168,7 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
     return {
       product: this.id,
       baseUrl: this.cfg.baseUrl,
-      authorizationHeader: creds.mcpAuthorization,
+      authorizationHeader: requireMcpAuthorization(creds, "nextcloud"),
       raw: { source: "run-state" },
     };
   }
@@ -185,7 +191,7 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
     const creds = readP4McpCredentials("nextcloud", this.mcpRunStateFile());
     const readiness = await mcpReadinessFor("nextcloud", {
       url: creds.mcpUrl,
-      authorization: creds.mcpAuthorization,
+      authorization: requireMcpAuthorization(creds, "nextcloud"),
       timeoutMs: timeoutMs ?? p4WaitBudgetMs(),
       minTools: 1,
     });

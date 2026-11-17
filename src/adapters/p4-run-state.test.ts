@@ -85,6 +85,12 @@ describe("p4 run state", () => {
     );
   });
 
+  it("accepts a null credential (Penpot single-user) and round-trips it", () => {
+    const file = p4RunStateFile("penpot", root);
+    writeP4RunState(file, state({ product: "penpot", mcpAuthorization: null }));
+    assert.equal(readP4McpCredentials("penpot", file).mcpAuthorization, null);
+  });
+
   it("rejects a state for another product, a non-http URL, or an empty credential", () => {
     const file = p4RunStateFile("outline", root);
     const cases: Partial<P4RunState>[] = [
