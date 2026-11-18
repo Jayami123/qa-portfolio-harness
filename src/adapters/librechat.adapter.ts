@@ -20,7 +20,6 @@ import {
   type LibreChatSecrets,
 } from "./librechat-env.js";
 import {
-  connectionStates,
   interestingLogLines,
   LIBRECHAT_APP_CONTAINER,
   mcpContainerFor,
@@ -30,15 +29,14 @@ import {
   serversFor,
 } from "./librechat-diag.js";
 import {
-  assertServersConnected,
   createOwnerArgs,
   librechatMcpEnv,
   librechatMongoUri,
   loginRequest,
   tokenFromLogin,
-  toolCountsByServer,
 } from "./librechat-seed.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
+import { waitForMcpServers } from "./librechat-mcp-wait.js";
 
 const POLL_MS = 2000;
 
@@ -197,24 +195,23 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
   async waitMcpProofs(timeoutMs?: number): Promise<Record<string, number>> {
     const names = [...this.cfg.mcpProducts];
     const token = await this.token();
-    const deadline = Date.now() + (timeoutMs ?? p4WaitBudgetMs());
-    let last = "no attempt";
-    let states: Record<string, string> = {};
-    while (Date.now() < deadline) {
-      try {
-        const status = await (await fetch(`${this.cfg.baseUrl}/api/mcp/connection/status`, { headers: { authorization: `Bearer ${token}` } })).json();
-        states = connectionStates(status, names);
-        assertServersConnected(status, names);
-        const tools = await (await fetch(`${this.cfg.baseUrl}/api/mcp/tools`, { headers: { authorization: `Bearer ${token}` } })).json();
-        return toolCountsByServer(tools, names);
-      } catch (err) {
-        last = err instanceof Error ? err.message.slice(0, 160) : "unknown";
-      }
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-    }
-    this.diagnoseMcp(names, states);
-    const summary = names.map((n) => `${n}=${states[n] ?? "unknown"}`).join(", ");
-    throw new Error(`Timed out waiting for LibreChat MCP servers (last: ${last}). Connection states: ${summary}`);
+    const get = async (path: string): Promise<unknown> => {
+      const r = await fetch(`${this.cfg.baseUrl}${path}`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      return r.json();
+    };
+    return waitForMcpServers(
+      {
+        openTools: () => get("/api/mcp/tools"),
+        readStatus: () => get("/api/mcp/connection/status"),
+        onTimeout: (states) => this.diagnoseMcp(names, states),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        now: () => Date.now(),
+      },
+      { names, timeoutMs: timeoutMs ?? p4WaitBudgetMs(), pollMs: POLL_MS, reopenMs: 15000 },
+    );
   }
 
   /**
