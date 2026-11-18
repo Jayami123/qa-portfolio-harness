@@ -11,7 +11,67 @@ import {
   parseP4LlmMode,
 } from "./litellm-env.js";
 
+type LiteLlmParams = Record<string, string | number>;
+interface LiteLlmModel {
+  model_name: string;
+  litellm_params: LiteLlmParams;
+}
+
+/** Reads the model_list entries of the generated config. Comments are skipped; values are numbers or unquoted strings. */
+function parseLiteLlmModelList(yaml: string): LiteLlmModel[] {
+  const models: LiteLlmModel[] = [];
+  let current: LiteLlmModel | undefined;
+  for (const line of yaml.split("\n")) {
+    if (line.trimStart().startsWith("#")) continue;
+    const head = /^ {2}- model_name: (\S+)$/.exec(line);
+    if (head?.[1] !== undefined) {
+      current = { model_name: head[1], litellm_params: {} };
+      models.push(current);
+      continue;
+    }
+    if (/^\S/.test(line)) {
+      current = undefined;
+      continue;
+    }
+    const param = /^ {6}([a-z_]+): (.+)$/.exec(line);
+    if (current !== undefined && param?.[1] !== undefined && param[2] !== undefined) {
+      const raw = param[2].replace(/^"(.*)"$/, "$1");
+      current.litellm_params[param[1]] = /^\d+$/.test(raw) ? Number(raw) : raw;
+    }
+  }
+  return models;
+}
+
 describe("litellm-env (ADR 0007, D13 to D15)", () => {
+  it("parses the generated model_list: p4-nightly carries rpm 30, tpm 16000 and num_retries, with no fallbacks", () => {
+    const yaml = liteLlmConfigYaml();
+    const models = parseLiteLlmModelList(yaml);
+    assert.deepEqual(
+      models.map((m) => m.model_name),
+      ["p4-stub", "p4-nightly"],
+    );
+
+    const nightly = models.find((m) => m.model_name === "p4-nightly")?.litellm_params;
+    assert.ok(nightly, "p4-nightly is in model_list");
+    assert.equal(nightly.model, "gemini/gemma-4-31b-it");
+    assert.equal(nightly.rpm, 30);
+    assert.equal(nightly.tpm, 16000);
+    assert.equal(typeof nightly.num_retries, "number");
+    assert.ok((nightly.num_retries as number) > 0, "num_retries is a positive count");
+    assert.equal(nightly.fallbacks, undefined, "p4-nightly has no fallbacks key");
+
+    const uncommented = yaml
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    assert.doesNotMatch(uncommented, /fallback/i, "no fallback anywhere in the config");
+  });
+
+  it("leaves p4-stub unchanged: no rate limits and no retries", () => {
+    const stub = parseLiteLlmModelList(liteLlmConfigYaml()).find((m) => m.model_name === "p4-stub")?.litellm_params;
+    assert.deepEqual(stub, { model: "openai/stub-upstream-model", mock_response: "stub-ok" });
+  });
+
   it("pins the image by digest, not by a moving tag", () => {
     assert.match(LITELLM_IMAGE, /^ghcr\.io\/berriai\/litellm:v1\.110\.0@sha256:[0-9a-f]{64}$/);
   });
