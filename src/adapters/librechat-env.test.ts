@@ -51,7 +51,8 @@ describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
 
   it("writes the pinned config version, the allowlist, five servers and the LiteLLM endpoint", () => {
     const y = librechatYaml({ defaultModel: "p4-stub", servers: FIVE.map(librechatMcpServerFor) });
-    assert.match(y, new RegExp(`^version: ${LIBRECHAT_CONFIG_VERSION.replace(/\./g, "\\.")}$`, "m"));
+    assert.equal(LIBRECHAT_CONFIG_VERSION, "1.3.13");
+    assert.match(y, /^version: 1\.3\.13$/m);
     assert.match(y, /allowedDomains:\n {4}- "nextcloud-mcp"/);
     assert.equal((y.match(/type: streamable-http/g) ?? []).length, 5);
     assert.match(y, /baseURL: "http:\/\/litellm:4000\/v1"/);
