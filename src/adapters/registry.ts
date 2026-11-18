@@ -9,6 +9,7 @@ import { OutlineAdapter } from "./outline.adapter.js";
 import { PenpotAdapter } from "./penpot.adapter.js";
 import { TwentyAdapter } from "./twenty.adapter.js";
 import { notImplemented } from "../errors.js";
+import { LibreChatAdapter } from "./librechat.adapter.js";
 import { LiteLlmAdapter } from "./litellm.adapter.js";
 import type { ProductAdapter } from "./types.js";
 
@@ -34,7 +35,7 @@ export function getAdapter(id: ProductId): ProductAdapter {
     case "litellm":
       return new LiteLlmAdapter(loadProductConfig("litellm"));
     case "librechat":
-      return notImplemented(id, "getAdapter", "the LibreChat adapter lands in task 4");
+      return new LibreChatAdapter(loadProductConfig("librechat"));
     case "openclaw":
       return notImplemented(id, "getAdapter", "the OpenClaw adapter lands in task 5");
     default: {
