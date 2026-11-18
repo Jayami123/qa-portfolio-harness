@@ -41,10 +41,14 @@ export function librechatMcpEnv(
   return { servers, env };
 }
 
-/** Arguments for `npm run create-user` in the app container. Non-interactive: all four values and the verified flag. */
+/**
+ * Arguments for `npm run create-user` in the app container. Non-interactive: all four values and the verified flag.
+ * The caller runs this through runCapture with the password redacted, so no log line carries it.
+ */
 export function createOwnerArgs(password: string): string[] {
   return [
     "run",
+    "--silent", // npm does not echo the command, so the password is not echoed by npm
     "create-user",
     "--",
     LIBRECHAT_OWNER_EMAIL,

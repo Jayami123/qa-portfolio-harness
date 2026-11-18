@@ -1,9 +1,10 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { LibreChatConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
 import { ensureP4Network } from "../internal/p4-network.js";
-import { run } from "../internal/run.js";
+import { runCapture } from "../internal/run.js";
 import { HARNESS_DOCKER_DIR } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
@@ -19,6 +20,16 @@ import {
   type LibreChatSecrets,
 } from "./librechat-env.js";
 import {
+  connectionStates,
+  interestingLogLines,
+  LIBRECHAT_APP_CONTAINER,
+  mcpContainerFor,
+  probeArgs,
+  redactionValues,
+  redactText,
+  serversFor,
+} from "./librechat-diag.js";
+import {
   assertServersConnected,
   createOwnerArgs,
   librechatMcpEnv,
@@ -29,14 +40,12 @@ import {
 } from "./librechat-seed.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
 
-/** The app container name compose gives this project (project-service-1). */
-const APP_CONTAINER = "qa-harness-librechat-app-1";
 const POLL_MS = 2000;
 
 /**
  * LibreChat chat host (ADR 0007). It boots against LiteLLM by alias and attaches the Part A MCP servers by alias.
  * B1 proves health, the seeded login, and that each configured MCP server is connected and lists tools (review answers
- * 0.6 and 0.7).
+ * 0.6 and 0.7). On a timeout it prints redacted diagnostics before it throws.
  */
 export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
   readonly id = "librechat" as const;
@@ -58,7 +67,7 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
   }
 
   /** Reads the saved secrets, or creates them (mode 0600). Creates nothing on down. */
-  private secrets(create: boolean): LibreChatSecrets & { ownerPassword: string } {
+  private secrets(create: boolean): LibreChatSecrets {
     if (fs.existsSync(this.secretsFile())) {
       try {
         const parsed = JSON.parse(fs.readFileSync(this.secretsFile(), "utf8")) as Partial<LibreChatSecrets>;
@@ -94,6 +103,7 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
   }
 
   async up(): Promise<void> {
+    // The compose file declares qa-harness-p4 as external, so it must exist before any compose call.
     await ensureP4Network();
     const liteLlm = readLlmRunState("litellm", llmRunStateFile("litellm")); // throws P4_RUN_STATE_MISSING if LiteLLM is down
     const secrets = this.secrets(true);
@@ -128,7 +138,7 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     );
   }
 
-  /** Removes containers only. It never creates secrets (review answer 0.6 reading of the earlier rule). */
+  /** Removes containers only. It never creates secrets. */
   async down(): Promise<void> {
     await composeDown(this.composeOpts("unused-on-down"), ["--remove-orphans"]);
   }
@@ -157,7 +167,11 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     throw new Error(`Timed out waiting for ${this.cfg.baseUrl}/health and /api/config to be ready (last: ${last})`);
   }
 
-  /** Creates the fake owner once. If the login already works, nothing is created (idempotent on a kept volume). */
+  /**
+   * Creates the fake owner once. If the login already works, nothing is created (idempotent on a kept volume).
+   * create-user takes the password as an argument. It runs through runCapture with the password redacted, so neither
+   * npm's output nor a thrown error carries it. npm runs with --silent, so it does not echo the command.
+   */
   async seed(): Promise<SeedResult> {
     const secrets = this.secrets(true);
     const probe = loginRequest(this.cfg.baseUrl, LIBRECHAT_OWNER_EMAIL, secrets.ownerPassword);
@@ -165,7 +179,10 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     if (existing.status === 200) {
       return { product: this.id, created: false, users: [{ email: LIBRECHAT_OWNER_EMAIL, role: "owner" }], notes: "Owner already present. Login works." };
     }
-    await run("docker", ["exec", APP_CONTAINER, "npm", ...createOwnerArgs(secrets.ownerPassword)], { cwd: HARNESS_DOCKER_DIR });
+    await runCapture("docker", ["exec", LIBRECHAT_APP_CONTAINER, "npm", ...createOwnerArgs(secrets.ownerPassword)], {
+      cwd: HARNESS_DOCKER_DIR,
+      redact: [secrets.ownerPassword],
+    });
     const again = await fetch(probe.url, probe.init);
     if (again.status !== 200) {
       throw new Error(`LIBRECHAT_LOGIN_FAILED: the seeded owner cannot log in (HTTP ${again.status})`);
@@ -173,15 +190,20 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     return { product: this.id, created: true, users: [{ email: LIBRECHAT_OWNER_EMAIL, role: "owner" }], notes: "Owner created with create-user. Password in secrets.json (mode 0600)." };
   }
 
-  /** Logs in, then polls the supported MCP routes until every configured server is connected and lists tools. */
+  /**
+   * Logs in, then polls the supported MCP routes until every configured server is connected and lists tools. On timeout it
+   * prints every server's state and redacted diagnostics, then throws. The error names each state, never a value.
+   */
   async waitMcpProofs(timeoutMs?: number): Promise<Record<string, number>> {
     const names = [...this.cfg.mcpProducts];
     const token = await this.token();
     const deadline = Date.now() + (timeoutMs ?? p4WaitBudgetMs());
     let last = "no attempt";
+    let states: Record<string, string> = {};
     while (Date.now() < deadline) {
       try {
         const status = await (await fetch(`${this.cfg.baseUrl}/api/mcp/connection/status`, { headers: { authorization: `Bearer ${token}` } })).json();
+        states = connectionStates(status, names);
         assertServersConnected(status, names);
         const tools = await (await fetch(`${this.cfg.baseUrl}/api/mcp/tools`, { headers: { authorization: `Bearer ${token}` } })).json();
         return toolCountsByServer(tools, names);
@@ -190,7 +212,47 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
       }
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
-    throw new Error(`Timed out waiting for LibreChat MCP servers (last: ${last})`);
+    this.diagnoseMcp(names, states);
+    const summary = names.map((n) => `${n}=${states[n] ?? "unknown"}`).join(", ");
+    throw new Error(`Timed out waiting for LibreChat MCP servers (last: ${last}). Connection states: ${summary}`);
+  }
+
+  /**
+   * Redacted diagnostics for a failed MCP wait: every state, LibreChat's MCP and allow-list lines, the tail of each failing
+   * MCP container's log, and a probe run inside the LibreChat container (DNS address and HTTP status per server). Only
+   * names, addresses, statuses and log lines are printed. Every line is redacted with the env-file values and the secrets.
+   */
+  private diagnoseMcp(names: string[], states: Record<string, string>): void {
+    const envText = fs.existsSync(this.envFile()) ? fs.readFileSync(this.envFile(), "utf8") : "";
+    const secrets = fs.existsSync(this.secretsFile()) ? (JSON.parse(fs.readFileSync(this.secretsFile(), "utf8")) as Record<string, unknown>) : {};
+    const values = redactionValues(envText, secrets);
+    const print = (text: string): void => {
+      for (const line of redactText(text, values).split("\n")) {
+        if (line.trim() !== "") console.log(`  ${line}`);
+      }
+    };
+
+    console.log("LibreChat MCP diagnostics (every value redacted; no header is printed):");
+    for (const name of names) {
+      console.log(`  state ${name}: ${states[name] ?? "no status reported"}`);
+    }
+
+    const app = spawnSync("docker", ["logs", "--tail", "400", LIBRECHAT_APP_CONTAINER], { encoding: "utf8" });
+    console.log(`LibreChat log lines about MCP, allow lists and errors (${LIBRECHAT_APP_CONTAINER}):`);
+    print(interestingLogLines(`${app.stdout}\n${app.stderr}`).join("\n"));
+
+    for (const name of names) {
+      if (states[name] === "connected") continue;
+      const container = mcpContainerFor(name);
+      if (container === undefined) continue;
+      const mcp = spawnSync("docker", ["logs", "--tail", "40", container], { encoding: "utf8" });
+      console.log(`last lines of ${container} (${name}):`);
+      print(`${mcp.stdout}\n${mcp.stderr}`);
+    }
+
+    const probe = spawnSync("docker", probeArgs(serversFor(names)), { encoding: "utf8", timeout: 60000 });
+    console.log("in-container probe (name, DNS address, HTTP status; no header value):");
+    print(`${probe.stdout}\n${probe.stderr}`);
   }
 
   private async token(): Promise<string> {

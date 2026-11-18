@@ -57,7 +57,7 @@ describe("librechat-seed (review answers 0.1, 0.6, 0.7)", () => {
 
   it("builds non-interactive create-user arguments with the verified flag and the fake owner", () => {
     const args = createOwnerArgs("pw-1");
-    assert.deepEqual(args.slice(0, 3), ["run", "create-user", "--"]);
+    assert.deepEqual(args.slice(0, 4), ["run", "--silent", "create-user", "--"]);
     assert.ok(args.includes("qa-owner@p4.test"));
     assert.ok(args.includes("--email-verified=true"));
   });
