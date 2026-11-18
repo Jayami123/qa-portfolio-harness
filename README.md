@@ -490,6 +490,8 @@ bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty   # writ
 
 **Agent hosts (ADR 0007, P4 part B1).** `litellm`, `librechat` and `openclaw` are image-only adapters, pinned by digest. They join the external network `qa-harness-p4` by alias and publish on `127.0.0.1` only. They run in **stub mode** (`P4_LLM_MODE=stub`, the default): the `p4-stub` alias answers from `mock_response` and nothing calls Gemma. Start them after the MCP products: `npm run up -- litellm`, then `npm run up -- librechat` and `npm run up -- openclaw`. Stop them in reverse order. `GEMINI_API_KEY` is read only in `nightly` mode and is not needed here. Linux only: the stack needs Docker, not Docker Desktop host networking.
 
+Optional agent-host primitives (v0.6.2, all off by default): `P4_STUB_API_BASE` routes `p4-stub` to an OpenAI-compatible stub and forwards `X-P4-Fixture`; `LIBRECHAT_MODELS` sets LibreChat's model list (`p4-nightly` only with `P4_LLM_MODE=nightly`; LibreChat never gets the Gemini key); `OPENCLAW_RESPONSES_API=1` enables `POST /v1/responses` so `getAdapter("openclaw").runTask(task, { tools })` returns the tool-call trace.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.
