@@ -1,0 +1,104 @@
+# Harness-owned Penpot stack (ADR 0006). The database password and the shared secret are generated per run by the
+# adapter and passed through the environment. Nothing secret is written in this file.
+#
+#   node scripts/up.mjs penpot   (starts the stack, creates the fake owner, waits for the MCP tools)
+name: qa-harness-penpot
+
+x-penpot-flags: &penpot-flags "enable-login-with-password disable-registration disable-email-verification disable-onboarding-questions disable-admin-console enable-prepl-server"
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
+    environment:
+      POSTGRES_DB: penpot
+      POSTGRES_USER: penpot
+      POSTGRES_PASSWORD: ${PENPOT_DB_PASSWORD:?set by the adapter}
+    ports:
+      - "127.0.0.1:5462:5432"
+    volumes:
+      - penpot_harness_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penpot -d penpot"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  valkey:
+    image: valkey/valkey:8-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  mail:
+    image: axllent/mailpit:v1.22.3@sha256:f7f7c31de4de59540ad6515a0ca057a77525bca2069b6e747d873ca66c10fe08
+    ports:
+      - "127.0.0.1:8028:8025"
+
+  backend:
+    image: penpotapp/backend:2.19.2@sha256:b6c602504ca48ec99a25f6a5463c9aa4f4728ac9ed69e7d5d183fb4f779f5e4e
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      PENPOT_FLAGS: *penpot-flags
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set by the adapter}
+      PENPOT_PUBLIC_URI: http://127.0.0.1:9001
+      PENPOT_DATABASE_URI: postgresql://postgres/penpot
+      PENPOT_DATABASE_USERNAME: penpot
+      PENPOT_DATABASE_PASSWORD: ${PENPOT_DB_PASSWORD:?set by the adapter}
+      PENPOT_REDIS_URI: redis://valkey/0
+      PENPOT_ASSETS_STORAGE_BACKEND: assets-fs
+      PENPOT_STORAGE_ASSETS_FS_DIRECTORY: /opt/data/assets
+      PENPOT_TELEMETRY_ENABLED: "false"
+      PENPOT_SMTP_DEFAULT_FROM: penpot@p4.test
+      PENPOT_SMTP_DEFAULT_REPLY_TO: penpot@p4.test
+      PENPOT_SMTP_HOST: mail
+      PENPOT_SMTP_PORT: "1025"
+      PENPOT_SMTP_SSL: "false"
+      PENPOT_SMTP_TLS: "false"
+      JAVA_OPTS: "-Xmx1g"
+    volumes:
+      - penpot_harness_data:/opt/data
+
+  exporter:
+    image: penpotapp/exporter:2.19.2@sha256:60fdaddd4de2492e5fc5d21419a268374af83b5501c09b167cd2513d2c3e29d7
+    depends_on:
+      valkey:
+        condition: service_healthy
+    environment:
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:?set by the adapter}
+      PENPOT_PUBLIC_URI: http://frontend:8080
+      PENPOT_REDIS_URI: redis://valkey/0
+
+  frontend:
+    image: penpotapp/frontend:2.19.2@sha256:27af83e128712c6e621afcbc4dbae5a607204f7acc89a9ae1245b5601b4a66a8
+    depends_on:
+      - backend
+      - exporter
+    ports:
+      - "127.0.0.1:9001:8080"
+    environment:
+      PENPOT_FLAGS: *penpot-flags
+      PENPOT_BACKEND_URI: http://backend:6060
+      PENPOT_EXPORTER_URI: http://exporter:6061
+      # This host's kernel has no IPv6 sockets; the image's default [::] listener would fail. Harmless on CI runners.
+      PENPOT_DISABLE_IPV6_LISTEN: "true"
+    volumes:
+      - ./penpot-mcp-ws.conf:/etc/nginx/overrides/server.d/penpot-mcp-ws.conf:ro
+
+  mcp:
+    image: penpotapp/mcp:2.19.2@sha256:94c6672072a1fbbdb5ff577375e96d3f67b3a67ecdcd8f81498c5ec27eba36f3
+    # Single-user mode (no --multi-user). The plugin UI sends no user token, so single-user is what connects.
+    # Both ports stay on loopback.
+    command: ["node", "index.js"]
+    ports:
+      - "127.0.0.1:4401:4401"
+      - "127.0.0.1:4402:4402"
+
+volumes:
+  penpot_harness_pg: {}
+  penpot_harness_data: {}

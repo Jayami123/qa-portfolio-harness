@@ -17,3 +17,6 @@ Thumbs.db
 
 # Product forks cloned by scripts/cloud-install.sh when PRODUCTS_ROOT points inside the repo
 /products/
+
+# RAM probe output (scripts/p4-ram-probe.sh). CI uploads ram-probe.json as an artifact; it is never committed.
+/evidence/
