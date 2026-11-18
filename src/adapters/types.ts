@@ -1,3 +1,4 @@
+import type { OpenClawClientTool, OpenClawRunResult } from "./openclaw-seed.js";
 import type { AuthSession, HealthStatus, ProductId, SeedResult } from "../types.js";
 
 /** Result of a real MCP handshake: initialize, notifications/initialized, tools/list. Names only, never schemas or tokens. */
@@ -29,4 +30,12 @@ export interface ProductAdapter {
   waitMcp?(timeoutMs?: number): Promise<McpReadiness>;
   /** P4 (D4): absolute path of the run-state file that holds the MCP credential. */
   mcpRunStateFile?(): string;
+  /**
+   * P4 (OpenClaw only): headless agent run through POST /v1/responses. Sends one task and returns the tool-call trace.
+   * Needs OPENCLAW_RESPONSES_API=1 when `up` writes the gateway config.
+   */
+  runTask?(
+    task: string,
+    opts?: { tools?: OpenClawClientTool[]; requireTool?: boolean; timeoutMs?: number },
+  ): Promise<OpenClawRunResult>;
 }

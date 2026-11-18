@@ -8,6 +8,7 @@ import {
   openClawComposeFiles,
   openClawConfig,
   openClawEnvText,
+  parseOpenClawResponsesFlag,
 } from "./openclaw-env.js";
 
 describe("openclaw-env (ADR 0007, D18, D19; review answer 0.5)", () => {
@@ -59,5 +60,29 @@ describe("openclaw-env (ADR 0007, D18, D19; review answer 0.5)", () => {
 
   it("lists one compose file", () => {
     assert.equal(openClawComposeFiles().length, 1);
+  });
+
+  it("enables POST /v1/responses only when asked, and keeps the default config unchanged", () => {
+    const off = openClawConfig() as Record<string, any>;
+    assert.equal(off.gateway.http, undefined);
+    assert.deepEqual(openClawConfig({ responsesApi: false }), openClawConfig());
+    const on = openClawConfig({ responsesApi: true }) as Record<string, any>;
+    assert.deepEqual(on.gateway.http, { endpoints: { responses: { enabled: true } } });
+    assert.equal(on.gateway.auth.mode, "token", "token auth stays on");
+    assert.equal(on.tools.exec.ask, "always", "approvals stay on");
+    assert.equal(on.gateway.bind, "lan");
+  });
+
+  it("parses OPENCLAW_RESPONSES_API: blank is off, exactly 1 is on, anything else throws", () => {
+    assert.equal(parseOpenClawResponsesFlag(undefined), false);
+    assert.equal(parseOpenClawResponsesFlag(" "), false);
+    assert.equal(parseOpenClawResponsesFlag("1"), true);
+    for (const bad of ["0", "true", "yes"]) {
+      assert.throws(() => parseOpenClawResponsesFlag(bad), (err: Error) => {
+        assert.match(err.message, /OPENCLAW_RESPONSES_API_INVALID/);
+        assert.doesNotMatch(err.message, new RegExp(`"${bad}"`));
+        return true;
+      });
+    }
   });
 });
