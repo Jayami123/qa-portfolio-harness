@@ -2,17 +2,15 @@
 
 ## Unreleased
 
-- P4 agent hosts (LiteLLM, LibreChat, OpenClaw): harness adapters, pins, a shared `qa-harness-p4` network, and an advisory CI job (ADR 0007).
+## [0.6.1] - 2026-11-18
 
+- LiteLLM (P4): the `p4-nightly` entry (`gemini/gemma-4-31b-it`) gets `rpm: 30`, `tpm: 16000` and `num_retries: 3`. `tpm` is unverified: Google's AI Studio rate-limits page publishes no Gemma free-tier tpm figure, and 16000 comes from the suite plan. `rpm` is the owner's setting. `p4-stub` and the fallback-free config are unchanged.
+- P4 agent hosts (LiteLLM, LibreChat, OpenClaw): harness adapters, pins, a shared `qa-harness-p4` network, and an advisory CI job (ADR 0007).
 - P4: four image-only adapters, `nextcloud`, `outline`, `penpot` and `mattermost`, added to `ProductId`, `getAdapter` and `scripts/up.mjs` / `down.mjs`. Each starts a pinned, digest-pinned compose stack (`docker/<product>.compose.yml`), waits for app health and for a real MCP `initialize` + `tools/list`, and writes one fake owner's MCP credential to `.harness/<product>-run.json` (mode 0600, removed by `down`). See ADR 0006 and `docs/pins/p4.md`.
 - P4 licences recorded in ADR 0006: Outline is BSL 1.1 (accepted for local QA use); the Mattermost MCP binary is development-only upstream and is built from a pinned commit of `mattermost/mattermost-plugin-agents` (Apache-2.0).
 - Twenty: opt-in `TWENTY_MCP=1` (exact value) mints a least-privilege API key through the loginToken exchange and waits for `/mcp`. With it unset, nothing changes. The Twenty compose file and every Twenty default are unchanged.
 - P4 readiness and memory: `scripts/ready.mjs` and `scripts/p4-ram-probe.sh` (writes `evidence/ram-probe.json`, budget 14 GiB, committed in `src/adapters/p4-ram.ts`). CI job `P4 adapters` is advisory.
 - Config: `ProductId` is now `ForkProductId | P4ProductId`. `loadConfig()` still returns exactly the four fork products. `loadProductConfig` accepts the P4 ids. `ProductAdapter` gains the optional `waitMcp()` and `mcpRunStateFile()`.
-
-## [0.6.1] - 2026-11-18
-
-- LiteLLM (P4): the `p4-nightly` entry (`gemini/gemma-4-31b-it`) gets `rpm: 30`, `tpm: 16000` and `num_retries: 3`. `tpm` is unverified: Google's AI Studio rate-limits page publishes no Gemma free-tier tpm figure, and 16000 comes from the suite plan. `rpm` is the owner's setting. `p4-stub` and the fallback-free config are unchanged.
 
 ## [0.5.1] - 2026-11-13
 
