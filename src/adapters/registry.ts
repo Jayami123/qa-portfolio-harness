@@ -3,7 +3,6 @@ import type { ProductId } from "../types.js";
 import { CalAdapter } from "./cal.adapter.js";
 import { DocumensoAdapter } from "./documenso.adapter.js";
 import { MedusaAdapter } from "./medusa.adapter.js";
-import { UnimplementedAdapter } from "./base.js";
 import { NextcloudAdapter } from "./nextcloud.adapter.js";
 import { MattermostAdapter } from "./mattermost.adapter.js";
 import { OutlineAdapter } from "./outline.adapter.js";
@@ -23,7 +22,6 @@ export function getAdapter(id: ProductId): ProductAdapter {
       return new TwentyAdapter(loadProductConfig("twenty"));
     case "nextcloud":
       return new NextcloudAdapter(loadProductConfig("nextcloud"));
-    // Outline, Penpot and Mattermost arrive in Tasks 4 to 6. Until then they fail loudly with NotImplementedError.
     case "outline":
       return new OutlineAdapter(loadProductConfig("outline"));
     case "penpot":
