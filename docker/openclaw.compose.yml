@@ -1,0 +1,32 @@
+# OpenClaw gateway (ADR 0007, review answers 0.1, 0.3, 0.5). The gateway binds lan inside its container (see the config
+# in src/adapters/openclaw-env.ts). The host publish is 127.0.0.1 only. The state and the placeholder-only config live
+# in a named volume the adapter writes first. Secrets come from the env file, which is outside the volume.
+#
+#   node scripts/up.mjs openclaw   (run `up litellm` first)
+name: qa-harness-openclaw
+
+services:
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:2026.10.33-slim@sha256:dcd5925b76a2f3b6ac55e173741223a7ab1fe6b3b1c53c419ee2e3d3cbdcf503
+    env_file:
+      - ${OPENCLAW_ENV_FILE:?set by the adapter}
+    environment:
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+    volumes:
+      - qa-harness-openclaw-state:/home/node/.openclaw
+    ports:
+      - "127.0.0.1:18789:18789"
+    networks:
+      default: {}
+      p4:
+        aliases:
+          - openclaw
+
+volumes:
+  qa-harness-openclaw-state:
+    name: qa-harness-openclaw-state
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4
