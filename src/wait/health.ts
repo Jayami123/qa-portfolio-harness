@@ -1,4 +1,5 @@
 import type { HealthStatus } from "../types.js";
+import { failIfContainerExited, type DockerRunner } from "./readiness-diagnostics.js";
 import { describeFetchFailure } from "./readiness-error.js";
 
 const DEFAULT_INTERVAL_MS = 2000;
@@ -16,6 +17,10 @@ export interface PollHealthOptions {
   isOk?: (statusCode: number) => boolean;
   /** Also try the localhost/127.0.0.1 twin of the URL. Default true. */
   alternateLoopback?: boolean;
+  /** App container to check on each poll. When it has exited, the wait throws at once instead of running out the timeout. */
+  container?: string;
+  /** Docker call used for the container check. Tests pass a stub. */
+  docker?: DockerRunner;
 }
 
 interface ProbeOptions {
@@ -86,7 +91,7 @@ async function getOnce(url: string, probe: ProbeOptions): Promise<HealthStatus> 
 
 /**
  * Poll GET `url` every 2s until the status is healthy (default: < 500) or timeout.
- * Returns the last status / error. Does not throw.
+ * Returns the last status / error. Does not throw, except ContainerExitedError when `container` is set and has exited.
  */
 export async function pollHealth(url: string, options: PollHealthOptions = {}): Promise<HealthStatus> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -104,6 +109,9 @@ export async function pollHealth(url: string, options: PollHealthOptions = {}): 
   const deadline = Date.now() + timeoutMs;
 
   while (!last.ok && Date.now() < deadline) {
+    if (options.container !== undefined) {
+      failIfContainerExited(options.container, url, options.docker);
+    }
     const remaining = deadline - Date.now();
     await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, Math.max(remaining, 0))));
     last = await getOnce(url, probe);

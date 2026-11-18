@@ -49,6 +49,7 @@ import {
 import type { McpReadiness } from "./types.js";
 
 const COMPOSE_PROJECT = "qa-harness-twenty";
+const TWENTY_SERVER_CONTAINER = `${COMPOSE_PROJECT}-server-1`;
 const DEFAULT_WAIT_MS = 10 * 60 * 1000;
 const MIN_WAIT_MS = 120_000;
 
@@ -233,6 +234,7 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     await waitUntilHealthy(this.healthUrl(), {
       timeoutMs: timeoutMs ?? this.waitBudgetMs(),
       isOk: isTwentyHealthyStatus,
+      container: TWENTY_SERVER_CONTAINER,
     });
   }
 

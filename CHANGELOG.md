@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Readiness: a wait now fails fast, with the container name, exit code and OOMKilled, as soon as the app container has exited (Nextcloud and Twenty, via `failIfContainerExited` / the `container` option of `waitUntilHealthy`). On failure the harness prints `docker logs --tail 200` and `docker inspect` ExitCode and OOMKilled, with secret-looking values redacted.
+
 ## [0.6.1] - 2026-11-18
 
 - LiteLLM (P4): the `p4-nightly` entry (`gemini/gemma-4-31b-it`) gets `rpm: 30`, `tpm: 16000` and `num_retries: 3`. `tpm` is unverified: Google's AI Studio rate-limits page publishes no Gemma free-tier tpm figure, and 16000 comes from the suite plan. `rpm` is the owner's setting. `p4-stub` and the fallback-free config are unchanged.
