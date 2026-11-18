@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## [0.6.3] - 2026-11-18
+
+- OpenClaw (P4): with `OPENCLAW_RESPONSES_API=1` the gateway config now also writes `tools.toolSearch: false`. Tool Search is on by default for embedded runs and defers tool schemas behind `tool_search` / `dispatch_action`; the pinned docs say "Set `tools.toolSearch: false` to restore direct schemas" (`docs/tools/tool-search.md` at `2026.10.33`). With the flag unset, the config is byte-identical to 0.6.2.
+
 ## [0.6.2] - 2026-11-18
 
 - LiteLLM (P4): optional `P4_STUB_API_BASE`. When set (an `http(s)` URL with no credentials, query or fragment), `p4-stub` routes to that OpenAI-compatible stub through `api_base` instead of `mock_response`, and the proxy forwards the client's `x-` headers (`forward_client_headers_to_llm_api`), so `X-P4-Fixture` reaches the stub. When unset, the config is byte-identical to 0.6.1. With it set, the readiness ping to `p4-stub` is skipped, because the stub needs a fixture header the harness cannot choose. The LiteLLM compose file maps `host.docker.internal` to the host gateway (nothing new is published; the port stays on `127.0.0.1`). A stub on the host must listen on an address the Docker bridge can reach, or run as a container on `qa-harness-p4`.
