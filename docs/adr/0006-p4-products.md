@@ -80,3 +80,8 @@ role. The owner, a system admin, is used only for setup.
 - Each product bump is a deliberate edit to `docs/pins/p4.md` and the matching constants; the pin test fails otherwise.
 - The sandbox proxy needs `MATTERMOST_EXTRA_CA_FILE` for the Mattermost MCP build. CI does not set it.
 - If the RAM probe does not fit the budget, the split in plan section 10 applies, and a second ADR (`0007`) records it.
+
+## Addendum (2026-11-18): the split ADR number
+
+The consequence above that says "a second ADR (`0007`) records it" is retargeted. `0007` now records the agent hosts
+(`docs/adr/0007-p4-agent-hosts.md`). A measured stack split, if adopted, is recorded as `docs/adr/0008-p4-stack-split.md`.

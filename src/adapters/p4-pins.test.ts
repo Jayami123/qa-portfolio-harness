@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { LIBRECHAT_IMAGE, LIBRECHAT_MONGO_IMAGE } from "./librechat-env.js";
+import { LITELLM_IMAGE } from "./litellm-env.js";
+import { OPENCLAW_IMAGE } from "./openclaw-env.js";
 import { MATTERMOST_IMAGE, MATTERMOST_MM_AGENTS_COMMIT } from "./mattermost-env.js";
 import { NEXTCLOUD_IMAGE, NEXTCLOUD_MCP_IMAGE } from "./nextcloud-env.js";
 import { OUTLINE_API_KEY_PREFIX } from "./outline-env.js";
@@ -15,6 +18,9 @@ const COMPOSE_FILES = [
   "docker/outline.compose.yml",
   "docker/penpot.compose.yml",
   "docker/mattermost.compose.yml",
+  "docker/litellm.compose.yml",
+  "docker/librechat.compose.yml",
+  "docker/openclaw.compose.yml",
 ];
 const DOCKERFILE = "docker/mattermost-mcp.Dockerfile";
 
@@ -76,6 +82,10 @@ describe("P4 pins (docs/pins/p4.md is the source of truth)", () => {
       PENPOT_EXPORTER_IMAGE,
       PENPOT_MCP_IMAGE,
       MATTERMOST_IMAGE,
+      LITELLM_IMAGE,
+      LIBRECHAT_IMAGE,
+      LIBRECHAT_MONGO_IMAGE,
+      OPENCLAW_IMAGE,
     ]) {
       assert.ok(compose.includes(pin), `pin constant ${pin} is not in the compose files`);
     }
@@ -93,5 +103,15 @@ describe("P4 pins (docs/pins/p4.md is the source of truth)", () => {
 
   it("the Twenty compose file still uses the tag-only pin (not changed by P4)", () => {
     assert.ok(read("docker/twenty.compose.yml").includes("twentycrm/twenty:${TAG:-v2.44.0}"));
+  });
+});
+
+describe("agent-host pins (ADR 0007, D18)", () => {
+  it("no agent-host compose file uses a moving tag", () => {
+    for (const file of ["docker/litellm.compose.yml", "docker/librechat.compose.yml", "docker/openclaw.compose.yml"]) {
+      for (const ref of imageRefs(read(file))) {
+        assert.doesNotMatch(ref, /:(latest|main|main-slim)[@:]/, `${file}: ${ref} uses a moving tag`);
+      }
+    }
   });
 });
