@@ -6,7 +6,8 @@ import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-e
 import { assertMedusaSecondBaseUrl } from "./adapters/medusa-env.js";
 import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
 import { HARNESS_ROOT } from "./paths.js";
-import { isForkProductId, type ProductId } from "./types.js";
+import { parseP4LlmMode } from "./adapters/litellm-env.js";
+import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
 
@@ -123,6 +124,15 @@ const envSchema = z.object({
   MATTERMOST_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8065"),
   MATTERMOST_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8066/mcp"),
   MATTERMOST_DB_URL: z.string().trim().min(1).default("postgres://mattermost@127.0.0.1:5463/mattermost"),
+
+  // Agent hosts (ADR 0007). Host ports are loopback. In-container networking uses the qa-harness-p4 aliases (review answer 0.1).
+  // Stub mode is the default and p4-stub uses mock_response (review answer 0.9). Gemma is not called in B1.
+  LITELLM_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:4000"),
+  P4_LLM_MODE: z.string().trim().default("stub"),
+  LIBRECHAT_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3080"),
+  LIBRECHAT_DB_URL: z.string().trim().min(1).default("mongodb://127.0.0.1:27017/LibreChat"),
+  LIBRECHAT_MCP_PRODUCTS: z.string().trim().default("nextcloud,outline,twenty,penpot,mattermost"),
+  OPENCLAW_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:18789"),
 });
 
 export interface ProductConfig {
@@ -189,7 +199,30 @@ export interface MattermostConfig extends ProductConfig {
   mcpUrl: string;
 }
 
-export type P4Config = NextcloudConfig | OutlineConfig | PenpotConfig | MattermostConfig;
+/** LiteLLM proxy (ADR 0007). No database in B1. The stub alias is config-level mock_response (review answer 0.9). */
+export interface LiteLlmConfig extends ProductConfig {
+  id: "litellm";
+  mode: "stub" | "nightly";
+}
+
+/** LibreChat chat host. mcpProducts are Part A product ids whose MCP credentials go into its env (review answer 0.1). */
+export interface LibreChatConfig extends ProductConfig {
+  id: "librechat";
+  mcpProducts: string[];
+}
+
+export interface OpenClawConfig extends ProductConfig {
+  id: "openclaw";
+}
+
+export type P4Config =
+  | NextcloudConfig
+  | OutlineConfig
+  | PenpotConfig
+  | MattermostConfig
+  | LiteLlmConfig
+  | LibreChatConfig
+  | OpenClawConfig;
 
 export interface HarnessConfig {
   productsRoot: string;
@@ -285,7 +318,7 @@ function buildTwentyConfig(parsed: ParsedEnv, productsRoot: string): TwentyConfi
 }
 
 /** D1: every P4 product keeps its state under the harness folder. Nothing here requires that folder to exist. */
-function p4ProductRoot(id: "nextcloud" | "outline" | "penpot" | "mattermost"): string {
+function p4ProductRoot(id: P4ProductId): string {
   return path.join(HARNESS_ROOT, ".harness", id);
 }
 
@@ -330,6 +363,37 @@ function buildMattermostConfig(parsed: ParsedEnv): MattermostConfig {
   };
 }
 
+function buildLiteLlmConfig(parsed: ParsedEnv): LiteLlmConfig {
+  return {
+    id: "litellm",
+    productRoot: p4ProductRoot("litellm"),
+    baseUrl: parsed.LITELLM_BASE_URL.replace(/\/$/, ""),
+    dbUrl: "none://litellm", // sentinel: LiteLLM has no database in B1 (VERIFIED: it served requests with no DATABASE_URL)
+    mode: parseP4LlmMode(parsed.P4_LLM_MODE),
+  };
+}
+
+function buildLibreChatConfig(parsed: ParsedEnv): LibreChatConfig {
+  return {
+    id: "librechat",
+    productRoot: p4ProductRoot("librechat"),
+    baseUrl: parsed.LIBRECHAT_BASE_URL.replace(/\/$/, ""),
+    dbUrl: parsed.LIBRECHAT_DB_URL,
+    mcpProducts: parsed.LIBRECHAT_MCP_PRODUCTS.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== ""),
+  };
+}
+
+function buildOpenClawConfig(parsed: ParsedEnv): OpenClawConfig {
+  return {
+    id: "openclaw",
+    productRoot: p4ProductRoot("openclaw"),
+    baseUrl: parsed.OPENCLAW_BASE_URL.replace(/\/$/, ""),
+    dbUrl: "none://openclaw", // sentinel: OpenClaw has no database in B1
+  };
+}
+
 let cached: HarnessConfig | undefined;
 
 export function loadConfig(): HarnessConfig {
@@ -364,6 +428,9 @@ export function loadProductConfig(id: "nextcloud"): NextcloudConfig;
 export function loadProductConfig(id: "outline"): OutlineConfig;
 export function loadProductConfig(id: "penpot"): PenpotConfig;
 export function loadProductConfig(id: "mattermost"): MattermostConfig;
+export function loadProductConfig(id: "litellm"): LiteLlmConfig;
+export function loadProductConfig(id: "librechat"): LibreChatConfig;
+export function loadProductConfig(id: "openclaw"): OpenClawConfig;
 export function loadProductConfig(id: ProductId): ProductConfig;
 export function loadProductConfig(id: ProductId): ProductConfig {
   // Only the four fork products are cached (loadConfig holds them). P4 products never touch the cache.
@@ -391,6 +458,12 @@ export function loadProductConfig(id: ProductId): ProductConfig {
       return buildPenpotConfig(parsed);
     case "mattermost":
       return buildMattermostConfig(parsed);
+    case "litellm":
+      return buildLiteLlmConfig(parsed);
+    case "librechat":
+      return buildLibreChatConfig(parsed);
+    case "openclaw":
+      return buildOpenClawConfig(parsed);
     default: {
       const exhaustive: never = id;
       throw new Error(`Unknown product id: ${String(exhaustive)}`);

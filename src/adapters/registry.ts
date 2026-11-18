@@ -8,6 +8,7 @@ import { MattermostAdapter } from "./mattermost.adapter.js";
 import { OutlineAdapter } from "./outline.adapter.js";
 import { PenpotAdapter } from "./penpot.adapter.js";
 import { TwentyAdapter } from "./twenty.adapter.js";
+import { notImplemented } from "../errors.js";
 import type { ProductAdapter } from "./types.js";
 
 export function getAdapter(id: ProductId): ProductAdapter {
@@ -28,6 +29,13 @@ export function getAdapter(id: ProductId): ProductAdapter {
       return new PenpotAdapter(loadProductConfig("penpot"));
     case "mattermost":
       return new MattermostAdapter(loadProductConfig("mattermost"));
+    // Adapters land in tasks 3 to 5. Until then these ids fail with a named message, not a silent fallback.
+    case "litellm":
+      return notImplemented(id, "getAdapter", "the LiteLLM adapter lands in task 3");
+    case "librechat":
+      return notImplemented(id, "getAdapter", "the LibreChat adapter lands in task 4");
+    case "openclaw":
+      return notImplemented(id, "getAdapter", "the OpenClaw adapter lands in task 5");
     default: {
       const exhaustive: never = id;
       throw new Error(`Unknown product id: ${String(exhaustive)}`);

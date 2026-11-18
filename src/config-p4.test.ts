@@ -99,3 +99,69 @@ describe("P4 config and the fork split (ADR 0006, D1 and D2)", () => {
     }
   });
 });
+
+describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () => {
+  const AGENT_KEYS = ["P4_LLM_MODE", "LITELLM_BASE_URL", "LIBRECHAT_BASE_URL", "LIBRECHAT_MCP_PRODUCTS", "OPENCLAW_BASE_URL", "PRODUCTS_ROOT"];
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of AGENT_KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+    resetConfigCache();
+  });
+
+  afterEach(() => {
+    for (const k of AGENT_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    resetConfigCache();
+  });
+
+  function fakeProductsRoot(): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "p4-agent-config-"));
+    for (const d of ["cal", "documenso", "medusa-dtc-starter", "twenty-CRM"]) fs.mkdirSync(path.join(root, d));
+    return root;
+  }
+
+  it("keeps loadConfig() to the four fork products (regression, D2)", () => {
+    process.env.PRODUCTS_ROOT = fakeProductsRoot();
+    const keys = Object.keys(loadConfig()).filter((k) => k !== "productsRoot").sort();
+    assert.deepEqual(keys, ["cal", "documenso", "medusa", "twenty"]);
+  });
+
+  it("loads each agent host under .harness/<id> without needing PRODUCTS_ROOT to exist", () => {
+    process.env.PRODUCTS_ROOT = path.join(os.tmpdir(), "definitely-not-a-products-root");
+    for (const id of ["litellm", "librechat", "openclaw"] as const) {
+      assert.equal(loadProductConfig(id).productRoot, path.join(HARNESS_ROOT, ".harness", id));
+    }
+  });
+
+  it("defaults the LLM mode to stub and rejects other values without echoing them", () => {
+    assert.equal(loadProductConfig("litellm").mode, "stub");
+    process.env.P4_LLM_MODE = "live";
+    assert.throws(() => loadProductConfig("litellm"), (err: Error) => {
+      assert.match(err.message, /P4_LLM_MODE/);
+      assert.doesNotMatch(err.message, /live/);
+      return true;
+    });
+  });
+
+  it("uses loopback base URLs by default", () => {
+    assert.equal(loadProductConfig("litellm").baseUrl, "http://127.0.0.1:4000");
+    assert.equal(loadProductConfig("librechat").baseUrl, "http://127.0.0.1:3080");
+    assert.equal(loadProductConfig("openclaw").baseUrl, "http://127.0.0.1:18789");
+  });
+
+  it("reads the LibreChat MCP product list from the env, trimmed", () => {
+    process.env.LIBRECHAT_MCP_PRODUCTS = " nextcloud, outline ,";
+    assert.deepEqual(loadProductConfig("librechat").mcpProducts, ["nextcloud", "outline"]);
+  });
+
+  it("keeps the agent hosts out of the fork-product cache", () => {
+    assert.equal(P4_PRODUCT_IDS.some((id) => isForkProductId(id)), false);
+    assert.equal(P4_PRODUCT_IDS.length, 7);
+  });
+});
