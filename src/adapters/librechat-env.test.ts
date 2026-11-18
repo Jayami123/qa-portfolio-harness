@@ -82,6 +82,17 @@ describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
     assert.match(y, /allowedDomains:\n {4}- "nextcloud-mcp"/);
   });
 
+  it("sets requiresOAuth: false on every mcpServers entry, so LibreChat skips OAuth detection", () => {
+    const y = librechatYaml({ defaultModel: "p4-stub", servers: FIVE.map(librechatMcpServerFor) });
+    const block = y.slice(y.indexOf("mcpServers:"), y.indexOf("endpoints:"));
+    const entries = block.split(/\n(?= {2}[a-z]+:\n)/).slice(1);
+    assert.equal(entries.length, 5);
+    for (const entry of entries) {
+      assert.match(entry, /^ {4}requiresOAuth: false$/m, entry.split("\n")[0]);
+    }
+    assert.equal((y.match(/requiresOAuth/g) ?? []).length, 5);
+  });
+
   it("gives Penpot no headers block (single-user, no token)", () => {
     const y = librechatYaml({ defaultModel: "p4-stub", servers: [librechatMcpServerFor("penpot")] });
     assert.doesNotMatch(y, /headers:/);

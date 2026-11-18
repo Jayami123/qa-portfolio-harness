@@ -77,7 +77,17 @@ export function librechatYaml(opts: { defaultModel: string; servers: LibreChatMc
   }
   lines.push("mcpServers:");
   for (const s of experimentMcpServerOrder(opts.servers)) {
-    lines.push(`  ${s.name}:`, "    type: streamable-http", `    url: ${s.url}`, "    initTimeout: 30000", "    timeout: 60000");
+    // requiresOAuth: false skips LibreChat's OAuth auto-detection, which probes without the configured headers and marks a
+    // server that publishes RFC 9728 metadata (or answers 401 with a Bearer challenge) as OAuth-only, so it never connects
+    // with the Authorization header. Schema: packages/data-provider/src/mcp.ts:190; skip: MCPServerInspector.ts:122.
+    lines.push(
+      `  ${s.name}:`,
+      "    type: streamable-http",
+      `    url: ${s.url}`,
+      "    requiresOAuth: false",
+      "    initTimeout: 30000",
+      "    timeout: 60000",
+    );
     if (s.authEnv !== null) {
       lines.push("    headers:", `      Authorization: "\${${s.authEnv}}"`);
     }
