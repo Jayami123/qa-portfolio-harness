@@ -33,6 +33,11 @@ the CI shape, and the licences.
    the Part A run states into a 0600 env file. The fake owner is created with `create-user --email-verified=true`, and
    `ALLOW_REGISTRATION` stays `false`. Proof: `GET /api/mcp/connection/status` reports each server `connected`, and
    `GET /api/mcp/tools` lists at least one tool per server (verified in the spike with the Penpot MCP: five tools).
+   Every `mcpServers` entry sets `requiresOAuth: false`. LibreChat v0.8.7 otherwise runs OAuth auto-detection without the
+   configured headers, marks a header-auth server that publishes protected-resource metadata or a Bearer challenge as
+   OAuth-only, and never connects it with its Authorization header (CI run 44277015543: Outline, Twenty and Mattermost).
+   With the key set, all five servers connect (CI run 44281516923: 110, 20, 7, 5 and 121 tools). The order of
+   `mcpServers` is not a factor: an experiment with Mattermost first was reverted.
 7. **OpenClaw uses `${VAR}` placeholders, with the config written into its state volume (D17, revised).** The gateway token
    and the LiteLLM key resolve from a 0600 env file under `.harness/openclaw/`, which is outside the state volume because
    OpenClaw reads `~/.openclaw/.env`. The config has no secret, so it needs no 0600. A one-off container running as uid 1000
@@ -63,4 +68,11 @@ the CI shape, and the licences.
 - Licences: LiteLLM core MIT (read from the image); `litellm_enterprise` in the image is not used; LibreChat MIT (read from
   the image); OpenClaw MIT (image label); MongoDB SSPL, accepted for local QA only (review answer 0.10). The upstream release
   notes were not readable in the session (UNVERIFIED).
+- LibreChat's OAuth auto-detection is off for every configured MCP server (`requiresOAuth: false`). A server that really
+  needs an OAuth flow cannot be added to the generated config without changing this. An upstream issue draft is in
+  section 18.5 of the plan (not filed).
+- Measured in CI run 44281516923 at `2cc988f` (full set in one job): `totalPeakMiB` 7378.5 against the 14336 MiB budget,
+  `sumOfPeaksMiB` 12020.1, `hostUsedPeakMiB` 8545, disk 104 -> 78 GiB free, bind check ok.
+- The bind check exempts only Twenty's pre-existing `3002` publish, which binds on all interfaces. A follow-up PR binds
+  it to `127.0.0.1` and removes the exemption.
 - A `docker inspect` shows container environment. Acceptable on a throwaway loopback stack, as ADR 0006 R14 records.

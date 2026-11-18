@@ -2158,3 +2158,57 @@ The ADR text is in section 6, task 8, step 3. The build writes it to `docs/adr/0
 10. Evidence in the PR body only (task 9)
 
 **Will not do:** edit any product fork (including the reference forks `Jayami123/openclaw` and `Jayami123/LibreChat`); change `docker/twenty.compose.yml`, any Part A compose file or any Part A default; touch the Cal, Documenso, Medusa or Twenty adapters; write a `.env` for a product; call Gemma or set `GEMINI_API_KEY`; add the Gemini host to any allowlist; invent L1 case IDs or close any suite case; add the suite's fixture server to this repo; run CodeRabbit; use the Bridge-bss account; merge, tag, squash, rebase or force-push; write a personal name in any file, commit or PR.
+
+## 18 Build results and deviations (2026-11-18)
+
+### 18.1 CI at `2cc988f` (all checks green)
+
+| Workflow | Run | Conclusion |
+|---|---|---|
+| P4 agent hosts (full set: LiteLLM, LibreChat, OpenClaw and the five Part A products) | [44281516923](https://github.com/Jayami123/qa-portfolio-harness/actions/runs/44281516923) | success |
+| P4 adapters (Part A) | [44281516891](https://github.com/Jayami123/qa-portfolio-harness/actions/runs/44281516891) | success |
+| CI | [44281516920](https://github.com/Jayami123/qa-portfolio-harness/actions/runs/44281516920) | success |
+| CodeQL | [44281516929](https://github.com/Jayami123/qa-portfolio-harness/actions/runs/44281516929) | success |
+| PR title | [44281516882](https://github.com/Jayami123/qa-portfolio-harness/actions/runs/44281516882) | success |
+
+### 18.2 RAM probe (CI run 44281516923, `ram-probe-full.json`)
+
+Read from the job log of the run above (the uploaded artifact holds the same file). The "No harness containers left" step passed.
+
+| Measure | Value |
+|---|---|
+| Budget (`RAM_BUDGET_MIB`) | 14336 MiB |
+| Peak of the per-instant sum across containers (`totalPeakMiB`) | **7378.5 MiB** |
+| Sum of each container's own peak (`sumOfPeaksMiB`, reported, not checked) | 12020.1 MiB |
+| Host memory used, peak (`hostUsedPeakMiB`) | 8545 MiB |
+| Disk free before and after start | 104 GiB -> 78 GiB |
+| Time from first `up` to all ready (`readyMs`) | 916086 ms |
+| Fit | **true** |
+| Readiness | ok |
+| Bind check | ok, no offending ports (Twenty's 3002 exempt, see 18.4) |
+| Largest containers (peak) | twenty-server 3831.8 MiB, openclaw 1821.7 MiB, twenty-worker 1126.4 MiB, penpot-backend 1021 MiB |
+
+### 18.3 LibreChat MCP proof (CI run 44281516923)
+
+Every configured server reports `connected` on `GET /api/mcp/connection/status`, and `GET /api/mcp/tools` lists its tools:
+
+| Server | State | Tools |
+|---|---|---|
+| nextcloud | connected | 110 |
+| outline | connected | 20 |
+| twenty | connected | 7 |
+| penpot | connected | 5 |
+| mattermost | connected | 121 |
+
+### 18.4 Deviations from the plan, and why
+
+- **LibreChat OAuth auto-detection (workaround `requiresOAuth: false`).** LibreChat v0.8.7 checks each MCP server for OAuth before it connects. That check does not send `mcpServers[].headers`. Outline, Twenty and Mattermost answer the header-less probe with a Bearer challenge or with protected-resource metadata. LibreChat therefore marked them OAuth-required and never opened the real connection with the Authorization header. Evidence: CI run 44277015543, with a request trace that logged only the server name and whether an Authorization header was present. Those three servers got header-less `HEAD /mcp`, `POST /mcp` and `/.well-known/oauth-protected-resource` requests, and never a request with the header. Fix: the generated `librechat.yaml` sets `requiresOAuth: false` on every `mcpServers` entry. The key is in the image's schema (`packages/data-provider/src/mcp.ts:190`). `MCPServerInspector.detectOAuth` returns early when it is set (`packages/api/src/mcp/registry/MCPServerInspector.ts:122`). The generated file passes the image's `configSchema`. URLs, `allowedDomains` and the header mechanism are unchanged.
+- **Server order experiment (reverted, not the cause).** One commit put mattermost first in `mcpServers` to test a positional cause. Mattermost was then attempted first and still did not connect, so order was ruled out. The order was restored in `revert(librechat): restore the mcp server order`.
+- **Bind check exempts Twenty's port 3002 only.** Twenty's `3002:3000` publish predates P4 and binds on all interfaces. `scripts/p4-ram-probe.sh` exempts that one port by name. Every other P4 host port must bind to 127.0.0.1. Follow-up: a separate PR binds Twenty's 3002 to `127.0.0.1` and removes the exemption.
+- **Failure diagnostics.** `interestingLogLines` keeps every `[MCP][<name>]` line, so a per-server decision such as "OAuth Required" is never cut. Only the other matching lines are capped at the last 60.
+
+### 18.5 Upstream issue draft (LibreChat; not filed, for the owner to review)
+
+**Title:** MCP OAuth auto-detection probes without configured headers, so header-auth servers are marked OAuth-only and never connect
+
+**Body:** In LibreChat v0.8.7, OAuth detection runs before the configured connection and does not send `mcpServers[].headers` (e.g. `Authorization`). If the server answers with a Bearer challenge or publishes protected-resource metadata, it is marked OAuth-required and the real connection with the header is never opened. Workaround: `requiresOAuth: false` per server. Expected: send configured headers on the detection probe, or skip detection when an Authorization header is configured.
