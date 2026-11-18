@@ -43,12 +43,22 @@ export function redactText(text: string, values: string[]): string {
   return redactSecrets(text, values);
 }
 
-/** Lines about MCP connections, allow lists and errors. Keeps the last `max` of them. */
+/** A LibreChat line about one MCP server, such as "[MCP][outline] OAuth Required: true". */
+const MCP_SERVER_LINE = /\[MCP\]\[[^\]]+\]/;
+
+/**
+ * Lines about MCP connections, allow lists and errors, in log order. Every [MCP][<name>] line is kept, so a per-server
+ * decision such as "OAuth Required" is never cut. Of the other matching lines, only the last `max` are kept.
+ */
 export function interestingLogLines(text: string, max = 60): string[] {
-  return text
-    .split("\n")
-    .filter((line) => /mcp|allow|domain|oauth|ssrf|blocked|refus|error|warn|connect/i.test(line))
-    .slice(-max);
+  const matching = text.split("\n").filter((line) => /mcp|allow|domain|oauth|ssrf|blocked|refus|error|warn|connect/i.test(line));
+  const firstKeptOther = Math.max(0, matching.filter((line) => !MCP_SERVER_LINE.test(line)).length - max);
+  let otherIndex = -1;
+  return matching.filter((line) => {
+    if (MCP_SERVER_LINE.test(line)) return true;
+    otherIndex += 1;
+    return otherIndex >= firstKeptOther;
+  });
 }
 
 /** Each server's connectionState from /api/mcp/connection/status. A missing server reads "missing". */

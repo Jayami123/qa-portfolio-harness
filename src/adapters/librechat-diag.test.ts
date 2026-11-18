@@ -42,6 +42,19 @@ describe("librechat-diag (CI diagnostics, values never printed)", () => {
     assert.equal(interestingLogLines("mcp a\nmcp b\nmcp c", 2).length, 2);
   });
 
+  it("keeps every [MCP][<name>] line beyond the cap, in log order, and caps only the other lines", () => {
+    const serverLines = Array.from({ length: 80 }, (_, i) => `info: [MCP][outline] line ${i}`);
+    const text = ["warn: old 1", ...serverLines.slice(0, 40), "warn: old 2", ...serverLines.slice(40), "error: new 3"].join("\n");
+    const kept = interestingLogLines(text, 2);
+    assert.equal(kept.filter((l) => l.includes("[MCP][outline]")).length, 80);
+    assert.deepEqual(
+      kept.filter((l) => !l.includes("[MCP][outline]")),
+      ["warn: old 2", "error: new 3"],
+    );
+    assert.equal(kept[0], "info: [MCP][outline] line 0");
+    assert.equal(kept.at(-1), "error: new 3");
+  });
+
   it("maps each server state, and marks a missing server", () => {
     const body = { connectionStatus: { nextcloud: { connectionState: "disconnected" }, penpot: { connectionState: "connected" } } };
     assert.deepEqual(connectionStates(body, ["nextcloud", "penpot", "outline"]), {
