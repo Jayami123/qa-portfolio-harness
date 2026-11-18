@@ -23,9 +23,14 @@ import {
   interestingLogLines,
   LIBRECHAT_APP_CONTAINER,
   mcpContainerFor,
+  mcpTraceHosts,
+  parseMcpTrace,
   redactionValues,
   redactText,
+  serversFor,
   streamMcpProbe,
+  summarizeMcpTrace,
+  type McpTraceEntry,
 } from "./librechat-diag.js";
 import {
   createOwnerArgs,
@@ -46,6 +51,8 @@ const POLL_MS = 2000;
  */
 export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
   readonly id = "librechat" as const;
+  /** The highest trace seq already printed, so each phase prints only its own requests. */
+  private traceMark = 0;
 
   constructor(cfg: LibreChatConfig) {
     super(cfg);
@@ -94,6 +101,7 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
         ...process.env,
         LIBRECHAT_ENV_FILE: this.envFile(),
         LIBRECHAT_CONFIG_FILE: this.configFile(),
+        LIBRECHAT_MCP_TRACE_HOSTS: mcpTraceHosts(serversFor(this.cfg.mcpProducts)),
         LIBRECHAT_MONGO_PASSWORD: mongoPassword,
       },
     };
@@ -128,8 +136,13 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
 
     await composeUp(this.composeOpts(secrets.mongoPassword), { wait: true });
     await this.waitHealthy();
+    this.printMcpTrace("boot (before login)");
     await this.seed();
-    await this.waitMcpProofs();
+    try {
+      await this.waitMcpProofs();
+    } finally {
+      this.printMcpTrace("per-user (after login, final)");
+    }
     console.log(
       `LibreChat is up: ${this.cfg.baseUrl}. MCP servers: ${mcp.servers.map((s) => s.name).join(", ")}. The owner password and the MCP values are in ${this.secretsFile()} and ${this.envFile()} (mode 0600) and are not printed.`,
     );
@@ -207,6 +220,7 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
         readStatus: () => get("/api/mcp/connection/status"),
         onFirstNotConnected: async (states) => {
           console.log(`LibreChat MCP: not all servers are connected yet (${Object.entries(states).map(([n, s]) => `${n}=${s}`).join(", ")}). Running the in-container probe now.`);
+          this.printMcpTrace("per-user (after the first tools and status calls)");
           await streamMcpProbe(names, this.redactionValues());
         },
         onTimeout: (states) => this.diagnoseMcp(names, states),
@@ -250,6 +264,26 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
       print(`${mcp.stdout}\n${mcp.stderr}`);
     }
 
+  }
+
+  /**
+   * Prints the trace lines (docker/librechat-mcp-trace.cjs) logged since the last call: per request, the server name, the
+   * method and whether an Authorization header was present. Then one summary line per server, in first-attempt order.
+   * The lines carry no value; they are still redacted.
+   */
+  private printMcpTrace(phase: string): void {
+    const logs = spawnSync("docker", ["logs", LIBRECHAT_APP_CONTAINER], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    const text = `${logs.stdout ?? ""}\n${logs.stderr ?? ""}`;
+    const fresh: McpTraceEntry[] = parseMcpTrace(text).filter((e) => e.seq > this.traceMark);
+    console.log(`LibreChat MCP trace, ${phase}: ${fresh.length} new traced request line(s). Names and true/false only.`);
+    const values = this.redactionValues();
+    for (const e of fresh.sort((a, b) => a.seq - b.seq)) {
+      console.log(`  ${redactText(`seq=${e.seq} server=${e.server} method=${e.method} authorization=${e.authorization}`, values)}`);
+    }
+    for (const line of summarizeMcpTrace(fresh)) {
+      console.log(`  ${line}`);
+    }
+    for (const e of fresh) this.traceMark = Math.max(this.traceMark, e.seq);
   }
 
   /** Every env-file value and secret, for redaction of anything printed from the probe or the logs. */

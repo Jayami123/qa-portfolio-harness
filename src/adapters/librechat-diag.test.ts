@@ -9,11 +9,15 @@ import {
   LIBRECHAT_APP_CONTAINER,
   mcpContainerFor,
   MCP_CONTAINERS,
+  MCP_TRACE_TAG,
+  mcpTraceHosts,
+  parseMcpTrace,
   PROBE_SCRIPT,
   probeArgs,
   redactionValues,
   redactText,
   serversFor,
+  summarizeMcpTrace,
 } from "./librechat-diag.js";
 
 describe("librechat-diag (CI diagnostics, values never printed)", () => {
@@ -118,5 +122,30 @@ describe("librechat-diag (CI diagnostics, values never printed)", () => {
       assert.match(lines.find((l) => l.startsWith("emptyauth")) ?? "", /auth var EMPTY/);
       assert.doesNotMatch(out, /tok-SHOULD-NOT-APPEAR/);
     });
+  });
+});
+
+describe("librechat-diag MCP trace (names and true/false only)", () => {
+  it("maps each alias host to its server name", () => {
+    assert.equal(
+      mcpTraceHosts(serversFor(["nextcloud", "mattermost"])),
+      "nextcloud-mcp=nextcloud,mattermost-mcp=mattermost",
+    );
+  });
+
+  it("parses trace lines, skips others, and summarises in first-attempt order", () => {
+    const log = [
+      "some other line",
+      `2026 ${MCP_TRACE_TAG} seq=2 time=t pid=1 via=undici server=nextcloud method=POST path=/mcp authorization=true`,
+      `${MCP_TRACE_TAG} seq=1 time=t pid=1 via=undici server=mattermost method=POST path=/mcp authorization=false`,
+      `${MCP_TRACE_TAG} seq=3 time=t pid=1 via=undici server=mattermost method=GET path=/mcp authorization=true`,
+      `${MCP_TRACE_TAG} seq=x server=broken`,
+    ].join("\n");
+    const entries = parseMcpTrace(log);
+    assert.equal(entries.length, 3);
+    assert.deepEqual(summarizeMcpTrace(entries), [
+      "#1 mattermost: traced requests 2, authorization=true 1, authorization=false 1",
+      "#2 nextcloud: traced requests 1, authorization=true 1, authorization=false 0",
+    ]);
   });
 });

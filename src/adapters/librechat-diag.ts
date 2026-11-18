@@ -146,3 +146,65 @@ export function streamMcpProbe(names: string[], values: string[], log: (line: st
     });
   });
 }
+
+/** The tag the trace preload (docker/librechat-mcp-trace.cjs) puts on each line. */
+export const MCP_TRACE_TAG = "[p4-mcp-trace]";
+
+/** "host=name,host=name" for P4_MCP_TRACE_HOSTS. Host and server names only, never a value. */
+export function mcpTraceHosts(servers: LibreChatMcpServer[]): string {
+  return servers.map((s) => `${new URL(s.url).hostname}=${s.name}`).join(",");
+}
+
+export interface McpTraceEntry {
+  seq: number;
+  server: string;
+  method: string;
+  authorization: boolean;
+}
+
+/** The trace lines in a LibreChat log, parsed. Lines that do not parse are skipped. */
+export function parseMcpTrace(logText: string): McpTraceEntry[] {
+  const out: McpTraceEntry[] = [];
+  for (const line of logText.split("\n")) {
+    const at = line.indexOf(MCP_TRACE_TAG);
+    if (at < 0) continue;
+    const fields = new Map(
+      line
+        .slice(at + MCP_TRACE_TAG.length)
+        .trim()
+        .split(/\s+/)
+        .map((kv) => [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)] as [string, string]),
+    );
+    const seq = Number(fields.get("seq"));
+    const server = fields.get("server");
+    const method = fields.get("method");
+    const auth = fields.get("authorization");
+    if (!Number.isInteger(seq) || !server || !method || (auth !== "true" && auth !== "false")) continue;
+    out.push({ seq, server, method, authorization: auth === "true" });
+  }
+  return out;
+}
+
+/**
+ * One summary line per server, in the order the servers were first attempted: requests seen, with and without an
+ * Authorization header. Names and counts only.
+ */
+export function summarizeMcpTrace(entries: McpTraceEntry[]): string[] {
+  const order: string[] = [];
+  const counts = new Map<string, { total: number; withAuth: number; withoutAuth: number }>();
+  for (const e of [...entries].sort((a, b) => a.seq - b.seq)) {
+    let c = counts.get(e.server);
+    if (c === undefined) {
+      c = { total: 0, withAuth: 0, withoutAuth: 0 };
+      counts.set(e.server, c);
+      order.push(e.server);
+    }
+    c.total += 1;
+    if (e.authorization) c.withAuth += 1;
+    else c.withoutAuth += 1;
+  }
+  return order.map((name, i) => {
+    const c = counts.get(name)!;
+    return `#${i + 1} ${name}: traced requests ${c.total}, authorization=true ${c.withAuth}, authorization=false ${c.withoutAuth}`;
+  });
+}

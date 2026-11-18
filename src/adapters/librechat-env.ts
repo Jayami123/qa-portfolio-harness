@@ -58,6 +58,15 @@ export function allowedDomainsFor(servers: LibreChatMcpServer[]): string[] {
 }
 
 /**
+ * EXPERIMENT (temporary, reverted once the result is in): the order of mcpServers only, with mattermost first. In CI run
+ * 44271887223 only the first header-using server (nextcloud) connected. Moving mattermost first tells a positional cause
+ * apart from a per-name or per-value one. Every server is kept, and allowedDomains keeps its order.
+ */
+export function experimentMcpServerOrder(servers: LibreChatMcpServer[]): LibreChatMcpServer[] {
+  return [...servers.filter((s) => s.name === "mattermost"), ...servers.filter((s) => s.name !== "mattermost")];
+}
+
+/**
  * Builds librechat.yaml. No secret value appears: Authorization values are ${VAR} placeholders read from the env
  * file (D16). The file is safe to keep at mode 0644.
  */
@@ -67,7 +76,7 @@ export function librechatYaml(opts: { defaultModel: string; servers: LibreChatMc
     lines.push(`    - "${host}"`);
   }
   lines.push("mcpServers:");
-  for (const s of opts.servers) {
+  for (const s of experimentMcpServerOrder(opts.servers)) {
     lines.push(`  ${s.name}:`, "    type: streamable-http", `    url: ${s.url}`, "    initTimeout: 30000", "    timeout: 60000");
     if (s.authEnv !== null) {
       lines.push("    headers:", `      Authorization: "\${${s.authEnv}}"`);
