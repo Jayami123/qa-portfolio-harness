@@ -22,6 +22,9 @@ services:
       # Empty in stub mode (D14). The adapter sets it only in nightly mode.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       # Unset: the enterprise admin MCP is not used (review answer 0.4).
+    # Lets P4_STUB_API_BASE name a stub running on the host (http://host.docker.internal:<port>/v1). Nothing is published.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${LITELLM_CONFIG_FILE:?set by the adapter}:/etc/p4/litellm-config.yaml:ro
     ports:

@@ -60,7 +60,7 @@ export class LiteLlmAdapter extends BaseAdapter<LiteLlmConfig> {
     fs.writeFileSync(this.secretsFile(), JSON.stringify(secrets), { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(this.secretsFile(), 0o600);
     // The config holds no secret, so it may be world-readable. The container reads it.
-    fs.writeFileSync(this.configFile(), liteLlmConfigYaml(), { encoding: "utf8", mode: 0o644 });
+    fs.writeFileSync(this.configFile(), liteLlmConfigYaml({ stubApiBase: this.cfg.stubApiBase }), { encoding: "utf8", mode: 0o644 });
     writeLlmRunState(llmRunStateFile("litellm"), {
       version: 1,
       product: "litellm",
@@ -150,6 +150,12 @@ export class LiteLlmAdapter extends BaseAdapter<LiteLlmConfig> {
 
   /** One p4-stub call. Logs the route names from the headers, never the key. Never sends p4-nightly (D14). */
   async waitStubRoute(): Promise<void> {
+    if (this.cfg.stubApiBase !== undefined) {
+      // p4-stub routes to the suite's fixture stub, which needs an X-P4-Fixture header the harness cannot choose.
+      // The ping is skipped; the suite's tests prove the route with a real fixture.
+      console.log("LiteLLM route: p4-stub is routed to P4_STUB_API_BASE; the readiness ping is skipped (the stub needs a fixture header).");
+      return;
+    }
     const { baseUrl, apiKey } = readLlmRunState("litellm", llmRunStateFile("litellm"));
     const req = stubCompletionRequest(baseUrl, apiKey);
     assertNoNightlyCall(req.init);

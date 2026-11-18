@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { describe, it } from "node:test";
 import {
   generateLiteLlmMasterKey,
@@ -9,6 +10,7 @@ import {
   liteLlmComposeEnv,
   liteLlmConfigYaml,
   parseP4LlmMode,
+  parseStubApiBase,
 } from "./litellm-env.js";
 
 type LiteLlmParams = Record<string, string | number>;
@@ -134,5 +136,54 @@ describe("litellm-env (ADR 0007, D13 to D15)", () => {
   it("lists one compose file", () => {
     assert.equal(litellmComposeFiles().length, 1);
     assert.match(litellmComposeFiles()[0] ?? "", /litellm\.compose\.yml$/);
+  });
+
+  describe("P4_STUB_API_BASE (optional p4-stub upstream)", () => {
+    const BASE = "http://host.docker.internal:8787/v1";
+
+    it("unset: p4-stub keeps mock_response, no api_base and no header forwarding", () => {
+      const y = liteLlmConfigYaml({});
+      assert.equal(y, liteLlmConfigYaml());
+      const stub = parseLiteLlmModelList(y).find((m) => m.model_name === "p4-stub")?.litellm_params;
+      assert.deepEqual(stub, { model: "openai/stub-upstream-model", mock_response: "stub-ok" });
+      assert.doesNotMatch(y, /api_base|forward_client_headers/);
+    });
+
+    it("set: p4-stub routes to the stub with api_base, drops mock_response, and forwards x- headers", () => {
+      const y = liteLlmConfigYaml({ stubApiBase: BASE });
+      const models = parseLiteLlmModelList(y);
+      assert.deepEqual(models.map((m) => m.model_name), ["p4-stub", "p4-nightly"]);
+      const stub = models.find((m) => m.model_name === "p4-stub")?.litellm_params;
+      assert.equal(stub?.api_base, BASE);
+      assert.equal(stub?.model, "openai/stub-upstream-model");
+      assert.equal(stub?.mock_response, undefined);
+      assert.match(y, /^ {2}forward_client_headers_to_llm_api: true$/m);
+      assert.match(y, /master_key: os\.environ\/LITELLM_MASTER_KEY/);
+    });
+
+    it("set: p4-nightly is unchanged and api_base never leaks onto it", () => {
+      const a = parseLiteLlmModelList(liteLlmConfigYaml()).find((m) => m.model_name === "p4-nightly");
+      const b = parseLiteLlmModelList(liteLlmConfigYaml({ stubApiBase: BASE })).find((m) => m.model_name === "p4-nightly");
+      assert.deepEqual(b, a);
+    });
+
+    it("parses: blank is unset, a trailing slash is removed, bad values throw without echoing", () => {
+      assert.equal(parseStubApiBase(undefined), undefined);
+      assert.equal(parseStubApiBase("  "), undefined);
+      assert.equal(parseStubApiBase(`${BASE}/`), BASE);
+      for (const bad of ["not a url", "ftp://h/x", "http://user:pw@h/v1", "http://h/v1?k=SECRETVAL", "http://h/v1#frag"]) {
+        assert.throws(() => parseStubApiBase(bad), (err: Error) => {
+          assert.match(err.message, /P4_STUB_API_BASE_INVALID/);
+          assert.doesNotMatch(err.message, /SECRETVAL|pw@/);
+          return true;
+        });
+      }
+    });
+
+    it("the compose file maps host.docker.internal and still publishes only on 127.0.0.1", () => {
+      const text = fs.readFileSync(litellmComposeFiles()[0] ?? "", "utf8");
+      assert.match(text, /host\.docker\.internal:host-gateway/);
+      assert.match(text, /"127\.0\.0\.1:4000:4000"/);
+    });
   });
 });
