@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   allowedDomainsFor,
-  experimentMcpServerOrder,
   LIBRECHAT_CONFIG_VERSION,
   LIBRECHAT_IMAGE,
   LIBRECHAT_MONGO_IMAGE,
@@ -67,19 +66,13 @@ describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
     assert.match(y, /\$\{P4_LITELLM_API_KEY\}/);
   });
 
-  it("EXPERIMENT: writes mattermost first in mcpServers, keeps all five, and leaves allowedDomains in order", () => {
-    const servers = FIVE.map(librechatMcpServerFor);
-    assert.deepEqual(
-      experimentMcpServerOrder(servers).map((s) => s.name),
-      ["mattermost", "nextcloud", "outline", "twenty", "penpot"],
-    );
-    const y = librechatYaml({ defaultModel: "p4-stub", servers });
+  it("writes mcpServers in the configured order", () => {
+    const y = librechatYaml({ defaultModel: "p4-stub", servers: FIVE.map(librechatMcpServerFor) });
     const block = y.slice(y.indexOf("mcpServers:"), y.indexOf("endpoints:"));
     assert.deepEqual(
       [...block.matchAll(/^ {2}([a-z]+):$/gm)].map((m) => m[1]),
-      ["mattermost", "nextcloud", "outline", "twenty", "penpot"],
+      FIVE,
     );
-    assert.match(y, /allowedDomains:\n {4}- "nextcloud-mcp"/);
   });
 
   it("sets requiresOAuth: false on every mcpServers entry, so LibreChat skips OAuth detection", () => {
