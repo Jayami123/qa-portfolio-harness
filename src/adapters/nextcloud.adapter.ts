@@ -29,7 +29,7 @@ import {
 } from "./p4-run-state.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
 import { describeFetchFailure } from "../wait/readiness-error.js";
-import { printReadinessDiagnostics } from "../wait/readiness-diagnostics.js";
+import { failIfContainerExited, printReadinessDiagnostics } from "../wait/readiness-diagnostics.js";
 
 /** The Nextcloud app container (compose project qa-harness-nextcloud, service app). */
 const NEXTCLOUD_APP_CONTAINER = "qa-harness-nextcloud-app-1";
@@ -122,6 +122,7 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
     const deadline = Date.now() + (timeoutMs ?? p4WaitBudgetMs());
     let last = "no response";
     while (Date.now() < deadline) {
+      failIfContainerExited(NEXTCLOUD_APP_CONTAINER, url);
       try {
         const response = await fetch(url, { signal: AbortSignal.timeout(STATUS_REQUEST_MS) });
         if (response.status === 200) {
