@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { OpenClawConfig } from "../config.js";
-import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
+import { composeDown, composeExecArgs, composeRestart, composeUp, type ComposeOptions } from "../internal/compose.js";
 import { ensureP4Network } from "../internal/p4-network.js";
 import { run } from "../internal/run.js";
 import { HARNESS_DOCKER_DIR } from "../paths.js";
@@ -13,6 +13,7 @@ import { llmRunStateFile, readLlmRunState } from "./llm-run-state.js";
 import {
   assertOpenClawPinIsRelease,
   generateOpenClawGatewayToken,
+  generateOpenClawMockChannelToken,
   OPENCLAW_COMPOSE_PROJECT,
   OPENCLAW_IMAGE,
   OPENCLAW_STATE_VOLUME,
@@ -21,11 +22,20 @@ import {
   openClawEnvText,
 } from "./openclaw-env.js";
 import {
+  OPENCLAW_APPROVALS_GET_COMMAND,
+  OPENCLAW_APPROVALS_PENDING_COMMAND,
+  openClawCronCreateCommand,
+  openClawMemoryPath,
   openClawResponsesBody,
   openClawRunResult,
+  openClawSeedFileArgs,
+  openClawSkillPath,
   openClawWriteConfigArgs,
+  parseOpenClawApprovals,
+  parseOpenClawPendingApprovals,
   readyzIsReady,
   type OpenClawClientTool,
+  type OpenClawCronSpec,
   type OpenClawRunResult,
 } from "./openclaw-seed.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
@@ -64,6 +74,33 @@ export class OpenClawAdapter extends BaseAdapter<OpenClawConfig> {
     return token;
   }
 
+  /**
+   * H1: the per-run bot token for the mock channel, kept in secrets.json (mode 0600). Created on first use when `create` is
+   * true. Returns undefined when the channel option is off or the file has none. Never printed.
+   */
+  private mockChannelTokenFor(create: boolean): string | undefined {
+    let parsed: { gatewayToken?: unknown; mockChannelToken?: unknown } = {};
+    if (fs.existsSync(this.secretsFile())) {
+      parsed = JSON.parse(fs.readFileSync(this.secretsFile(), "utf8")) as typeof parsed;
+      if (typeof parsed.mockChannelToken === "string" && parsed.mockChannelToken !== "") {
+        return parsed.mockChannelToken;
+      }
+    }
+    if (!create) {
+      return undefined;
+    }
+    const token = generateOpenClawMockChannelToken();
+    fs.mkdirSync(this.cfg.productRoot, { recursive: true });
+    fs.writeFileSync(this.secretsFile(), JSON.stringify({ ...parsed, mockChannelToken: token }), { encoding: "utf8", mode: 0o600 });
+    fs.chmodSync(this.secretsFile(), 0o600);
+    return token;
+  }
+
+  /** H1: the bot token the suite's mock channel must accept (Bot API path `/bot<token>/...`). Undefined unless OPENCLAW_CHANNEL_MOCK=1 ran `up`. */
+  mockChannelBotToken(): string | undefined {
+    return this.cfg.channelMock ? this.mockChannelTokenFor(false) : undefined;
+  }
+
   private composeOpts(): ComposeOptions {
     return {
       projectName: OPENCLAW_COMPOSE_PROJECT,
@@ -75,8 +112,13 @@ export class OpenClawAdapter extends BaseAdapter<OpenClawConfig> {
 
   /** Streams the config to a one-off container that runs as uid 1000 with no network (review answer 0.5). */
   private writeConfigInVolume(json: string): Promise<void> {
+    return this.dockerWithStdin(openClawWriteConfigArgs(OPENCLAW_IMAGE, OPENCLAW_STATE_VOLUME), json, "OPENCLAW_CONFIG_WRITE_FAILED");
+  }
+
+  /** Runs `docker <args>` with `input` on stdin. Output is never printed; only the exit code and the stderr size are reported. */
+  private dockerWithStdin(args: string[], input: string, failureCode: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn("docker", openClawWriteConfigArgs(OPENCLAW_IMAGE, OPENCLAW_STATE_VOLUME), {
+      const child = spawn("docker", args, {
         stdio: ["pipe", "ignore", "pipe"],
       });
       let stderrLength = 0;
@@ -88,11 +130,84 @@ export class OpenClawAdapter extends BaseAdapter<OpenClawConfig> {
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error(`OPENCLAW_CONFIG_WRITE_FAILED: docker exited ${code} (stderr ${stderrLength} bytes, not printed)`));
+          reject(new Error(`${failureCode}: docker exited ${code} (stderr ${stderrLength} bytes, not printed)`));
         }
       });
-      child.stdin.end(json);
+      child.stdin.end(input);
     });
+  }
+
+  /** Runs a command in the running gateway container and returns stdout. Nothing is printed; a failure reports only the exit code. */
+  private execInGateway(command: string[], failureCode: string): Promise<string> {
+    const opts = this.composeOpts();
+    return new Promise((resolve, reject) => {
+      const child = spawn("docker", composeExecArgs(opts, "openclaw", command), {
+        cwd: opts.cwd,
+        env: opts.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let out = "";
+      let stderrLength = 0;
+      child.stdout.on("data", (chunk: Buffer) => {
+        out += chunk.toString();
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrLength += chunk.length;
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolve(out);
+        } else {
+          reject(new Error(`${failureCode}: the command exited ${code} (stderr ${stderrLength} bytes, not printed)`));
+        }
+      });
+    });
+  }
+
+  // ---- H2: seed primitive. Files go into the state volume as uid 1000 with no network; nothing is printed. ----
+
+  /** Writes `content` to `<workspace>/<relPath>`. The path is validated (relative, no `..`). */
+  async seedWorkspaceFile(relPath: string, content: string): Promise<void> {
+    await this.dockerWithStdin(openClawSeedFileArgs(OPENCLAW_IMAGE, OPENCLAW_STATE_VOLUME, relPath), content, "OPENCLAW_SEED_FAILED");
+  }
+
+  /** Writes MEMORY.md, or memory/<name>.md. */
+  async seedMemory(name: string, content: string): Promise<void> {
+    await this.seedWorkspaceFile(openClawMemoryPath(name), content);
+  }
+
+  /** Writes <workspace>/skills/<name>/SKILL.md. */
+  async seedSkill(name: string, skillMarkdown: string): Promise<void> {
+    await this.seedWorkspaceFile(openClawSkillPath(name), skillMarkdown);
+  }
+
+  /** Creates one automation (cron job) in the running gateway through the CLI. Needs the gateway up. */
+  async seedCron(spec: OpenClawCronSpec): Promise<void> {
+    await this.execInGateway(openClawCronCreateCommand(spec), "OPENCLAW_SEED_FAILED");
+  }
+
+  // ---- H3: approvals read primitive. Read-only; the `socket` token is dropped before anything is returned. ----
+
+  /** `openclaw approvals get --json` in the gateway container: the effective exec policy and the approvals document. */
+  async readApprovals(): Promise<Record<string, unknown>> {
+    return parseOpenClawApprovals(await this.execInGateway(OPENCLAW_APPROVALS_GET_COMMAND, "OPENCLAW_APPROVALS_READ_FAILED"));
+  }
+
+  /** `openclaw approvals pending --json`: approvals waiting for a decision. */
+  async readPendingApprovals(): Promise<Array<Record<string, unknown>>> {
+    return parseOpenClawPendingApprovals(await this.execInGateway(OPENCLAW_APPROVALS_PENDING_COMMAND, "OPENCLAW_APPROVALS_READ_FAILED"));
+  }
+
+  // ---- H6: restart primitive. ----
+
+  /**
+   * Restarts the gateway container and waits for /healthz and /readyz. The state volume, the env file and the config are
+   * kept as they are, so no option can change across a restart. `up` and `down` stay the only start and stop commands.
+   */
+  async restart(): Promise<void> {
+    await composeRestart(this.composeOpts(), "openclaw");
+    await this.waitHealthy();
   }
 
   async up(): Promise<void> {
@@ -101,14 +216,22 @@ export class OpenClawAdapter extends BaseAdapter<OpenClawConfig> {
     const liteLlm = readLlmRunState("litellm", llmRunStateFile("litellm")); // LiteLLM must be up first
     const token = this.tokenFor(true);
     fs.mkdirSync(this.cfg.productRoot, { recursive: true });
-    fs.writeFileSync(this.envFile(), openClawEnvText({ gatewayToken: token, liteLlmKey: liteLlm.apiKey }), {
+    const mockChannelToken = this.cfg.channelMock ? this.mockChannelTokenFor(true) : undefined;
+    fs.writeFileSync(this.envFile(), openClawEnvText({ gatewayToken: token, liteLlmKey: liteLlm.apiKey, mockChannelToken }), {
       encoding: "utf8",
       mode: 0o600,
     });
     fs.chmodSync(this.envFile(), 0o600);
 
     await run("docker", ["volume", "create", OPENCLAW_STATE_VOLUME], { cwd: HARNESS_DOCKER_DIR });
-    await this.writeConfigInVolume(`${JSON.stringify(openClawConfig({ responsesApi: this.cfg.responsesApi }), null, 2)}\n`);
+    await this.writeConfigInVolume(`${JSON.stringify(openClawConfig({
+          responsesApi: this.cfg.responsesApi,
+          channelMock: this.cfg.channelMock,
+          loopDetection: this.cfg.loopDetection,
+          webFetchAllowedHosts: this.cfg.webFetchAllowedHosts,
+          webFetchPrivateNetwork: this.cfg.webFetchPrivateNetwork,
+          nightlyModel: this.cfg.nightlyModel,
+        }), null, 2)}\n`);
     await composeUp(this.composeOpts(), { wait: true });
     await this.waitHealthy();
     console.log(
