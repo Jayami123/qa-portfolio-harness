@@ -26,14 +26,8 @@ services:
         condition: service_healthy
     env_file:
       - ${LIBRECHAT_ENV_FILE:?set by the adapter}
-    environment:
-      # Diagnostics only: the preload prints, per MCP request, the server name and whether an Authorization header is
-      # present (true or false). It never prints a value. P4_MCP_TRACE_HOSTS holds host and server names only.
-      NODE_OPTIONS: "--require /app/p4-mcp-trace.cjs"
-      P4_MCP_TRACE_HOSTS: ${LIBRECHAT_MCP_TRACE_HOSTS:-}
     volumes:
       - ${LIBRECHAT_CONFIG_FILE:?set by the adapter}:/app/librechat.yaml:ro
-      - ./librechat-mcp-trace.cjs:/app/p4-mcp-trace.cjs:ro
     ports:
       - "127.0.0.1:3080:3080"
     networks:
