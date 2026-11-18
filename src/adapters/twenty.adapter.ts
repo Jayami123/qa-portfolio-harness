@@ -190,6 +190,9 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
     await this.assertRunningServerImage();
     // Opt-in (TWENTY_MCP=1 exactly). Off by default, so the defaults above are unchanged.
     if (twentyMcpEnabled(process.env)) {
+      // seed() is idempotent (seedAlreadyPresent): a kept-volume restart skips it. A fresh volume needs it first,
+      // because signIn fails with "User not found" until workspace:seed:dev has created the admin.
+      await this.seed();
       await this.prepareMcp();
       await this.waitMcp();
     }
@@ -298,7 +301,7 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
       mcpAuthorization: `Bearer ${apiKeyToken}`,
       owner: { username: this.cfg.email, email: this.cfg.email },
     });
-    console.log(`Twenty MCP credential written (role ${role.label}, expires ${expiresAt}). It is not printed.`);
+    console.log("Twenty MCP credential written to the run state. It is not printed.");
   }
 
   /** MCP readiness: a real handshake and tools/list with the scoped key. The key is not printed. */
