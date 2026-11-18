@@ -9,6 +9,209 @@
 - Labels: **VERIFIED** (observed in this session; the command or file is named), **UNVERIFIED** (could not be checked, or checked only in part; a build-phase spike settles it), **INFERRED** (reasoned from verified facts, not observed end to end).
 - Start and stop products only through `npm run up -- <product>` and `npm run down -- <product>`. Finish every run with `down` and confirm `docker ps -a --filter name=qa-harness` is empty.
 
+## 0 Review answers (2026-11-18). Binding: this section wins over sections 2 to 16 where they conflict
+
+The reviewer answered Q1 to Q10. Each answer below replaces the matching text. Spike evidence is from the B1 spikes on 2026-11-18, run on the pinned images. Every item is VERIFIED unless marked UNVERIFIED.
+
+**0.1 Networking (Q1; replaces D12, section 3.7 item 1, risk R17 and every `network_mode: host` snippet).** No host networking anywhere.
+
+- The harness creates one external network, `qa-harness-p4`, idempotently before any agent-host or MCP-facing `up`: `docker network inspect qa-harness-p4 >/dev/null 2>&1 || docker network create qa-harness-p4`. The helper lives in `src/internal/p4-network.ts` (task 1).
+- Each compose project keeps its **default** network for intra-stack DNS (for example LibreChat to its own MongoDB). MCP-facing services and the three agent hosts also join `qa-harness-p4`, each with a **unique alias**, because service names collide (`db`, `mcp`, `app`, `redis`, `mail`):
+
+| Service | Alias on `qa-harness-p4` | Container port | Host publish (unchanged Part A values) |
+|---|---|---|---|
+| Nextcloud MCP (service `mcp`) | `nextcloud-mcp` | 8000 | `127.0.0.1:8765:8000` |
+| Outline (service `app`) | `outline` | 3000 (MCP at `/mcp`) | `127.0.0.1:3011:3000` |
+| Twenty server | `twenty-server` | 3000 (MCP at `/mcp`) | unchanged, see below |
+| Penpot MCP (service `mcp`) | `penpot-mcp` | 4401 | `127.0.0.1:4401:4401` |
+| Mattermost MCP (service `mcp`) | `mattermost-mcp` | 8066 | `127.0.0.1:8066:8066` |
+| LiteLLM (new) | `litellm` | 4000 | `127.0.0.1:4000:4000` |
+| LibreChat (new) | `librechat` | 3080 | `127.0.0.1:3080:3080` |
+| OpenClaw (new) | `openclaw` | 18789 | `127.0.0.1:18789:18789` |
+
+- The service's own process must listen on `0.0.0.0` **inside** its container, because a `127.0.0.1` listener inside a container is not reachable through a port publish (VERIFIED for LiteLLM and OpenClaw in the spikes). The host side stays on `127.0.0.1`. Penpot MCP needs `PENPOT_MCP_SERVER_LISTEN_ADDRESS=0.0.0.0` (VERIFIED in the spike; a build check confirms it is required).
+- Twenty: add the `qa-harness-p4` network and the `twenty-server` alias through the existing harness overlay only. Its existing non-loopback publishes and `docker/twenty.compose.yml` defaults are **not changed**. The Twenty service name is UNVERIFIED and is confirmed in the build.
+- Mongo (LibreChat's database) is **not published** to the host. It sits on the LibreChat project's default network only. This removes the 27017 host port.
+- LibreChat `librechat.yaml` uses the aliases, not `127.0.0.1`:
+
+```yaml
+version: 1.3.13
+cache: true
+mcpSettings:
+  allowedDomains:
+    - "nextcloud-mcp"
+    - "outline"
+    - "twenty-server"
+    - "penpot-mcp"
+    - "mattermost-mcp"
+    - "litellm"
+mcpServers:
+  nextcloud:
+    type: streamable-http
+    url: http://nextcloud-mcp:8000/mcp
+    headers:
+      Authorization: "${P4_NEXTCLOUD_MCP_AUTHORIZATION}"
+  outline:
+    type: streamable-http
+    url: http://outline:3000/mcp
+    headers:
+      Authorization: "${P4_OUTLINE_MCP_AUTHORIZATION}"
+  twenty:
+    type: streamable-http
+    url: http://twenty-server:3000/mcp
+    headers:
+      Authorization: "${P4_TWENTY_MCP_AUTHORIZATION}"
+  penpot:
+    type: streamable-http
+    url: http://penpot-mcp:4401/mcp
+  mattermost:
+    type: streamable-http
+    url: http://mattermost-mcp:8066/mcp
+    headers:
+      Authorization: "${P4_MATTERMOST_MCP_AUTHORIZATION}"
+endpoints:
+  custom:
+    - name: "P4 LiteLLM"
+      apiKey: "${P4_LITELLM_API_KEY}"
+      baseURL: "http://litellm:4000/v1"
+      models:
+        default: ["p4-stub"]
+        fetch: false
+      titleConvo: false
+```
+
+- **Correction to task 4:** `librechatMcpEnv` must take the **credential** (Authorization) from the Part A run state only. The **URL** is the alias URL in the table above, not the run-state `mcpUrl` (which is a host URL that the container cannot use). The `servers.url = creds.mcpUrl` line in task 4 is withdrawn.
+- Compose snippet for LiteLLM (replaces the `network_mode: host` block in task 3):
+
+```yaml
+name: qa-harness-litellm
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.110.0@sha256:4295b064b22eb88f9530e616afc812edd47048891ba64896bfc3fa74e2b883c3
+    command: ["--config", "/etc/p4/litellm-config.yaml", "--host", "0.0.0.0", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set by the adapter}
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - ${LITELLM_CONFIG_FILE:?set by the adapter}:/etc/p4/litellm-config.yaml:ro
+    ports:
+      - "127.0.0.1:4000:4000"
+    networks:
+      default: {}
+      p4:
+        aliases: [litellm]
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4
+```
+
+- LibreChat compose uses the same pattern: `HOST=0.0.0.0` and `PORT=3080` inside the container, `ports: ["127.0.0.1:3080:3080"]`, the `p4` network with alias `librechat`, and the Mongo service on the default network with no `ports:` entry.
+
+**0.2 Disk and CI (Q2; replaces section 10's split recommendation and risk R5).** Facts: Part A run `44242421839` (`P4 adapters`, run_number 3, head `34a3ec2`) concluded `success`. This is VERIFIED from run metadata. The owner reported from that run's artifact: `diskFreeGiB` 88 and a CI peak of 7848.9 MiB. **Those two figures are owner-supplied, not re-read here**: the artifact was not downloaded in this session. Combined RAM: 7848.9 + about 2581 MiB (agent hosts, measured at rest) is about 10430 MiB, under the 14336 MiB budget (INFERRED, to be measured). Images: about 19 GB against 88 GiB free (INFERRED).
+
+- **Start CI with the full set in one job**, in this order: `litellm librechat nextcloud outline twenty penpot mattermost openclaw`. LiteLLM is first because LibreChat and OpenClaw read its run state. The probe records `df` and `diskFreeGiB` before and after start.
+- The A/B/OC split is a **documented fallback only**. It is recorded in `0008-p4-stack-split.md` only if it is adopted after a measured failure. Section 10 is superseded for this.
+
+**0.3 Channels (Q3).** No channel in B1. `channels.qa-channel` stays UNVERIFIED (in the schema, purpose undocumented). It is decided later after reading its source. `channels: {}` in the config.
+
+**0.4 LiteLLM `/mcp` (Q4; reinforces D15).** No documented switch disables `/mcp` in v1.110.0. `LITELLM_ENABLE_ADMIN_MCP` covers only enterprise `/admin/mcp`, so it stays unset or `false`. Mitigation, recorded in ADR 0007: loopback host publish only, no MCP server granted, readiness asserts `tools/list` returns an empty list (VERIFIED: `initialize` answers "no MCP servers granted", `tools/list` answers `{"tools":[]}`). Do not use `litellm_enterprise`.
+
+**0.5 OpenClaw substitution (Q5; replaces D17, the root helper, and the task 5 config and compose).** The spike (VERIFIED) found:
+
+- `${VAR}` substitution works. `gateway.auth.token: "${OPENCLAW_GATEWAY_TOKEN}"` becomes a SecretRef on env `OPENCLAW_GATEWAY_TOKEN`. `models.providers.p4-litellm.apiKey: "${P4_LITELLM_API_KEY}"` resolves from `P4_LITELLM_API_KEY`. With the variable unset, OpenClaw warns that the feature is unavailable, so the adapter must check both names exist before `up`.
+- The gateway must bind `lan` **inside the container** (`gateway.bind: "lan"`), because a loopback bind is not reachable through the port publish. Token auth stays on. `/healthz` returned 200 from the host through `127.0.0.1:18789`.
+- The config has **placeholders only**, so it holds no secret and needs no 0600. It is written into the named volume `qa-harness-openclaw-state` by a one-off container that runs as the image's `node` user (uid 1000), not as root: `docker run --rm -i --user 1000:1000 -v qa-harness-openclaw-state:/home/node/.openclaw --network none --entrypoint sh <image> -c 'cat > /home/node/.openclaw/openclaw.json'`, with the JSON on stdin. The file came out owned by `1000:1000`. No root helper, no `chown`. This is VERIFIED.
+- Secrets go in `.harness/openclaw/env` (mode 0600), passed to compose with `env_file`. **It must not sit in the state directory**: OpenClaw reads `~/.openclaw/.env` automatically, and a root-owned file there caused `EACCES` (VERIFIED).
+- The gateway reported `ready: true` on `/readyz` after about 30 s, with no `EROFS` error (VERIFIED).
+
+Config (placeholders, written into the volume):
+
+```json
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 18789,
+    "auth": { "mode": "token", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+  },
+  "tools": { "exec": { "ask": "always", "security": "allowlist" } },
+  "approvals": { "exec": { "enabled": true, "mode": "session" } },
+  "agents": { "defaults": { "model": { "primary": "p4-litellm/p4-stub" } } },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "p4-litellm": {
+        "baseUrl": "http://litellm:4000/v1",
+        "apiKey": "${P4_LITELLM_API_KEY}",
+        "api": "openai-completions",
+        "models": [ { "id": "p4-stub", "name": "p4-stub" } ]
+      }
+    }
+  },
+  "channels": {}
+}
+```
+
+Compose (replaces task 5d):
+
+```yaml
+name: qa-harness-openclaw
+services:
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:2026.10.33-slim@sha256:dcd5925b76a2f3b6ac55e173741223a7ab1fe6b3b1c53c419ee2e3d3cbdcf503
+    env_file:
+      - ${OPENCLAW_ENV_FILE:?set by the adapter}
+    environment:
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+    volumes:
+      - qa-harness-openclaw-state:/home/node/.openclaw
+    ports:
+      - "127.0.0.1:18789:18789"
+    networks:
+      default: {}
+      p4:
+        aliases: [openclaw]
+volumes:
+  qa-harness-openclaw-state:
+    name: qa-harness-openclaw-state
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4
+```
+
+Order in `up()`: `ensureP4Network()`, `docker volume create qa-harness-openclaw-state`, write the config with the one-off above, `composeUp --wait`, `waitHealthy()`. The adapter's `openClawWriteConfigArgs` in task 5b changes to this non-root form. `assertOpenClawPinIsRelease` stays.
+
+**0.6 LibreChat seed user (Q6; replaces the B1 "no user" decision).** VERIFIED: `npm run create-user -- <email> <name> <username> <password> --email-verified=true`, run with `docker exec` and stdin from `/dev/null`, exits 0 and prints "User created successfully!". Without `--email-verified=true` the script prompts and hangs. The password is an argument, which the script warns about and never echoes. This is accepted for a throwaway container. The fake owner is `qa-owner@p4.test`, name `QA Owner`, username `qa-owner`. Its password goes in `.harness/librechat/secrets.json` (mode 0600). `ALLOW_REGISTRATION` stays `false` at all times, because `create-user` does not need it. Login: `POST /api/auth/login` returns 200 with a token (VERIFIED).
+
+**0.7 LibreChat MCP proof (Q7; replaces the "LibreChat MCP not proved in B1" line in section 8).** VERIFIED: v0.8.7 has the supported routes `GET /api/mcp/tools` (behind `requireJwtAuth`; returns `servers.<name>.tools` as an array) and `GET /api/mcp/connection/status` (returns `connectionStatus.<name>.connectionState`). Spike result with the Penpot MCP at `penpot-mcp:4401` on the shared network: `connected`, `requiresOAuth: false`, five tools (`execute_code`, `high_level_overview`, `penpot_api_info`, `export_shape`, `import_image`). The same routes against LiteLLM's ungranted `/mcp`: `disconnected`, 0 tools. **B1 readiness for LibreChat:** health 200, login 200, then each configured server reports `connected` and `tools` has at least one entry, in stub mode. Each server's tool count is recorded in the evidence.
+
+**0.8 ADR (Q8).** This ADR is `docs/adr/0007-p4-agent-hosts.md`, covering the shared network, aliases and licences. Add an addendum to `docs/adr/0006-p4-products.md`: the reserved "0007 for the split" line is retargeted to `0008`, and `0008-p4-stack-split.md` is written only if a measured split is adopted.
+
+**0.9 LiteLLM `p4-stub` (Q9; replaces the route stub and `P4_STUB_BASE_URL`).** No `scripts/p4-route-stub.mjs`. The alias uses **config-level** `mock_response` in the generated config. VERIFIED on v1.110.0:
+
+```yaml
+model_list:
+  - model_name: p4-stub
+    litellm_params:
+      model: openai/stub-upstream-model
+      mock_response: "stub-ok"
+  - model_name: p4-nightly
+    litellm_params:
+      model: gemini/gemma-4-31b-it
+      api_key: os.environ/GEMINI_API_KEY
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+```
+
+The `p4-stub` completion returned HTTP 200 with content `stub-ok`, headers `x-litellm-model-group: p4-stub` and `x-litellm-model-name: openai/stub-upstream-model`. `p4-nightly` without a key returned HTTP 500 "Missing Gemini API key" with no network call. Delete `stubBaseUrl`, `P4_STUB_BASE_URL` and `liteLlmConfigYaml`'s argument from tasks 1 and 3. B2 switches `p4-stub` to `api_base` for the suite fixture server.
+
+**0.10 Licences (Q10).** MongoDB SSPL is **accepted for local QA**, and is recorded in `docs/pins/p4.md` and ADR 0007. `litellm_enterprise` ships in the image and is not used. The build confirms this, and it does not block task 1.
+
+**Probe containers and networks.** All probe containers were removed, and the `qa-harness-p4` probe network was removed. The scratch files are outside the repo.
+
 ## 2 Goal and scope
 
 **Goal.** Add three pinned, image-only, startable adapters so the P4 suite can start its agent hosts the same way it starts the Part A products (ADR 0006, D1: `productRoot = .harness/<product>`):
@@ -1454,7 +1657,7 @@ describe("openclaw-seed", () => {
 
 ### Task 6: RAM probe, route stub and ordering (extend, never change the budget)
 
-#### 6a `scripts/p4-route-stub.mjs` (TEMPORARY, removed in part B2)
+#### 6a REMOVED by review answer Q9 (no route stub; see section 0.9)
 
 ```js
 // TEMPORARY route listener for the B1 readiness proof only (ADR 0007). The suite's fixture server replaces it in part B2,
@@ -1551,7 +1754,7 @@ Already covered in task 1 step 8.
 
 **Commit:** `chore(scripts): start the route stub and check agent host order in the ram probe`.
 
-### Task 7: CI, sibling advisory workflow
+### Task 7: CI, sibling advisory workflow (matrix SUPERSEDED: section 0.2 runs the full set first; the three-stack matrix is the fallback only)
 
 File `.github/workflows/p4-agent-hosts.yml`:
 
@@ -1807,7 +2010,7 @@ The MCP servers that LibreChat attaches are proved by **their own Part A adapter
 
 Rules: nothing prints a key, token or password (names and paths only); no secret goes in a committed file, a log or the uploaded evidence; `.harness/` is gitignored and never uploaded; the fake owner is `qa-owner@p4.test` (`.test` is reserved), created only when B2 needs a login.
 
-## 10 Memory, disk and the split fallback
+## 10 Memory, disk and the split fallback (SUPERSEDED by section 0.2: full set first, split only as a documented fallback)
 
 **RAM (measured in the probe, INFERRED for the sum).** About 2.58 GiB for the three agent hosts plus Mongo, added to Part A's measured 4901 MiB peak: about **7.5 GiB** against the 14336 MiB budget. The probe measures the per-instant sum in CI, so this number is checked there.
 
@@ -1877,7 +2080,7 @@ stat -c '%a %n' .harness/*/secrets.json .harness/*/librechat.env .harness/litell
 git status --short                                           # expected: no .harness/ entries
 ```
 
-## 12 ADR draft
+## 12 ADR draft (the decisions in this draft are superseded where section 0 differs: shared network, aliases, mock_response, OpenClaw substitution)
 
 The ADR text is in section 6, task 8, step 3. The build writes it to `docs/adr/0007-p4-agent-hosts.md`.
 
@@ -1926,7 +2129,7 @@ The ADR text is in section 6, task 8, step 3. The build writes it to `docs/adr/0
 | R18 | Container env is visible in `docker inspect`. Acceptable on a throwaway loopback stack (as ADR 0006 R14). | VERIFIED by design |
 | R19 | Part A ports do not clash with 4000, 3080, 18789, 27017, 9911 (the list in D23). | VERIFIED against the Part A compose files |
 
-**Questions for the reviewer**
+**Questions for the reviewer (all answered in section 0)**
 
 - **Q1 Host networking (D12).** Accept host networking on Linux for B1 (non-standard, flagged), with the user-defined network as the recorded alternative in ADR 0007? Or require the network alternative now (it means editing the Part A MCP compose files)?
 - **Q2 Disk and split.** Start CI with the three-job split (A, B, OC) and try the full set only after it is measured? Or require the full set in one job?
