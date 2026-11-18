@@ -953,3 +953,11 @@ Spikes ran with raw `docker compose` files in the session scratchpad (not commit
 - **Mattermost MCP headless OAuth.** Only PAT bearer was verified (dev binary).
 - **Outline tool calls.** `tools/list` is verified. The `list_documents` tool call is not.
 - **Nextcloud apps.** Calendar, Contacts and Mail are not installed (appstore unreachable). UNVERIFIED.
+
+### 18.5 Deviation: Outline on host port 3011
+
+The plan gave Outline host port 3010. `docker/documenso.gotenberg.compose.yml` (opt-in) already publishes `127.0.0.1:3010`, so the two cannot run together. Outline now uses `127.0.0.1:3011` (app and `URL`), with `OUTLINE_BASE_URL` defaulting to `http://127.0.0.1:3011`. The MCP is Outline's built-in `/mcp` on the same origin, so its URL moves with it.
+
+### 18.6 Fix: Twenty seeds before minting the MCP credential
+
+The advisory `P4 adapters` job failed at `975b994`: `mcp signIn returned GraphQL errors (HTTP 200): User not found`. `up()` minted the MCP key straight after the compose health check, before `workspace:seed:dev` had created the admin. `up()` now calls the existing `seed()` first, only when `TWENTY_MCP=1`. `seed()` is idempotent (`seedAlreadyPresent`), so a kept-volume restart skips the seed. With the flag unset, nothing changes.

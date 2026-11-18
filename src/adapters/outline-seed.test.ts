@@ -53,8 +53,8 @@ describe("outline-seed", () => {
   });
 
   it("builds auth.info with a bearer key and an empty JSON body", () => {
-    const req = authInfoRequest("http://127.0.0.1:3010", `Bearer ${KEY}`);
-    assert.equal(req.url, "http://127.0.0.1:3010/api/auth.info");
+    const req = authInfoRequest("http://127.0.0.1:3011", `Bearer ${KEY}`);
+    assert.equal(req.url, "http://127.0.0.1:3011/api/auth.info");
     assert.equal(req.init.method, "POST");
     assert.equal(req.init.body, "{}");
     assert.equal((req.init.headers as Record<string, string>).Authorization, `Bearer ${KEY}`);

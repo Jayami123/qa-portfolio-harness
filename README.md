@@ -477,7 +477,7 @@ bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty   # writ
 | Product | App (127.0.0.1) | MCP (127.0.0.1) | MCP auth | Notes |
 |---|---|---|---|---|
 | Nextcloud | 8080 | 8765 `/mcp` | app password, pass-through (`multi_user_basic`) | The MCP holds no Nextcloud credential. Calendar, Contacts and Mail app installs are unverified (the appstore was unreachable). |
-| Outline | 3010 | 3010 `/mcp` (built in) | API key bearer | BSL 1.1 licence, accepted for local QA use. Owner and team are created through Outline's models. |
+| Outline | 3011 | 3011 `/mcp` (built in) | API key bearer | BSL 1.1 licence, accepted for local QA use. Owner and team are created through Outline's models. |
 | Penpot | 9001 | 4401 `/mcp` (single-user) | none | The MCP plugin connects from a browser. A design edit needs that browser session; readiness checks `tools/list` only. |
 | Mattermost | 8065 | 8066 `/mcp` | PAT of a member account with no admin role | **The MCP binary is development-only upstream**, built from a pinned commit. No Enterprise licence. |
 | Twenty | 3002 | 3002 `/mcp` | scoped API key (opt-in `TWENTY_MCP=1`) | The Twenty stack and its defaults are unchanged. |

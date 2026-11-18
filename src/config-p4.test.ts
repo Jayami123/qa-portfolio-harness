@@ -58,7 +58,7 @@ describe("P4 config and the fork split (ADR 0006, D1 and D2)", () => {
   });
 
   it("Outline MCP is the app origin plus /mcp", () => {
-    assert.equal(loadProductConfig("outline").mcpUrl, "http://127.0.0.1:3010/mcp");
+    assert.equal(loadProductConfig("outline").mcpUrl, "http://127.0.0.1:3011/mcp");
   });
 
   it("P4 defaults carry no database password (CLAUDE.md: no passwords in committed files)", () => {

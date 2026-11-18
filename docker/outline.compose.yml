@@ -46,7 +46,7 @@ services:
       mail:
         condition: service_started
     ports:
-      - "127.0.0.1:3010:3000"
+      - "127.0.0.1:3011:3000"
     environment:
       # ENVIRONMENT is derived from NODE_ENV; it must be "production" for the server to start.
       NODE_ENV: production
@@ -55,7 +55,7 @@ services:
       DATABASE_URL: postgres://outline:${OUTLINE_DB_PASSWORD:?set by the adapter}@db:5432/outline
       PGSSLMODE: disable
       REDIS_URL: redis://redis:6379
-      URL: http://127.0.0.1:3010
+      URL: http://127.0.0.1:3011
       PORT: "3000"
       FORCE_HTTPS: "false"
       FILE_STORAGE: local

@@ -115,7 +115,7 @@ const envSchema = z.object({
   NEXTCLOUD_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8080"),
   NEXTCLOUD_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8765/mcp"),
   NEXTCLOUD_DB_URL: z.string().trim().min(1).default("postgres://nextcloud@127.0.0.1:5460/nextcloud"),
-  OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3010"),
+  OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3011"),
   OUTLINE_DB_URL: z.string().trim().min(1).default("postgres://outline@127.0.0.1:5461/outline"),
   PENPOT_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:9001"),
   PENPOT_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:4401/mcp"),
