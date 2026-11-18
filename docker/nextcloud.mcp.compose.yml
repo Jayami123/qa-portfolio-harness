@@ -4,6 +4,11 @@
 services:
   mcp:
     image: ghcr.io/cbcoutinho/nextcloud-mcp-server:0.213.2@sha256:655c2864b48fd3f0696480ebe19a165ff114a582b30b9cec1d6ab4923586d325
+    networks:
+      default: {}
+      p4:
+        aliases:
+          - nextcloud-mcp
     depends_on:
       app:
         condition: service_started
@@ -12,3 +17,8 @@ services:
     environment:
       NEXTCLOUD_HOST: http://app
       MCP_DEPLOYMENT_MODE: multi_user_basic
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4

@@ -13,6 +13,11 @@ services:
 
   server:
     image: twentycrm/twenty:${TAG:-v2.44.0}
+    networks:
+      default: {}
+      p4:
+        aliases:
+          - twenty-server
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -57,3 +62,8 @@ services:
   redis:
     # Pinned by version and digest (ADR 0005). The fork's compose uses the floating tag `redis`.
     image: redis:8.10.3@sha256:1f88291b4c57bdf249f02eb085a8669889b2d2954e91d4de5118a5da6b78dd53
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4

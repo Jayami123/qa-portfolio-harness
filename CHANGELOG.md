@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- P4 agent hosts (LiteLLM, LibreChat, OpenClaw): harness adapters, pins, a shared `qa-harness-p4` network, and an advisory CI job (ADR 0007).
+
 - P4: four image-only adapters, `nextcloud`, `outline`, `penpot` and `mattermost`, added to `ProductId`, `getAdapter` and `scripts/up.mjs` / `down.mjs`. Each starts a pinned, digest-pinned compose stack (`docker/<product>.compose.yml`), waits for app health and for a real MCP `initialize` + `tools/list`, and writes one fake owner's MCP credential to `.harness/<product>-run.json` (mode 0600, removed by `down`). See ADR 0006 and `docs/pins/p4.md`.
 - P4 licences recorded in ADR 0006: Outline is BSL 1.1 (accepted for local QA use); the Mattermost MCP binary is development-only upstream and is built from a pinned commit of `mattermost/mattermost-plugin-agents` (Apache-2.0).
 - Twenty: opt-in `TWENTY_MCP=1` (exact value) mints a least-privilege API key through the loginToken exchange and waits for `/mcp`. With it unset, nothing changes. The Twenty compose file and every Twenty default are unchanged.

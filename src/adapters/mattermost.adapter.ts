@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { MattermostConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
+import { ensureP4Network } from "../internal/p4-network.js";
 import { run, runCapture } from "../internal/run.js";
 import { HARNESS_DOCKER_DIR } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
@@ -110,6 +111,8 @@ export class MattermostAdapter extends BaseAdapter<MattermostConfig> {
   }
 
   async up(): Promise<void> {
+    // The compose file declares qa-harness-p4 as external, so it must exist before any compose call.
+    await ensureP4Network();
     this.secrets = this.secretsFromDisk();
     this.writeSecrets(this.secrets);
     this.prepareBuildContext();

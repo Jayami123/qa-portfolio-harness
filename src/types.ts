@@ -2,11 +2,26 @@
 export type ForkProductId = "cal" | "documenso" | "medusa" | "twenty";
 
 /** P4 products: image-only, no fork. Their productRoot is .harness/<product> (ADR 0006, decision D1). */
-export type P4ProductId = "nextcloud" | "outline" | "penpot" | "mattermost";
+export type P4ProductId =
+  | "nextcloud"
+  | "outline"
+  | "penpot"
+  | "mattermost"
+  | "litellm"
+  | "librechat"
+  | "openclaw";
 
 export type ProductId = ForkProductId | P4ProductId;
 
-export const P4_PRODUCT_IDS: readonly P4ProductId[] = ["nextcloud", "outline", "penpot", "mattermost"];
+export const P4_PRODUCT_IDS: readonly P4ProductId[] = [
+  "nextcloud",
+  "outline",
+  "penpot",
+  "mattermost",
+  "litellm",
+  "librechat",
+  "openclaw",
+];
 
 export function isForkProductId(id: ProductId): id is ForkProductId {
   return !(P4_PRODUCT_IDS as readonly string[]).includes(id);

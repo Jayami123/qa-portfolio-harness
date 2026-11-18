@@ -1,0 +1,38 @@
+# LiteLLM proxy (ADR 0007, review answers 0.1, 0.4, 0.9). Official image pinned by digest, no fork. Ports are published on
+# 127.0.0.1 only. Inside the container the proxy listens on 0.0.0.0 so the port publish can reach it. The shared network
+# qa-harness-p4 gives the other agent hosts the alias `litellm`. Nothing secret is written in this file.
+#
+#   node scripts/up.mjs litellm
+name: qa-harness-litellm
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.110.0@sha256:4295b064b22eb88f9530e616afc812edd47048891ba64896bfc3fa74e2b883c3
+    command:
+      - --config
+      - /etc/p4/litellm-config.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "4000"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set by the adapter}
+      # Uses the bundled model cost map, so the proxy does not fetch raw.githubusercontent.com at boot (VERIFIED in the spike log).
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      # Empty in stub mode (D14). The adapter sets it only in nightly mode.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Unset: the enterprise admin MCP is not used (review answer 0.4).
+    volumes:
+      - ${LITELLM_CONFIG_FILE:?set by the adapter}:/etc/p4/litellm-config.yaml:ro
+    ports:
+      - "127.0.0.1:4000:4000"
+    networks:
+      default: {}
+      p4:
+        aliases:
+          - litellm
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4

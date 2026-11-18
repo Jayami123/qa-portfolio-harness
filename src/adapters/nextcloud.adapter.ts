@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { NextcloudConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
+import { ensureP4Network } from "../internal/p4-network.js";
 import { run } from "../internal/run.js";
 import { HARNESS_DOCKER_DIR } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
@@ -27,6 +28,11 @@ import {
   writeP4RunState,
 } from "./p4-run-state.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
+import { describeFetchFailure } from "../wait/readiness-error.js";
+import { printReadinessDiagnostics } from "../wait/readiness-diagnostics.js";
+
+/** The Nextcloud app container (compose project qa-harness-nextcloud, service app). */
+const NEXTCLOUD_APP_CONTAINER = "qa-harness-nextcloud-app-1";
 import type { McpReadiness } from "./types.js";
 
 const STATUS_POLL_MS = 2000;
@@ -77,6 +83,8 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
   }
 
   async up(): Promise<void> {
+    // The compose file declares qa-harness-p4 as external, so it must exist before any compose call.
+    await ensureP4Network();
     this.secrets = this.secretsFromDisk();
     this.writeSecrets(this.secrets);
     await composeUp(this.composeOpts(false), { wait: true });
@@ -125,11 +133,13 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
         } else {
           last = `HTTP ${response.status}`;
         }
-      } catch {
-        last = "connection failed";
+      } catch (error) {
+        last = describeFetchFailure(error);
       }
       await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_MS));
     }
+    console.log(`Nextcloud readiness: the last attempt failed with ${last}`);
+    printReadinessDiagnostics({ url, container: NEXTCLOUD_APP_CONTAINER });
     throw new Error(`Timed out waiting for ${url} to be ready (last: ${last})`);
   }
 

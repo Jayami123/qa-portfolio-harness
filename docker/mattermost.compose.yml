@@ -46,6 +46,11 @@ services:
       args:
         MM_AGENTS_COMMIT: 96ecd17ce4d4b6cbcec1abcd2a9173759b4e85e1
     image: p4-harness/mattermost-mcp:96ecd17
+    networks:
+      default: {}
+      p4:
+        aliases:
+          - mattermost-mcp
     depends_on:
       - app
     # The binary binds 0.0.0.0 inside the container (the host port stays on 127.0.0.1). --site-url is required then.
@@ -67,3 +72,8 @@ services:
 
 volumes:
   mattermost_harness_pg: {}
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4

@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { TwentyConfig } from "../config.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
+import { ensureP4Network } from "../internal/p4-network.js";
 import { TWENTY_REPLICAS_COMPOSE_FILE, twentyServerReplicas } from "./twenty-replicas.js";
 import { run, runCapture } from "../internal/run.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
@@ -167,6 +168,8 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
   }
 
   async up(): Promise<void> {
+    // The compose file declares qa-harness-p4 as external, so it must exist before any compose call.
+    await ensureP4Network();
     assertTwentyImageTag(this.cfg.imageTag);
     const requireFresh = readTwentyRequireFresh(process.env);
     if (requireFresh) {

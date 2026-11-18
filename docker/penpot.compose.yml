@@ -92,6 +92,11 @@ services:
 
   mcp:
     image: penpotapp/mcp:2.19.2@sha256:94c6672072a1fbbdb5ff577375e96d3f67b3a67ecdcd8f81498c5ec27eba36f3
+    networks:
+      default: {}
+      p4:
+        aliases:
+          - penpot-mcp
     # Single-user mode (no --multi-user). The plugin UI sends no user token, so single-user is what connects.
     # Both ports stay on loopback.
     command: ["node", "index.js"]
@@ -102,3 +107,8 @@ services:
 volumes:
   penpot_harness_pg: {}
   penpot_harness_data: {}
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4

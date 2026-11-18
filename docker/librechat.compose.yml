@@ -1,0 +1,46 @@
+# LibreChat chat host and its MongoDB (ADR 0007, review answers 0.1 and 0.6). The app joins the shared network
+# qa-harness-p4 with the alias `librechat`, and publishes 127.0.0.1:3080 only. MongoDB stays on the project's default
+# network and is not published. Secrets come from the adapter's env file. None is written here.
+#
+#   node scripts/up.mjs librechat   (run `up litellm` first; the adapter reads its run state)
+name: qa-harness-librechat
+
+services:
+  mongodb:
+    image: mongo:8@sha256:05b334b0a7a78fe913caac0cd2e1ecccf4da515d9a3a44be911b6ea3734c17cd
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: librechat
+      MONGO_INITDB_ROOT_PASSWORD: ${LIBRECHAT_MONGO_PASSWORD:?set by the adapter}
+    volumes:
+      - librechat_harness_mongo:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/27017' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  app:
+    image: ghcr.io/librechat-ai/librechat:v0.8.7@sha256:c5db3331b845e1f289f8d04c0c77936c4bbe372f76730a804abc1c37e44d23a9
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    env_file:
+      - ${LIBRECHAT_ENV_FILE:?set by the adapter}
+    volumes:
+      - ${LIBRECHAT_CONFIG_FILE:?set by the adapter}:/app/librechat.yaml:ro
+    ports:
+      - "127.0.0.1:3080:3080"
+    networks:
+      default: {}
+      p4:
+        aliases:
+          - librechat
+
+volumes:
+  librechat_harness_mongo:
+    name: qa-harness-librechat-mongo
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4
