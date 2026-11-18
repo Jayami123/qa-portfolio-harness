@@ -1,4 +1,5 @@
 import type { HealthStatus } from "../types.js";
+import { describeFetchFailure } from "./readiness-error.js";
 
 const DEFAULT_INTERVAL_MS = 2000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -70,10 +71,7 @@ async function getOnce(url: string, probe: ProbeOptions): Promise<HealthStatus> 
         checkedAt: nowIso(),
       };
     } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-      if (lastError.includes("abort")) {
-        lastError = "fetch timed out";
-      }
+      lastError = describeFetchFailure(error);
     } finally {
       clearTimeout(timer);
     }

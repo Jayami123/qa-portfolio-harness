@@ -28,6 +28,11 @@ import {
   writeP4RunState,
 } from "./p4-run-state.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
+import { describeFetchFailure } from "../wait/readiness-error.js";
+import { printReadinessDiagnostics } from "../wait/readiness-diagnostics.js";
+
+/** The Nextcloud app container (compose project qa-harness-nextcloud, service app). */
+const NEXTCLOUD_APP_CONTAINER = "qa-harness-nextcloud-app-1";
 import type { McpReadiness } from "./types.js";
 
 const STATUS_POLL_MS = 2000;
@@ -128,11 +133,13 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
         } else {
           last = `HTTP ${response.status}`;
         }
-      } catch {
-        last = "connection failed";
+      } catch (error) {
+        last = describeFetchFailure(error);
       }
       await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_MS));
     }
+    console.log(`Nextcloud readiness: the last attempt failed with ${last}`);
+    printReadinessDiagnostics({ url, container: NEXTCLOUD_APP_CONTAINER });
     throw new Error(`Timed out waiting for ${url} to be ready (last: ${last})`);
   }
 
