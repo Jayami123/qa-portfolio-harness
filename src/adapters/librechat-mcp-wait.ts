@@ -15,6 +15,8 @@ export interface McpWaitIo {
   openTools(): Promise<unknown>;
   /** GET /api/mcp/connection/status. Reads the connections. */
   readStatus(): Promise<unknown>;
+  /** Runs once, the first time a status poll shows any server not connected. The adapter runs the probe here. */
+  onFirstNotConnected?(states: Record<string, string>): Promise<void>;
   /** Runs when the wait gives up. The adapter prints diagnostics here. */
   onTimeout(states: Record<string, string>): void;
   sleep(ms: number): Promise<void>;
@@ -41,6 +43,7 @@ export async function waitForMcpServers(io: McpWaitIo, opts: McpWaitOptions): Pr
   let lastOpen = Number.NEGATIVE_INFINITY;
   let states: Record<string, string> = Object.fromEntries(opts.names.map((n) => [n, "not polled"]));
   let last = "no attempt";
+  let notConnectedSeen = false;
 
   for (;;) {
     // 1. Open the connections (first pass, and again while a server is still down).
@@ -60,6 +63,10 @@ export async function waitForMcpServers(io: McpWaitIo, opts: McpWaitOptions): Pr
         return toolCountsByServer(await io.openTools(), opts.names);
       }
       last = `not connected: ${opts.names.filter((n) => states[n] !== "connected").join(", ")}`;
+      if (!notConnectedSeen) {
+        notConnectedSeen = true;
+        await io.onFirstNotConnected?.(states);
+      }
     } catch (err) {
       last = err instanceof Error ? err.message.slice(0, 160) : "unknown";
     }

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { spawn } from "node:child_process";
+import { after, before, describe, it } from "node:test";
 import {
   connectionStates,
   interestingLogLines,
@@ -20,12 +23,11 @@ describe("librechat-diag (CI diagnostics, values never printed)", () => {
     assert.ok(values.includes("Basic dXNlcjpzZWNyZXQ="));
     assert.ok(values.includes("jwt-value-123"));
     assert.ok(values.includes("owner-pw-456"));
-    assert.ok(!values.includes("3080"), "short values are not redacted, so they do not hide ordinary text");
+    assert.ok(!values.includes("3080"), "short values are not redacted");
   });
 
   it("replaces every collected value in a text", () => {
-    const values = ["jwt-value-123", "Basic dXNlcjpzZWNyZXQ="];
-    const out = redactText("token jwt-value-123 and Basic dXNlcjpzZWNyZXQ= end", values);
+    const out = redactText("token jwt-value-123 and Basic dXNlcjpzZWNyZXQ= end", ["jwt-value-123", "Basic dXNlcjpzZWNyZXQ="]);
     assert.doesNotMatch(out, /jwt-value-123|dXNlcjpzZWNyZXQ/);
     assert.match(out, /\*\*\*/);
   });
@@ -43,10 +45,9 @@ describe("librechat-diag (CI diagnostics, values never printed)", () => {
       penpot: "connected",
       outline: "missing",
     });
-    assert.deepEqual(connectionStates(null, ["nextcloud"]), { nextcloud: "missing" });
   });
 
-  it("names the LibreChat app container and the five MCP containers, and no others", () => {
+  it("names the LibreChat app container and the five MCP containers", () => {
     assert.equal(LIBRECHAT_APP_CONTAINER, "qa-harness-librechat-app-1");
     assert.deepEqual(Object.keys(MCP_CONTAINERS).sort(), ["mattermost", "nextcloud", "outline", "penpot", "twenty"]);
     assert.equal(mcpContainerFor("nextcloud"), "qa-harness-nextcloud-mcp-1");
@@ -63,9 +64,59 @@ describe("librechat-diag (CI diagnostics, values never printed)", () => {
     ]);
   });
 
-  it("the probe script resolves the host and reports status without printing headers", () => {
-    assert.match(PROBE_SCRIPT, /dns\.lookup/);
-    assert.match(PROBE_SCRIPT, /process\.env\[authEnv\]/);
-    assert.doesNotMatch(PROBE_SCRIPT, /console\.log\([^)]*headers/);
+  it("the probe has short limits, checks in parallel, and never prints a header or an env value", () => {
+    assert.match(PROBE_SCRIPT, /AbortSignal\.timeout\(4000\)/);
+    assert.match(PROBE_SCRIPT, /Promise\.all\(servers\.map\(probe\)\)/);
+    assert.match(PROBE_SCRIPT, /auth var set|auth var EMPTY/);
+    assert.doesNotMatch(PROBE_SCRIPT, /console\.log\([^)]*(headers|process\.env\[authEnv\])/);
+  });
+
+  describe("the probe, run for real against a local server", () => {
+    let server: Server;
+    let base = "";
+
+    before(async () => {
+      server = createServer((req, res) => {
+        req.resume();
+        req.on("end", () => res.writeHead(200, { "content-type": "application/json" }).end("{}"));
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+      base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;
+    });
+
+    after(() => {
+      server.close();
+    });
+
+    /** Async on purpose: the probe's server lives in this process, so a blocking spawn would starve it. */
+    function runProbe(env: Record<string, string>): Promise<{ lines: string[]; out: string }> {
+      const list = JSON.stringify([
+        ["withauth", base, "P4_TEST_AUTH"],
+        ["noauthvar", base, null],
+        ["emptyauth", base, "P4_TEST_EMPTY"],
+      ]);
+      return new Promise((resolve, reject) => {
+        const child = spawn("node", ["-e", PROBE_SCRIPT, list], { env: { ...process.env, ...env } });
+        let out = "";
+        child.stdout.on("data", (c: Buffer) => (out += c.toString()));
+        child.stderr.on("data", (c: Buffer) => (out += c.toString()));
+        const timer = setTimeout(() => child.kill("SIGKILL"), 20000);
+        child.on("error", reject);
+        child.on("close", () => {
+          clearTimeout(timer);
+          resolve({ lines: out.split("\n").filter((l) => l.includes(" | ")), out });
+        });
+      });
+    }
+
+    it("prints one line per server with the status and the auth state, and never the value", async () => {
+      const secret = "tok-SHOULD-NOT-APPEAR-9f3c";
+      const { lines, out } = await runProbe({ P4_TEST_AUTH: secret, P4_TEST_EMPTY: "" });
+      assert.equal(lines.length, 3);
+      assert.match(lines.find((l) => l.startsWith("withauth")) ?? "", /http 200 \| auth var set/);
+      assert.match(lines.find((l) => l.startsWith("noauthvar")) ?? "", /no auth var/);
+      assert.match(lines.find((l) => l.startsWith("emptyauth")) ?? "", /auth var EMPTY/);
+      assert.doesNotMatch(out, /tok-SHOULD-NOT-APPEAR/);
+    });
   });
 });

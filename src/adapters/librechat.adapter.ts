@@ -23,10 +23,9 @@ import {
   interestingLogLines,
   LIBRECHAT_APP_CONTAINER,
   mcpContainerFor,
-  probeArgs,
   redactionValues,
   redactText,
-  serversFor,
+  streamMcpProbe,
 } from "./librechat-diag.js";
 import {
   createOwnerArgs,
@@ -206,6 +205,10 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
       {
         openTools: () => get("/api/mcp/tools"),
         readStatus: () => get("/api/mcp/connection/status"),
+        onFirstNotConnected: async (states) => {
+          console.log(`LibreChat MCP: not all servers are connected yet (${Object.entries(states).map(([n, s]) => `${n}=${s}`).join(", ")}). Running the in-container probe now.`);
+          await streamMcpProbe(names, this.redactionValues());
+        },
         onTimeout: (states) => this.diagnoseMcp(names, states),
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         now: () => Date.now(),
@@ -247,9 +250,13 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
       print(`${mcp.stdout}\n${mcp.stderr}`);
     }
 
-    const probe = spawnSync("docker", probeArgs(serversFor(names)), { encoding: "utf8", timeout: 60000 });
-    console.log("in-container probe (name, DNS address, HTTP status; no header value):");
-    print(`${probe.stdout}\n${probe.stderr}`);
+  }
+
+  /** Every env-file value and secret, for redaction of anything printed from the probe or the logs. */
+  private redactionValues(): string[] {
+    const envText = fs.existsSync(this.envFile()) ? fs.readFileSync(this.envFile(), "utf8") : "";
+    const secrets = fs.existsSync(this.secretsFile()) ? (JSON.parse(fs.readFileSync(this.secretsFile(), "utf8")) as Record<string, unknown>) : {};
+    return redactionValues(envText, secrets);
   }
 
   private async token(): Promise<string> {

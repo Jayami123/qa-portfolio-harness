@@ -1,8 +1,9 @@
 /**
- * Diagnostics for a LibreChat MCP timeout (CI run 2c629dc: "nextcloud is disconnected"). Pure helpers here, so each one is
- * unit tested. The adapter does the I/O. Nothing printed by these helpers contains a secret or a header value: every
- * captured line is redacted with the env-file values and the per-run secrets first.
+ * Diagnostics for LibreChat's MCP connections. Pure helpers here, so each one is unit tested. The adapter does the I/O.
+ * Nothing printed contains a secret or a header value: every captured line is redacted with the env-file values and the
+ * per-run secrets first, and the probe prints only whether an auth variable is set and non-empty.
  */
+import { spawn } from "node:child_process";
 import { redactSecrets } from "../internal/run.js";
 import { librechatMcpServerFor, type LibreChatMcpServer } from "./librechat-env.js";
 
@@ -19,6 +20,8 @@ export const MCP_CONTAINERS: Record<string, string> = {
 };
 
 const MIN_SECRET_LENGTH = 6;
+/** Hard stop for the streamed probe on the host. The in-container probe finishes well before this. */
+export const PROBE_HOST_TIMEOUT_MS = 45_000;
 
 /** Every value in the env file and every string in the secrets, so a redaction pass covers them all. */
 export function redactionValues(envText: string, secrets: Record<string, unknown>): string[] {
@@ -60,33 +63,35 @@ export function connectionStates(statusBody: unknown, names: string[]): Record<s
 }
 
 /**
- * The probe that runs inside the LibreChat container. For each server it resolves the host and sends one initialize
- * request, sending the Authorization value from the container env by name. It prints the name, the address, the HTTP
- * status or the error code, and whether the auth env var is set. It never prints a header or an env value.
+ * The probe that runs inside the LibreChat container. Every server is checked in parallel. Each request has a 4 s limit
+ * and each DNS lookup a 3 s limit, so the whole probe ends in about 8 s. A server's line is printed as soon as its check
+ * ends. A line holds the name, the host, the resolved address, the HTTP status or error code, and whether the auth
+ * variable is set and non-empty. The value is never printed, and the header is sent only when the value is non-empty.
  */
 export const PROBE_SCRIPT = [
   'const dns = require("dns").promises;',
   "const servers = JSON.parse(process.argv[1]);",
-  "(async () => {",
-  "  for (const [name, url, authEnv] of servers) {",
-  "    const host = new URL(url).hostname;",
-  '    let address;',
-  '    try { address = (await dns.lookup(host)).address; } catch (e) { address = "dns " + (e.code || "error"); }',
-  '    let status;',
-  "    try {",
-  '      const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };',
-  '      if (authEnv) headers.authorization = process.env[authEnv] || "";',
-  "      const body = JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"initialize\", params: { protocolVersion: \"2025-06-18\", capabilities: {}, clientInfo: { name: \"diag\", version: \"0\" } } });",
-  "      const r = await fetch(url, { method: \"POST\", headers, body, signal: AbortSignal.timeout(8000) });",
-  '      status = "http " + r.status + (authEnv ? (process.env[authEnv] ? " (auth env set)" : " (auth env EMPTY)") : " (no auth)");',
-  "    } catch (e) {",
-  '      const inner = e.cause && (e.cause.code || (e.cause.errors && e.cause.errors[0] && e.cause.errors[0].code));',
-  '      const detail = e.cause && e.cause.message ? " / " + String(e.cause.message).slice(0, 120) : "";',
-  '      status = "fetch " + (inner || e.name || "error") + detail;',
-  "    }",
-  '    console.log(name, host, address, status);',
+  "const limit = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + \" timeout\")), ms))]);",
+  "const authState = (authEnv) => authEnv === null ? \"no auth var\" : ((process.env[authEnv] || \"\").trim() !== \"\" ? \"auth var set\" : \"auth var EMPTY\");",
+  "async function probe([name, url, authEnv]) {",
+  "  const host = new URL(url).hostname;",
+  "  let address;",
+  '  try { address = (await limit(dns.lookup(host), 3000, "dns")).address; } catch (e) { address = "dns " + (e.code || e.message); }',
+  "  let status;",
+  "  try {",
+  '    const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };',
+  "    if (authEnv && (process.env[authEnv] || \"\").trim() !== \"\") headers.authorization = process.env[authEnv];",
+  '    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "diag", version: "0" } } });',
+  '    const r = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(4000) });',
+  '    status = "http " + r.status;',
+  "  } catch (e) {",
+  "    const inner = e.cause && (e.cause.code || (e.cause.errors && e.cause.errors[0] && e.cause.errors[0].code));",
+  '    const detail = e.cause && e.cause.message ? " / " + String(e.cause.message).slice(0, 120) : "";',
+  '    status = "fetch " + (inner || e.name || "error") + detail;',
   "  }",
-  "})();",
+  '  console.log([name, host, address, status, authState(authEnv)].join(" | "));',
+  "}",
+  'Promise.all(servers.map(probe)).then(() => console.log("probe done"));',
 ].join("\n");
 
 /** The docker exec argv for the probe. The server list holds names, URLs and env variable NAMES only. */
@@ -101,4 +106,43 @@ export function serversFor(names: string[]): LibreChatMcpServer[] {
 
 export function mcpContainerFor(name: string): string | undefined {
   return MCP_CONTAINERS[name];
+}
+
+/**
+ * Runs the probe on the host and prints each line as it arrives, redacted. It resolves when the probe ends, and it never
+ * rejects: a probe that cannot start is printed and the wait keeps its own error.
+ */
+export function streamMcpProbe(names: string[], values: string[], log: (line: string) => void = console.log): Promise<void> {
+  return new Promise((resolve) => {
+    let carry = "";
+    const emit = (text: string): void => {
+      carry += text;
+      const lines = carry.split("\n");
+      carry = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim() !== "") log(`  ${redactText(line, values)}`);
+      }
+    };
+    let child;
+    try {
+      child = spawn("docker", probeArgs(serversFor(names)), { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (err) {
+      log(`  the probe could not start: ${err instanceof Error ? err.message.slice(0, 120) : "unknown error"}`);
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => child.kill("SIGKILL"), PROBE_HOST_TIMEOUT_MS);
+    child.stdout.on("data", (chunk: Buffer) => emit(chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => emit(chunk.toString()));
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      log(`  the probe failed to run: ${err.message.slice(0, 120)}`);
+      resolve();
+    });
+    child.on("close", () => {
+      clearTimeout(timer);
+      if (carry.trim() !== "") log(`  ${redactText(carry, values)}`);
+      resolve();
+    });
+  });
 }

@@ -106,4 +106,25 @@ describe("waitForMcpServers (CI fix: open connections before polling status)", (
     const counts = await waitForMcpServers(io, OPTS);
     assert.equal(Object.keys(counts).length, 5);
   });
+
+  it("runs onFirstNotConnected once, as soon as a server is down, and not when all are up at once", async () => {
+    const seen: Record<string, string>[] = [];
+    const { io, calls } = fakeIo({ statusBodies: [DISCONNECTED, DISCONNECTED, ALL_CONNECTED] });
+    io.onFirstNotConnected = async (states) => {
+      seen.push(states);
+      calls.push("probe");
+    };
+    await waitForMcpServers(io, OPTS);
+    assert.equal(seen.length, 1, "exactly once");
+    assert.equal(calls.indexOf("probe") < calls.lastIndexOf("readStatus"), true, "it ran before the wait ended");
+    assert.deepEqual(Object.keys(seen[0] ?? {}).sort(), [...NAMES].sort());
+
+    const quiet = fakeIo({ statusBodies: [ALL_CONNECTED] });
+    let ran = false;
+    quiet.io.onFirstNotConnected = async () => {
+      ran = true;
+    };
+    await waitForMcpServers(quiet.io, OPTS);
+    assert.equal(ran, false);
+  });
 });
