@@ -70,7 +70,15 @@ ready_ms=$(( $(date +%s%3N) - start ))
 
 # Bind check inside the probe, before cleanup stops everything. Only loopback host binds are allowed (review answer 0.1).
 ss -ltn > evidence/listen.txt
-for port in 4000 3080 18789 3002 3011 4401 8065 8066 8765 9001; do
+# Every host port that this PR or Part A added to a P4 compose file, plus Twenty's app port 3002. Twenty's 3002:3000 publish
+# predates P4 and binds on all interfaces. It is exempt by name below, and only there: a separate follow-up will bind it
+# to 127.0.0.1. Twenty's other ports (5434, 8025, 1025) are not added by P4 and are not checked here. Do not add exemptions.
+p4_host_ports="4000 3080 18789 3002 3011 4401 4402 5460 5461 5462 5463 8027 8028 8065 8066 8080 8765 9001"
+twenty_exempt_port=3002
+for port in $p4_host_ports; do
+  if [ "$port" = "$twenty_exempt_port" ]; then
+    continue
+  fi
   if grep -E "[ ]((0\.0\.0\.0|\*|\[::\]):)${port}[ ]" evidence/listen.txt; then
     echo "port ${port} is bound beyond loopback" >&2
     exit 1
