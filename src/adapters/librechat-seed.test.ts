@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  assertMcpAuthorizationShape,
   assertServersConnected,
   createOwnerArgs,
   librechatMcpEnv,
@@ -91,6 +92,84 @@ describe("librechat-seed (review answers 0.1, 0.6, 0.7)", () => {
     assert.throws(
       () => toolCountsByServer({ servers: { penpot: { tools: [] } } }, ["penpot"]),
       /LIBRECHAT_NO_TOOLS: penpot/,
+    );
+  });
+});
+
+describe("librechat authorization shape (step 0: values are checked at the source, never printed)", () => {
+  const SECRET_LIKE = "SECRET-ish-token-do-not-print";
+  const bad = (value: string): string => {
+    try {
+      assertMcpAuthorizationShape("mattermost", value);
+      return "";
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  };
+
+  it("accepts the shapes the Part A adapters write: Basic base64 and Bearer tokens with _ . - characters", () => {
+    assert.doesNotThrow(() => assertMcpAuthorizationShape("nextcloud", "Basic cWEtb3duZXI6YWJjLzEyK3g9PQ=="));
+    assert.doesNotThrow(() => assertMcpAuthorizationShape("outline", "Bearer ol_api_abc123XYZ"));
+    assert.doesNotThrow(() => assertMcpAuthorizationShape("twenty", "Bearer eyJhbGciOi.payload_part-two.sig"));
+    assert.doesNotThrow(() => assertMcpAuthorizationShape("mattermost", "Bearer abcdefghijklmnopqrstuvwxyz"));
+  });
+
+  it("names each bad shape and never includes the value", () => {
+    const cases: [string, RegExp][] = [
+      ["", /empty/],
+      [`Bearer ${SECRET_LIKE}\r`, /line break or carriage return/],
+      [`Bearer ${SECRET_LIKE}\n`, /line break or carriage return/],
+      [`"Bearer ${SECRET_LIKE}"`, /quoted/],
+      [SECRET_LIKE, /missing a Basic or Bearer scheme/],
+      [`Bearer Bearer ${SECRET_LIKE}`, /doubled with a second scheme/],
+      ["Bearer ", /missing its token/],
+      [`Bearer ${SECRET_LIKE} extra`, /whitespace inside the token/],
+      [`Bearer ${SECRET_LIKE}!`, /URL-safe set/],
+      [`Bearer  ${SECRET_LIKE}`, /whitespace inside the token/],
+    ];
+    for (const [value, reason] of cases) {
+      const message = bad(value);
+      assert.match(message, reason);
+      assert.match(message, /LIBRECHAT_MCP_AUTH_SHAPE: mattermost/);
+      assert.doesNotMatch(message, /SECRET-ish/, "the value must never be printed");
+    }
+  });
+
+  it("builds the env for the four header servers and none for penpot, with the shape checked first", () => {
+    const creds: Record<string, string | null> = {
+      nextcloud: "Basic cWEtb3duZXI6YWJj",
+      outline: "Bearer ol_api_one",
+      twenty: "Bearer eyJ.two.three",
+      mattermost: "Bearer fourfourfour",
+      penpot: null,
+    };
+    const out = librechatMcpEnv(
+      ["nextcloud", "outline", "twenty", "penpot", "mattermost"],
+      (product) => ({ mcpAuthorization: creds[product] ?? null }),
+      (p) => `/x/${p}`,
+    );
+    assert.deepEqual(Object.keys(out.env).sort(), [
+      "P4_MATTERMOST_MCP_AUTHORIZATION",
+      "P4_NEXTCLOUD_MCP_AUTHORIZATION",
+      "P4_OUTLINE_MCP_AUTHORIZATION",
+      "P4_TWENTY_MCP_AUTHORIZATION",
+    ]);
+    assert.equal(out.servers.length, 5);
+  });
+
+  it("a bad value stops librechatMcpEnv with the named error, before any env is returned", () => {
+    assert.throws(
+      () =>
+        librechatMcpEnv(
+          ["outline"],
+          () => ({ mcpAuthorization: `Bearer ${SECRET_LIKE}\r` }),
+          (p) => `/x/${p}`,
+        ),
+      (err: Error) => {
+        assert.match(err.message, /LIBRECHAT_MCP_AUTH_SHAPE: outline/);
+        assert.doesNotMatch(err.message, /SECRET-ish/);
+        return true;
+      },
     );
   });
 });

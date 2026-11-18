@@ -16,6 +16,26 @@ export function librechatMongoUri(password: string): string {
 }
 
 /**
+ * The shape of a header value written into librechat.env: one scheme (Basic or Bearer), one space, then a token made of
+ * URL-safe characters. Nothing is trimmed, so a bad value is reported, not quietly fixed. The reason names the problem and
+ * never includes the value.
+ */
+export function assertMcpAuthorizationShape(product: string, value: string): void {
+  const fail = (reason: string): never => {
+    throw new Error(`LIBRECHAT_MCP_AUTH_SHAPE: ${product} authorization is ${reason} (value not printed)`);
+  };
+  if (value === "") fail("empty");
+  if (/[\r\n]/.test(value)) fail("split by a line break or carriage return");
+  if (/["']/.test(value)) fail("quoted");
+  if (!/^(Basic|Bearer) /.test(value)) fail("missing a Basic or Bearer scheme");
+  if (/^(Basic|Bearer) (Basic|Bearer) /.test(value)) fail("doubled with a second scheme");
+  const token = value.slice(value.indexOf(" ") + 1);
+  if (token === "") fail("missing its token");
+  if (/\s/.test(token)) fail("containing whitespace inside the token");
+  if (!/^[A-Za-z0-9._~+\/=_-]+$/.test(token)) fail("containing characters outside the URL-safe set");
+}
+
+/**
  * For each Part A product in the list: the alias server entry, and the Authorization env value from its run state
  * (credential only, review answer 0.1). Throws the named P4_RUN_STATE_MISSING when a run state is absent, and
  * LIBRECHAT_MCP_AUTH_MISSING when a product that needs a header has none.
@@ -35,6 +55,7 @@ export function librechatMcpEnv(
       if (creds.mcpAuthorization === null) {
         throw new Error(`LIBRECHAT_MCP_AUTH_MISSING: ${product} has no MCP credential in its run state (value not printed)`);
       }
+      assertMcpAuthorizationShape(product, creds.mcpAuthorization);
       env[server.authEnv] = creds.mcpAuthorization;
     }
   }
