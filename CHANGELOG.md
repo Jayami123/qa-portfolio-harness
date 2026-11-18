@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.6.4] - 2026-11-18
+
+OpenClaw L4 primitives (plan `docs/plans/2026-11-18-openclaw-l4-primitives.md`). Every option is off by default; with none set the written config is deep-equal to 0.6.3. The `tools.exec` ask/allowlist lock is unchanged under every combination (unit tested). Config keys are quoted from the docs of the pinned image (`2026.10.33`, copied out by digest).
+
+- H1: `OPENCLAW_CHANNEL_MOCK=1` writes `channels.telegram` for the suite's mock channel (`apiRoot http://p4-mock-channel:8788`, `dmPolicy: pairing`, numeric allowlists for owner 1001, group -100777 under `groups`) and `commands.ownerAllowFrom`. The bot token is generated per run, kept in `secrets.json` (0600), written to the env file only with the option on, and never printed. The config holds a `${...}` placeholder.
+- H2: seed methods `seedWorkspaceFile`, `seedMemory`, `seedSkill`, `seedCron` on the OpenClaw adapter. Files are written into the state volume by a one-off container (uid 1000, no network, content on stdin, path as a positional parameter). Paths are validated (relative, no `..`, no hidden segments).
+- H3: `readApprovals` and `readPendingApprovals` run `openclaw approvals get --json` and `approvals pending --json` in the gateway container and drop the `socket` token. Unparseable output throws without printing it.
+- H4: `OPENCLAW_LOOP_DETECTION=1`, `OPENCLAW_WEB_FETCH_ALLOWED_HOSTS` (exact hostnames) and `OPENCLAW_WEB_FETCH_PRIVATE_NETWORK=1` write `tools.loopDetection.enabled`, `tools.web.fetch.ssrfPolicy.allowedHostnames` and `dangerouslyAllowPrivateNetwork`. A `tools.exec.security` knob and `askFallback` are not built (see the plan's findings F2 and F3).
+- H5: `OPENCLAW_NIGHTLY_MODEL=1` sets the primary model to `p4-litellm/p4-nightly` and lists it on the LiteLLM provider. It needs `P4_LLM_MODE=nightly`; in stub mode `up` fails with `OPENCLAW_NIGHTLY_MODEL_NEEDS_NIGHTLY`.
+- H6: `restart()` on the OpenClaw adapter runs `docker compose restart openclaw` and waits for `/healthz` and `/readyz`, keeping the volume, env file and config.
+
 ## [0.6.3] - 2026-11-18
 
 - OpenClaw (P4): with `OPENCLAW_RESPONSES_API=1` the gateway config now also writes `tools.toolSearch: false`. Tool Search is on by default for embedded runs and defers tool schemas behind `tool_search` / `dispatch_action`; the pinned docs say "Set `tools.toolSearch: false` to restore direct schemas" (`docs/tools/tool-search.md` at `2026.10.33`). With the flag unset, the config is byte-identical to 0.6.2.
