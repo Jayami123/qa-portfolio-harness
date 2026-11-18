@@ -43,10 +43,19 @@ export function liteLlmConfigYaml(): string {
     "    litellm_params:",
     "      model: openai/stub-upstream-model",
     '      mock_response: "stub-ok"',
+    // Free-tier limits for the Gemma model, checked 2026-11-18 against the Google AI Studio rate-limits page
+    // (https://aistudio.google.com/docs/rate-limits). That page lists no Gemma free-tier figures; its only free-tier
+    // figures are for Gemini (RPM 200, TPM 50,000, RPD 10,000), which do not apply to this model.
+    // rpm 30 is the owner's setting and is not verified on the page.
+    // tpm 16000 is UNVERIFIED: taken from the suite plan.
+    // num_retries: LiteLLM retries retriable errors, rate-limit (HTTP 429) errors included.
     `  - model_name: ${LITELLM_NIGHTLY_ALIAS}`,
     "    litellm_params:",
     "      model: gemini/gemma-4-31b-it",
     "      api_key: os.environ/GEMINI_API_KEY",
+    "      rpm: 30",
+    "      tpm: 16000",
+    "      num_retries: 3",
     "general_settings:",
     "  master_key: os.environ/LITELLM_MASTER_KEY",
     "",

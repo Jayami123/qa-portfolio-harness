@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- LiteLLM (P4): the `p4-nightly` entry (`gemini/gemma-4-31b-it`) gets `rpm: 30`, `tpm: 16000` (unverified, from the suite plan) and `num_retries: 3`. The Google AI Studio rate-limits page lists no Gemma free-tier figures, so the rpm value is the owner's setting. `p4-stub` and the fallback-free config are unchanged. Package version is 0.6.1; this section is not yet cut into a release heading.
+
 - P4 agent hosts (LiteLLM, LibreChat, OpenClaw): harness adapters, pins, a shared `qa-harness-p4` network, and an advisory CI job (ADR 0007).
 
 - P4: four image-only adapters, `nextcloud`, `outline`, `penpot` and `mattermost`, added to `ProductId`, `getAdapter` and `scripts/up.mjs` / `down.mjs`. Each starts a pinned, digest-pinned compose stack (`docker/<product>.compose.yml`), waits for app health and for a real MCP `initialize` + `tools/list`, and writes one fake owner's MCP credential to `.harness/<product>-run.json` (mode 0600, removed by `down`). See ADR 0006 and `docs/pins/p4.md`.
