@@ -6,6 +6,7 @@ export type {
   SeedUser,
 } from "./types.js";
 export type { ProductAdapter } from "./adapters/types.js";
+export type { OpenClawClientTool, OpenClawRunResult, OpenClawToolCall } from "./adapters/openclaw-seed.js";
 export { getAdapter } from "./adapters/registry.js";
 export { NotImplementedError } from "./errors.js";
 export { createPgClient } from "./db/pg.js";

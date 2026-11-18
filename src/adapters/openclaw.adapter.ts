@@ -20,7 +20,14 @@ import {
   openClawConfig,
   openClawEnvText,
 } from "./openclaw-env.js";
-import { openClawWriteConfigArgs, readyzIsReady } from "./openclaw-seed.js";
+import {
+  openClawResponsesBody,
+  openClawRunResult,
+  openClawWriteConfigArgs,
+  readyzIsReady,
+  type OpenClawClientTool,
+  type OpenClawRunResult,
+} from "./openclaw-seed.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
 
 /** OpenClaw gateway (ADR 0007). Approvals on, LiteLLM as the only provider, no channel in B1 (D19, review answer 0.3). */
@@ -101,7 +108,7 @@ export class OpenClawAdapter extends BaseAdapter<OpenClawConfig> {
     fs.chmodSync(this.envFile(), 0o600);
 
     await run("docker", ["volume", "create", OPENCLAW_STATE_VOLUME], { cwd: HARNESS_DOCKER_DIR });
-    await this.writeConfigInVolume(`${JSON.stringify(openClawConfig(), null, 2)}\n`);
+    await this.writeConfigInVolume(`${JSON.stringify(openClawConfig({ responsesApi: this.cfg.responsesApi }), null, 2)}\n`);
     await composeUp(this.composeOpts(), { wait: true });
     await this.waitHealthy();
     console.log(
@@ -153,6 +160,27 @@ export class OpenClawAdapter extends BaseAdapter<OpenClawConfig> {
 
   async authenticate(): Promise<AuthSession> {
     return { product: this.id, baseUrl: this.cfg.baseUrl, authorizationHeader: `Bearer ${this.tokenFor(false)}`, raw: { source: "secrets.json" } };
+  }
+
+  /**
+   * Headless agent run: sends one task through POST /v1/responses (the supported gateway API, same codepath as
+   * `openclaw agent`) and returns the tool-call trace. It needs OPENCLAW_RESPONSES_API=1 at `up`. The tools are client-side
+   * function tools: the gateway returns each call as a function_call item and does not execute it. It never prints the
+   * token or the response body. Throws OPENCLAW_RUN_FAILED with the HTTP status on a non-200 (for example 502 when a
+   * required tool was not called, or 404 when the endpoint is not enabled).
+   */
+  async runTask(task: string, opts: { tools?: OpenClawClientTool[]; requireTool?: boolean; timeoutMs?: number } = {}): Promise<OpenClawRunResult> {
+    const tools = opts.tools ?? [];
+    const r = await fetch(`${this.cfg.baseUrl}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.tokenFor(false)}` },
+      body: JSON.stringify(openClawResponsesBody(task, tools, opts.requireTool ?? tools.length > 0)),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 120000),
+    });
+    if (r.status !== 200) {
+      throw new Error(`OPENCLAW_RUN_FAILED: POST /v1/responses returned HTTP ${r.status}${this.cfg.responsesApi ? "" : " (OPENCLAW_RESPONSES_API=1 was not set when the config was written)"}`);
+    }
+    return openClawRunResult(r.status, await r.json());
   }
 
   /** Health only in B1. An authenticated gateway call is a B2 proof. */

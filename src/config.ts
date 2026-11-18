@@ -6,7 +6,9 @@ import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-e
 import { assertMedusaSecondBaseUrl } from "./adapters/medusa-env.js";
 import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
 import { HARNESS_ROOT } from "./paths.js";
-import { parseP4LlmMode } from "./adapters/litellm-env.js";
+import { parseP4LlmMode, parseStubApiBase } from "./adapters/litellm-env.js";
+import { parseOpenClawResponsesFlag } from "./adapters/openclaw-env.js";
+import { resolveLibreChatModels } from "./adapters/librechat-env.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
@@ -129,10 +131,16 @@ const envSchema = z.object({
   // Stub mode is the default and p4-stub uses mock_response (review answer 0.9). Gemma is not called in B1.
   LITELLM_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:4000"),
   P4_LLM_MODE: z.string().trim().default("stub"),
+  // Optional. When set, p4-stub routes to this OpenAI-compatible stub instead of mock_response. Blank means unset.
+  P4_STUB_API_BASE: z.string().trim().default(""),
+  // Optional. Comma-separated LiteLLM aliases LibreChat lists. Blank means the default (p4-stub, plus p4-nightly in nightly mode).
+  LIBRECHAT_MODELS: z.string().trim().default(""),
   LIBRECHAT_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3080"),
   LIBRECHAT_DB_URL: z.string().trim().min(1).default("mongodb://127.0.0.1:27017/LibreChat"),
   LIBRECHAT_MCP_PRODUCTS: z.string().trim().default("nextcloud,outline,twenty,penpot,mattermost"),
   OPENCLAW_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:18789"),
+  // Opt-in, exact value "1": enables the gateway's POST /v1/responses endpoint so runTask() works. Unset changes nothing.
+  OPENCLAW_RESPONSES_API: z.string().trim().default(""),
 });
 
 export interface ProductConfig {
@@ -203,16 +211,22 @@ export interface MattermostConfig extends ProductConfig {
 export interface LiteLlmConfig extends ProductConfig {
   id: "litellm";
   mode: "stub" | "nightly";
+  /** Validated P4_STUB_API_BASE. undefined keeps the p4-stub mock_response. */
+  stubApiBase: string | undefined;
 }
 
 /** LibreChat chat host. mcpProducts are Part A product ids whose MCP credentials go into its env (review answer 0.1). */
 export interface LibreChatConfig extends ProductConfig {
   id: "librechat";
   mcpProducts: string[];
+  /** Model aliases LibreChat lists, in order. The first is the default. Never includes p4-nightly in stub mode. */
+  models: string[];
 }
 
 export interface OpenClawConfig extends ProductConfig {
   id: "openclaw";
+  /** OPENCLAW_RESPONSES_API=1: the gateway serves POST /v1/responses (headless agent run). */
+  responsesApi: boolean;
 }
 
 export type P4Config =
@@ -370,6 +384,7 @@ function buildLiteLlmConfig(parsed: ParsedEnv): LiteLlmConfig {
     baseUrl: parsed.LITELLM_BASE_URL.replace(/\/$/, ""),
     dbUrl: "none://litellm", // sentinel: LiteLLM has no database in B1 (VERIFIED: it served requests with no DATABASE_URL)
     mode: parseP4LlmMode(parsed.P4_LLM_MODE),
+    stubApiBase: parseStubApiBase(parsed.P4_STUB_API_BASE),
   };
 }
 
@@ -382,6 +397,7 @@ function buildLibreChatConfig(parsed: ParsedEnv): LibreChatConfig {
     mcpProducts: parsed.LIBRECHAT_MCP_PRODUCTS.split(",")
       .map((s) => s.trim())
       .filter((s) => s !== ""),
+    models: resolveLibreChatModels(parsed.LIBRECHAT_MODELS, parseP4LlmMode(parsed.P4_LLM_MODE)),
   };
 }
 
@@ -391,6 +407,7 @@ function buildOpenClawConfig(parsed: ParsedEnv): OpenClawConfig {
     productRoot: p4ProductRoot("openclaw"),
     baseUrl: parsed.OPENCLAW_BASE_URL.replace(/\/$/, ""),
     dbUrl: "none://openclaw", // sentinel: OpenClaw has no database in B1
+    responsesApi: parseOpenClawResponsesFlag(parsed.OPENCLAW_RESPONSES_API),
   };
 }
 

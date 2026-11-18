@@ -101,7 +101,7 @@ describe("P4 config and the fork split (ADR 0006, D1 and D2)", () => {
 });
 
 describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () => {
-  const AGENT_KEYS = ["P4_LLM_MODE", "LITELLM_BASE_URL", "LIBRECHAT_BASE_URL", "LIBRECHAT_MCP_PRODUCTS", "OPENCLAW_BASE_URL", "PRODUCTS_ROOT"];
+  const AGENT_KEYS = ["P4_LLM_MODE", "LITELLM_BASE_URL", "LIBRECHAT_BASE_URL", "LIBRECHAT_MCP_PRODUCTS", "OPENCLAW_BASE_URL", "P4_STUB_API_BASE", "LIBRECHAT_MODELS", "OPENCLAW_RESPONSES_API", "PRODUCTS_ROOT"];
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -158,6 +158,36 @@ describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () =>
   it("reads the LibreChat MCP product list from the env, trimmed", () => {
     process.env.LIBRECHAT_MCP_PRODUCTS = " nextcloud, outline ,";
     assert.deepEqual(loadProductConfig("librechat").mcpProducts, ["nextcloud", "outline"]);
+  });
+
+  it("reads P4_STUB_API_BASE for LiteLLM: unset keeps mock_response, a bad value throws without echoing it", () => {
+    assert.equal(loadProductConfig("litellm").stubApiBase, undefined);
+    process.env.P4_STUB_API_BASE = " http://host.docker.internal:8787/v1/ ";
+    assert.equal(loadProductConfig("litellm").stubApiBase, "http://host.docker.internal:8787/v1");
+    process.env.P4_STUB_API_BASE = "ftp://secret-host/x";
+    assert.throws(() => loadProductConfig("litellm"), (err: Error) => {
+      assert.match(err.message, /P4_STUB_API_BASE_INVALID/);
+      assert.doesNotMatch(err.message, /secret-host/);
+      return true;
+    });
+  });
+
+  it("lists LibreChat models: p4-stub by default, plus p4-nightly in nightly mode, p4-nightly refused in stub mode", () => {
+    assert.deepEqual(loadProductConfig("librechat").models, ["p4-stub"]);
+    process.env.P4_LLM_MODE = "nightly";
+    assert.deepEqual(loadProductConfig("librechat").models, ["p4-stub", "p4-nightly"]);
+    process.env.LIBRECHAT_MODELS = "p4-nightly";
+    assert.deepEqual(loadProductConfig("librechat").models, ["p4-nightly"]);
+    process.env.P4_LLM_MODE = "stub";
+    assert.throws(() => loadProductConfig("librechat"), /LIBRECHAT_MODEL_NOT_ALLOWED/);
+  });
+
+  it("reads OPENCLAW_RESPONSES_API: off by default, exactly 1 turns it on, anything else throws", () => {
+    assert.equal(loadProductConfig("openclaw").responsesApi, false);
+    process.env.OPENCLAW_RESPONSES_API = "1";
+    assert.equal(loadProductConfig("openclaw").responsesApi, true);
+    process.env.OPENCLAW_RESPONSES_API = "true";
+    assert.throws(() => loadProductConfig("openclaw"), /OPENCLAW_RESPONSES_API_INVALID/);
   });
 
   it("keeps the agent hosts out of the fork-product cache", () => {

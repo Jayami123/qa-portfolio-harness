@@ -14,6 +14,18 @@ export const OPENCLAW_PRIMARY_MODEL = "p4-litellm/p4-stub";
 /** The env names the config substitutes. The adapter writes all of them, or startup warns (VERIFIED). */
 export const OPENCLAW_ENV_NAMES = ["OPENCLAW_GATEWAY_TOKEN", "P4_LITELLM_API_KEY", "OPENCLAW_CONFIG_PATH"] as const;
 
+/** Blank or unset is off. Exactly "1" is on. Anything else throws, without echoing the value. */
+export function parseOpenClawResponsesFlag(raw: string | undefined): boolean {
+  const value = (raw ?? "").trim();
+  if (value === "") {
+    return false;
+  }
+  if (value === "1") {
+    return true;
+  }
+  throw new Error('OPENCLAW_RESPONSES_API_INVALID: the value must be exactly "1" or unset (the value is not printed).');
+}
+
 export function generateOpenClawGatewayToken(randomBytes: (n: number) => Buffer = crypto.randomBytes): string {
   return randomBytes(24).toString("base64url");
 }
@@ -24,13 +36,15 @@ export function generateOpenClawGatewayToken(randomBytes: (n: number) => Buffer 
  * `bind: lan` makes the gateway listen on all interfaces inside its container. The host publish stays on 127.0.0.1.
  * Token auth stays on. Approvals are on (D19). No channel is enabled in B1 (review answer 0.3).
  */
-export function openClawConfig(): Record<string, unknown> {
+export function openClawConfig(opts: { responsesApi?: boolean } = {}): Record<string, unknown> {
   return {
     gateway: {
       mode: "local",
       bind: "lan",
       port: OPENCLAW_GATEWAY_PORT,
       auth: { mode: "token", token: "${OPENCLAW_GATEWAY_TOKEN}" },
+      // Opt-in headless run endpoint (docs/gateway/openresponses-http-api.md at 2026.10.33). Off by default upstream.
+      ...(opts.responsesApi === true ? { http: { endpoints: { responses: { enabled: true } } } } : {}),
     },
     tools: { exec: { ask: "always", security: "allowlist" } },
     approvals: { exec: { enabled: true, mode: "session" } },

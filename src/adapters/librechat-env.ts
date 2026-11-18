@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { harnessComposeFile } from "../internal/compose.js";
+import { LITELLM_ALIASES, LITELLM_NIGHTLY_ALIAS, LITELLM_STUB_ALIAS, type P4LlmMode } from "./litellm-env.js";
 
 /** Pinned in docs/pins/p4.md. v0.8.7 is the newest stable tag at 2026-11-18 (same digest as the danny-avila namespace). */
 export const LIBRECHAT_IMAGE =
@@ -58,10 +59,32 @@ export function allowedDomainsFor(servers: LibreChatMcpServer[]): string[] {
 }
 
 /**
+ * The model aliases LibreChat lists, in order; the first is the default. Blank means [p4-stub], plus p4-nightly in nightly
+ * mode. An explicit list may only name the two LiteLLM aliases, and p4-nightly only in nightly mode. LibreChat talks to
+ * LiteLLM only, so the Gemma key never reaches it.
+ */
+export function resolveLibreChatModels(raw: string | undefined, mode: P4LlmMode): string[] {
+  const listed = (raw ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+  const models = listed.length > 0 ? [...new Set(listed)] : mode === "nightly" ? [LITELLM_STUB_ALIAS, LITELLM_NIGHTLY_ALIAS] : [LITELLM_STUB_ALIAS];
+  for (const m of models) {
+    if (!(LITELLM_ALIASES as readonly string[]).includes(m)) {
+      throw new Error(`LIBRECHAT_MODEL_UNKNOWN: "${m}" is not a LiteLLM alias (expected ${LITELLM_ALIASES.join(" or ")})`);
+    }
+    if (m === LITELLM_NIGHTLY_ALIAS && mode !== "nightly") {
+      throw new Error(`LIBRECHAT_MODEL_NOT_ALLOWED: ${LITELLM_NIGHTLY_ALIAS} needs P4_LLM_MODE=nightly`);
+    }
+  }
+  return models;
+}
+
+/**
  * Builds librechat.yaml. No secret value appears: Authorization values are ${VAR} placeholders read from the env
  * file (D16). The file is safe to keep at mode 0644.
  */
-export function librechatYaml(opts: { defaultModel: string; servers: LibreChatMcpServer[] }): string {
+export function librechatYaml(opts: { models: string[]; servers: LibreChatMcpServer[] }): string {
   const lines: string[] = [`version: ${LIBRECHAT_CONFIG_VERSION}`, "cache: true", "mcpSettings:", "  allowedDomains:"];
   for (const host of allowedDomainsFor(opts.servers)) {
     lines.push(`    - "${host}"`);
@@ -90,7 +113,7 @@ export function librechatYaml(opts: { defaultModel: string; servers: LibreChatMc
     '      apiKey: "${P4_LITELLM_API_KEY}"',
     `      baseURL: "${LIBRECHAT_LITELLM_BASE_URL}"`,
     "      models:",
-    `        default: ["${opts.defaultModel}"]`,
+    `        default: [${opts.models.map((m) => `"${m}"`).join(", ")}]`,
     "        fetch: false",
     "      titleConvo: false",
     "",
@@ -100,6 +123,9 @@ export function librechatYaml(opts: { defaultModel: string; servers: LibreChatMc
 
 /** The compose env file, one NAME=value per line. Written mode 0600 by the adapter. Values are never printed. */
 export function librechatEnvText(values: Record<string, string>): string {
+  if (Object.keys(values).some((k) => /^GEMINI_/i.test(k))) {
+    throw new Error("LIBRECHAT_ENV_GEMINI_REFUSED: LibreChat talks to LiteLLM only and never receives the Gemini key");
+  }
   return `${Object.entries(values)
     .map(([k, v]) => `${k}=${v}`)
     .join("\n")}\n`;
