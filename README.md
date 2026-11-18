@@ -492,6 +492,19 @@ bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty   # writ
 
 Optional agent-host primitives (v0.6.2, all off by default): `P4_STUB_API_BASE` routes `p4-stub` to an OpenAI-compatible stub and forwards `X-P4-Fixture`; `LIBRECHAT_MODELS` sets LibreChat's model list (`p4-nightly` only with `P4_LLM_MODE=nightly`; LibreChat never gets the Gemini key); `OPENCLAW_RESPONSES_API=1` enables `POST /v1/responses` so `getAdapter("openclaw").runTask(task, { tools })` returns the tool-call trace.
 
+OpenClaw L4 primitives (v0.6.4, plan `docs/plans/2026-11-18-openclaw-l4-primitives.md`; every option is off by default and an unset option leaves the config as in 0.6.3; the `tools.exec` ask/allowlist lock is never changed):
+
+| | Option or method | Effect |
+|---|---|---|
+| H1 | `OPENCLAW_CHANNEL_MOCK=1` | Writes `channels.telegram` (apiRoot `http://p4-mock-channel:8788`, `dmPolicy: pairing`, allowlists for the fixed ids 1001 and group -100777) and `commands.ownerAllowFrom`. The bot token is per run, in `secrets.json` (0600) and the env file; `getAdapter("openclaw").mockChannelBotToken()` returns it. |
+| H2 | `seedWorkspaceFile`, `seedMemory`, `seedSkill`, `seedCron` | Write into the state volume as uid 1000 with no network (cron: `openclaw automations create` in the gateway container). Paths are validated. |
+| H3 | `readApprovals`, `readPendingApprovals` | `openclaw approvals get/pending --json` in the gateway container, with the `socket` token dropped. |
+| H4 | `OPENCLAW_LOOP_DETECTION=1`, `OPENCLAW_WEB_FETCH_ALLOWED_HOSTS=a,b`, `OPENCLAW_WEB_FETCH_PRIVATE_NETWORK=1` | `tools.loopDetection.enabled`, `tools.web.fetch.ssrfPolicy.allowedHostnames`, `...dangerouslyAllowPrivateNetwork`. |
+| H5 | `OPENCLAW_NIGHTLY_MODEL=1` | Primary model `p4-litellm/p4-nightly`. Only with `P4_LLM_MODE=nightly`; in stub mode `up` fails. |
+| H6 | `restart()` | `docker compose restart openclaw`, then waits for `/healthz` and `/readyz`. Volume, env file and config are kept. |
+
+Not built: a `tools.exec.security` knob (it would change the lock) and `askFallback` (not a config key; it defaults to `deny`). See the plan's findings.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.
