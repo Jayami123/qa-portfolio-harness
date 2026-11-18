@@ -46,7 +46,13 @@ export function openClawConfig(opts: { responsesApi?: boolean } = {}): Record<st
       // Opt-in headless run endpoint (docs/gateway/openresponses-http-api.md at 2026.10.33). Off by default upstream.
       ...(opts.responsesApi === true ? { http: { endpoints: { responses: { enabled: true } } } } : {}),
     },
-    tools: { exec: { ask: "always", security: "allowlist" } },
+    tools: {
+      exec: { ask: "always", security: "allowlist" },
+      // With the headless run on, offer the client tools as direct schemas. Tool Search is on by default for embedded runs and
+      // defers schemas behind tool_search / dispatch_action; "Set tools.toolSearch: false to restore direct schemas"
+      // (docs/tools/tool-search.md at 2026.10.33). Unset keeps the upstream default, so the default config is unchanged.
+      ...(opts.responsesApi === true ? { toolSearch: false } : {}),
+    },
     approvals: { exec: { enabled: true, mode: "session" } },
     agents: { defaults: { model: { primary: OPENCLAW_PRIMARY_MODEL } } },
     models: {

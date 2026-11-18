@@ -73,6 +73,15 @@ describe("openclaw-env (ADR 0007, D18, D19; review answer 0.5)", () => {
     assert.equal(on.gateway.bind, "lan");
   });
 
+  it("writes tools.toolSearch: false only with the responses API on (docs/tools/tool-search.md at 2026.10.33)", () => {
+    const off = openClawConfig() as Record<string, any>;
+    assert.equal("toolSearch" in off.tools, false, "unset keeps the upstream default");
+    assert.equal("toolSearch" in (openClawConfig({ responsesApi: false }) as Record<string, any>).tools, false);
+    const on = openClawConfig({ responsesApi: true }) as Record<string, any>;
+    assert.equal(on.tools.toolSearch, false);
+    assert.deepEqual(on.tools.exec, { ask: "always", security: "allowlist" }, "approvals stay on");
+  });
+
   it("parses OPENCLAW_RESPONSES_API: blank is off, exactly 1 is on, anything else throws", () => {
     assert.equal(parseOpenClawResponsesFlag(undefined), false);
     assert.equal(parseOpenClawResponsesFlag(" "), false);
