@@ -12,11 +12,20 @@ export function p4NetworkCreateArgs(): string[] {
   return ["network", "create", "--driver", "bridge", P4_NETWORK];
 }
 
-/** Creates the network if it is missing. Idempotent: an existing network is left as it is. */
-export async function ensureP4Network(): Promise<void> {
+/** Runs one docker argv. Injected in tests. */
+export type DockerExec = (args: string[]) => Promise<void>;
+
+const dockerRun: DockerExec = (args) => run("docker", args, { cwd: HARNESS_ROOT });
+
+/**
+ * Creates the network if it is missing. Idempotent: an existing network is left as it is. Every adapter whose compose
+ * declares the external network calls this first, so `npm run up -- <product>` works without the other products (the
+ * CI run that failed on "network qa-harness-p4 declared as external, but could not be found" is the reason).
+ */
+export async function ensureP4Network(exec: DockerExec = dockerRun): Promise<void> {
   try {
-    await run("docker", p4NetworkInspectArgs(), { cwd: HARNESS_ROOT });
+    await exec(p4NetworkInspectArgs());
   } catch {
-    await run("docker", p4NetworkCreateArgs(), { cwd: HARNESS_ROOT });
+    await exec(p4NetworkCreateArgs());
   }
 }

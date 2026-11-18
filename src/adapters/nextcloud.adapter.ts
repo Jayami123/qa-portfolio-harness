@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { NextcloudConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
+import { ensureP4Network } from "../internal/p4-network.js";
 import { run } from "../internal/run.js";
 import { HARNESS_DOCKER_DIR } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
@@ -77,6 +78,8 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
   }
 
   async up(): Promise<void> {
+    // The compose file declares qa-harness-p4 as external, so it must exist before any compose call.
+    await ensureP4Network();
     this.secrets = this.secretsFromDisk();
     this.writeSecrets(this.secrets);
     await composeUp(this.composeOpts(false), { wait: true });
