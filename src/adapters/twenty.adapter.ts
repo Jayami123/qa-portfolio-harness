@@ -317,13 +317,24 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     await this.mintMcpCredential(this.cfg.email, this.cfg.password, this.mcpRunStateFile(), "twenty");
   }
 
-  /** H2: the same key minting for the second member, from its own workspace token, into its own run state. */
+  /**
+   * H2. Twenty denies API-key management to a Member ("Entity performing the request does not have permission", live
+   * 2026-11-19), and API keys belong to the workspace, not to a user. So the second key is minted by the workspace admin,
+   * with the same least-privilege role as the owner's key, and recorded against the second member's identity. The second
+   * member's own sign-in is proven separately by probeSecondIdentity (currentUser).
+   */
   private async prepareSecondMcp(): Promise<void> {
-    await this.mintMcpCredential(TWENTY_SECOND_MEMBER_EMAIL, this.cfg.password, this.secondRunStateFile(), secondIdentityProduct("twenty"));
+    await this.mintMcpCredential(this.cfg.email, this.cfg.password, this.secondRunStateFile(), secondIdentityProduct("twenty"), TWENTY_SECOND_MEMBER_EMAIL);
   }
 
-  private async mintMcpCredential(email: string, password: string, runStateFile: string, product: string): Promise<void> {
-    const token = await this.workspaceTokenFor(email, password);
+  private async mintMcpCredential(
+    signInEmail: string,
+    password: string,
+    runStateFile: string,
+    product: string,
+    identityEmail: string = signInEmail,
+  ): Promise<void> {
+    const token = await this.workspaceTokenFor(signInEmail, password);
     const roles = await this.authedGraphql<{ getApiKeyRoles: ApiKeyRole[] }>(token, GET_API_KEY_ROLES, {}, "mcp getApiKeyRoles");
     const role = selectApiKeyRole(roles.getApiKeyRoles);
     const expiresAt = apiKeyExpiry(new Date());
@@ -345,7 +356,7 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
       product,
       mcpUrl: twentyMcpUrl(this.cfg.baseUrl),
       mcpAuthorization: `Bearer ${apiKeyToken}`,
-      owner: { username: email, email },
+      owner: { username: identityEmail, email: identityEmail },
     });
     console.log(`Twenty MCP credential written to ${product}-run.json. It is not printed.`);
   }
