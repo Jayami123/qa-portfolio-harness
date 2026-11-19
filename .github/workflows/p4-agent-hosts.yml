@@ -6,6 +6,15 @@ name: P4 agent hosts
 
 on:
   workflow_dispatch:
+    inputs:
+      tool_approval:
+        description: "Turn on LIBRECHAT_TOOL_APPROVAL=1 (ask nc_notes_list_notes, deny nc_notes_delete_note) and run the live H3 check"
+        type: boolean
+        default: false
+      second_identity:
+        description: "Turn on P4_SECOND_IDENTITY=1 (Nextcloud second user, H2)"
+        type: boolean
+        default: false
   pull_request:
     paths:
       - "src/adapters/litellm*"
@@ -51,6 +60,13 @@ jobs:
       TWENTY_MCP: "1"
       # LibreChat attaches the five Part A MCP servers. Each product is started before librechat (see the probe order).
       LIBRECHAT_MCP_PRODUCTS: "nextcloud,outline,twenty,penpot,mattermost"
+      # H2 and H3 options. Each is off unless its dispatch input is true (the empty string is the off value).
+      P4_SECOND_IDENTITY: ${{ inputs.second_identity && '1' || '' }}
+      LIBRECHAT_TOOL_APPROVAL: ${{ inputs.tool_approval && '1' || '' }}
+      LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_notes_list_notes' || '' }}
+      LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_notes_delete_note' || '' }}
+      # The H3 fixture stub runs on the runner host; LiteLLM reaches it through host.docker.internal.
+      P4_STUB_API_BASE: ${{ inputs.tool_approval && 'http://host.docker.internal:9099/v1' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,6 +101,26 @@ jobs:
         run: |
           set -euo pipefail
           P4_RAM_OUT="evidence/ram-probe-full.json" bash scripts/p4-ram-probe.sh litellm nextcloud outline twenty penpot mattermost librechat openclaw
+
+      - name: Start the H3 approval fixture (tool_approval only)
+        if: inputs.tool_approval
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          APPROVAL_STUB_PORT=9099 nohup node scripts/live/approval-stub.mjs > evidence/approval-stub.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:9099/stats >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:9099/stats >/dev/null
+
+      - name: "Live H3 check (tool_approval only): ask pauses and resumes, deny never runs"
+        if: inputs.tool_approval
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node scripts/live/librechat-approval.mjs "$PWD" | tee evidence/h3-live-check.txt
+
+      - name: Stop the H3 approval fixture
+        if: always() && inputs.tool_approval
+        run: pkill -f scripts/live/approval-stub.mjs || true
 
       - name: Upload RAM evidence
         if: always()
