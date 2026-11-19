@@ -3,6 +3,14 @@
 //   LIBRECHAT_TOOL_APPROVAL=1
 //   LIBRECHAT_TOOL_APPROVAL_ASK="mcp:nextcloud:nc_contacts_list_addressbooks"
 //   LIBRECHAT_TOOL_APPROVAL_DENY="mcp:nextcloud:nc_contacts_delete_addressbook"
+// With LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS=1 (toolApproval.allowAlways) it also asserts the remembered approval:
+//   the card offers Always allow (review_configs[].allow_always), the first approval is sent with scope "session", and a
+//   second call of the same tool in the same conversation runs without a pause. With the flag unset, the same second call
+//   must pause again (the control: the first approval was for that call only).
+// Always allow is never offered for a tool that an ask rule matches (packages/api/src/agents/hitl/allow.ts,
+// isToolAllowAlwaysEligible). So with the flag on, LIBRECHAT_TOOL_APPROVAL_ASK must be unset: the ask-listed tool then
+// pauses through mode default's unmatched-tool fallback (policy.ts, isToolApprovalPauseCapable). The script refuses to run
+// with the flag on and an ask rule set.
 // It asserts:
 //   ask-listed tool : the run pauses (requires_action) before the tool runs; /resume with an approve decision runs it
 //                     once and the run completes;
@@ -20,6 +28,8 @@ const OWNER_EMAIL = "qa-owner@p4.test";
 const ASK = "nc_contacts_list_addressbooks";
 const DENY = "nc_contacts_delete_addressbook";
 const BOOK = "h3-probe";
+const ALLOW_ALWAYS = process.env.LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS === "1";
+const ASK_RULE_SET = (process.env.LIBRECHAT_TOOL_APPROVAL_ASK ?? "").trim() !== "";
 const PARENT = "00000000-0000-0000-0000-000000000000";
 // LibreChat's uaParser middleware answers "Illegal request" (and logs a violation) to any client that is not a
 // recognized browser, so every LibreChat call sends a browser User-Agent. This is not a credential.
@@ -123,17 +133,33 @@ const terminal = (s) => typeof s?.status === "string" && s.status !== "running" 
 // A run is over when the assistant has written the stub's final answer (the stub writes it only after the tool result).
 // LibreChat's status endpoint reports active:false once a job ends and carries no status string, so it cannot say "done".
 const FINAL = "Final answer after the tool result.";
-async function waitForFinal(token, conversationId, timeoutMs) {
+const finals = (list) => list.filter((x) => !x.isCreatedByUser && !x.unfinished && JSON.stringify(x.content ?? x.text ?? "").includes(FINAL));
+async function waitForFinal(token, conversationId, timeoutMs, wanted = 1) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const m = await lcJson(`/api/messages/${conversationId}`, { headers: { authorization: `Bearer ${token}` } });
     const list = Array.isArray(m.body) ? m.body : [];
-    if (list.some((x) => !x.isCreatedByUser && !x.unfinished && JSON.stringify(x.content ?? x.text ?? "").includes(FINAL))) {
-      return { done: true };
+    const found = finals(list);
+    if (found.length >= wanted) {
+      return { done: true, messageId: found[found.length - 1].messageId };
     }
     await sleep(1000);
   }
   return { done: false };
+}
+
+// One turn in an existing conversation: stops early and reports a pause when the status says requires_action.
+async function watchTurn(token, conversationId, wantedFinals, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const s = await lcJson(`/api/agents/chat/status/${conversationId}`, { headers: { authorization: `Bearer ${token}` } });
+    if (s.body?.status === "requires_action") return { sawPause: true, pendingAction: s.body.pendingAction };
+    const m = await lcJson(`/api/messages/${conversationId}`, { headers: { authorization: `Bearer ${token}` } });
+    const found = finals(Array.isArray(m.body) ? m.body : []);
+    if (found.length >= wantedFinals) return { sawPause: false, done: true, messageId: found[found.length - 1].messageId };
+    await sleep(1000);
+  }
+  return { sawPause: false, done: false };
 }
 
 // --- Setup ----------------------------------------------------------------------------------------------------------
@@ -182,19 +208,28 @@ check(paused.status?.status === "requires_action", `the ask-listed run pauses fo
 const pending = paused.status.pendingAction;
 check(pending?.payload?.type === "tool_approval", "the pause is a tool_approval with a pending action");
 check(JSON.stringify(pending).includes(ASK), `the pending approval names ${ASK}`);
+const offersAlways = pending.payload?.review_configs?.[0]?.allow_always === true;
+check(offersAlways === ALLOW_ALWAYS, ALLOW_ALWAYS ? "the approval card offers Always allow (allow_always)" : "the approval card does not offer Always allow (flag off)");
 const before = await stub("/stats");
 check(before.toolResults === 0, `no tool result reached the model while paused (toolResults ${before.toolResults})`);
 
 // The pending payload names the call in action_requests[0].tool_call_id and lists the decisions it accepts.
 const toolCallId = pending.payload?.action_requests?.[0]?.tool_call_id;
 check(typeof toolCallId === "string" && toolCallId.length > 0, "the pending action carries a tool call id");
+if (ALLOW_ALWAYS) check(!ASK_RULE_SET, "Always allow needs LIBRECHAT_TOOL_APPROVAL_ASK unset (an ask match is never offered Always allow)");
 const allowed = pending.payload?.review_configs?.[0]?.allowed_decisions ?? [];
 check(Array.isArray(allowed) && allowed.includes("approve"), `the pause accepts an approve decision (allowed: ${allowed.join(", ")})`);
 
 const resumed = await lcJson("/api/agents/chat/resume", {
   method: "POST",
   headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-  body: JSON.stringify({ ...bodyA, conversationId: convA, actionId: pending.actionId, decisions: [{ tool_call_id: toolCallId, decision: "approve" }] }),
+  body: JSON.stringify({
+    ...bodyA,
+    conversationId: convA,
+    actionId: pending.actionId,
+    // "session" is the Always allow choice: it remembers the tool for this conversation. Without the flag, approve once.
+    decisions: [{ tool_call_id: toolCallId, decision: "approve", ...(ALLOW_ALWAYS ? { scope: "session" } : {}) }],
+  }),
 });
 check(resumed.status === 200, `POST /resume accepted the approval (HTTP ${resumed.status})`);
 const finishedA = await waitForFinal(token, convA, 180000);
@@ -202,6 +237,29 @@ check(finishedA.done, "the approved run finishes with the final answer");
 const afterA = await stub("/stats");
 check(afterA.toolResults === 1, `the approved tool ran exactly once (toolResults ${afterA.toolResults})`);
 check(afterA.toolResultNames.some((n) => n.includes(ASK)), `the tool result is for ${ASK}`);
+
+// --- Flow C: a second call of the same tool in the same conversation ---------------------------------------------------
+// With Always allow, the stored choice must let it run without a pause. Without the flag it must pause again.
+await stub("/reset", { method: "POST" });
+const convC = await startChat(token, {
+  text: "[approval-test:ask] list my address books again",
+  endpoint: "agents",
+  agent_id: agentId,
+  model: "p4-stub",
+  conversationId: convA,
+  parentMessageId: finishedA.messageId,
+  messageId: crypto.randomUUID(),
+});
+const turnC = await watchTurn(token, convC, 2, 180000);
+if (ALLOW_ALWAYS) {
+  check(!turnC.sawPause, "the second call runs without a pause (the remembered approval persists)");
+  check(turnC.done, "the second call finishes with the final answer");
+  const afterC = await stub("/stats");
+  check(afterC.toolResults === 1, `the remembered tool ran once in the second call (toolResults ${afterC.toolResults})`);
+} else {
+  check(turnC.sawPause, "control: without Always allow the second call pauses again");
+  console.log("info: control run stops at the second pause; the conversation is left paused and is removed with the stack");
+}
 
 // --- Flow B: the deny-listed tool never pauses and never runs -----------------------------------------------------------
 await stub("/reset", { method: "POST" });
@@ -228,4 +286,4 @@ check((await mcpTool(ncRun.mcpAuthorization, "nc_contacts_list_addressbooks", {}
 
 // --- Cleanup -------------------------------------------------------------------------------------------------------------
 await mcpTool(ncRun.mcpAuthorization, "nc_contacts_delete_addressbook", { name: BOOK });
-console.log("PASS: H3 live check (ask pauses and resumes; deny never pauses and never runs)");
+console.log(ALLOW_ALWAYS ? "PASS: H3 live check with Always allow (ask pauses; the remembered approval runs the second call with no pause; deny never runs)" : "PASS: H3 live check (ask pauses and resumes; deny never pauses and never runs; the second call pauses without Always allow)");
