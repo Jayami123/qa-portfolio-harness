@@ -11,10 +11,13 @@ import { BaseAdapter } from "./base.js";
 import { mcpReadinessFor } from "./mcp-ready.js";
 import { p4RunStateFile, readP4McpCredentials, removeP4RunState, writeP4RunState } from "./p4-run-state.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
+import { derivedSecondPassword, type SecondIdentityProbe, secondIdentityProduct } from "./p4-second-identity.js";
 import {
   PENPOT_COMPOSE_PROJECT,
   PENPOT_OWNER_EMAIL,
   PENPOT_OWNER_NAME,
+  PENPOT_SECOND_EMAIL,
+  PENPOT_SECOND_NAME,
   type PenpotSecrets,
   penpotComposeEnv,
   penpotComposeFiles,
@@ -46,6 +49,16 @@ export class PenpotAdapter extends BaseAdapter<PenpotConfig> {
 
   mcpRunStateFile(): string {
     return p4RunStateFile("penpot");
+  }
+
+  /** The second identity's run state (H2). Only written when P4_SECOND_IDENTITY=1. */
+  secondRunStateFile(): string {
+    return p4RunStateFile(secondIdentityProduct("penpot"));
+  }
+
+  /** H2: the second profile's password, derived from the owner-side secret so a kept volume reuses it. */
+  private secondPassword(secrets: PenpotSecrets): string {
+    return derivedSecondPassword(secrets.secretKey, "penpot");
   }
 
   private secretsFile(): string {
@@ -87,6 +100,9 @@ export class PenpotAdapter extends BaseAdapter<PenpotConfig> {
     await this.waitHealthy();
     await this.seed();
     await this.waitMcp();
+    if (this.cfg.secondIdentity) {
+      await this.seedSecond();
+    }
     console.log(
       `Penpot is up: ${this.cfg.baseUrl} (MCP ${this.cfg.mcpUrl}, single-user). Open the MCP plugin in a browser to edit designs. The run state is ${this.mcpRunStateFile()} and is not printed.`,
     );
@@ -94,6 +110,7 @@ export class PenpotAdapter extends BaseAdapter<PenpotConfig> {
 
   async down(): Promise<void> {
     removeP4RunState(this.mcpRunStateFile());
+    removeP4RunState(this.secondRunStateFile());
     const opts = this.composeOpts();
     if (process.env.PENPOT_DOWN_VOLUMES === "1") {
       await run("docker", this.composeArgs(["down", "-v"]), { cwd: opts.cwd, env: opts.env });
@@ -128,12 +145,78 @@ export class PenpotAdapter extends BaseAdapter<PenpotConfig> {
   }
 
   private async login(secrets: PenpotSecrets): Promise<string> {
-    const req = loginRequest(this.cfg.baseUrl, PENPOT_OWNER_EMAIL, secrets.ownerPassword);
+    return this.loginAs(PENPOT_OWNER_EMAIL, secrets.ownerPassword);
+  }
+
+  /** login-with-password for any profile. Returns the auth-token cookie value; the password is never printed. */
+  private async loginAs(email: string, password: string): Promise<string> {
+    const req = loginRequest(this.cfg.baseUrl, email, password);
     const response = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(REQUEST_MS) });
     if (response.status !== 200) {
       throw new Error(`PENPOT_LOGIN_FAILED: login-with-password returned HTTP ${response.status}`);
     }
     return authTokenFromSetCookie(response.headers.getSetCookie());
+  }
+
+  /**
+   * H2. Creates the second profile with manage.py when its login fails (not there yet), then logs in and checks that
+   * get-profile names it. Writes penpot-b-run.json with a null credential, because the MCP is single-user (see below).
+   */
+  async seedSecond(): Promise<void> {
+    const secrets = this.secrets ?? this.secretsFromDisk();
+    const password = this.secondPassword(secrets);
+    try {
+      await this.loginAs(PENPOT_SECOND_EMAIL, password);
+    } catch {
+      await runCapture(
+        "docker",
+        this.composeArgs(["exec", "-T", "backend", ...createProfileArgs(PENPOT_SECOND_EMAIL, PENPOT_SECOND_NAME, password)]),
+        { cwd: this.composeOpts().cwd, env: this.composeOpts().env, timeoutMs: CREATE_PROFILE_TIMEOUT_MS, redact: [password] },
+      );
+    }
+    const token = await this.loginAs(PENPOT_SECOND_EMAIL, password);
+    const email = await this.profileEmailWith(`auth-token=${token}`);
+    if (email !== PENPOT_SECOND_EMAIL) {
+      throw new Error("Penpot second identity: expected the second profile, got a different profile");
+    }
+    // Same MCP endpoint and same null credential as the owner (single-user mode takes none). The identity is the profile.
+    writeP4RunState(this.secondRunStateFile(), {
+      version: 1,
+      product: secondIdentityProduct("penpot"),
+      mcpUrl: this.cfg.mcpUrl,
+      mcpAuthorization: null,
+      owner: { username: PENPOT_SECOND_EMAIL, email: PENPOT_SECOND_EMAIL },
+    });
+  }
+
+  /**
+   * H2 live probe. Both profiles log in and get-profile names each one; the two emails differ. The MCP handshake and tools
+   * list run for both run states. The MCP is single-user, so it cannot tell the two apart: the probe reports that.
+   */
+  async probeSecondIdentity(): Promise<SecondIdentityProbe> {
+    const secrets = this.secrets ?? this.secretsFromDisk();
+    const ownerToken = await this.loginAs(PENPOT_OWNER_EMAIL, secrets.ownerPassword);
+    const secondToken = await this.loginAs(PENPOT_SECOND_EMAIL, this.secondPassword(secrets));
+    const ownerEmail = await this.profileEmailWith(`auth-token=${ownerToken}`);
+    const secondEmail = await this.profileEmailWith(`auth-token=${secondToken}`);
+    const ownerMcp = await mcpReadinessFor("penpot", {
+      url: readP4McpCredentials("penpot", this.mcpRunStateFile()).mcpUrl,
+      timeoutMs: p4WaitBudgetMs(),
+      minTools: MIN_TOOLS,
+    });
+    const secondMcp = await mcpReadinessFor("penpot", {
+      url: readP4McpCredentials(secondIdentityProduct("penpot"), this.secondRunStateFile()).mcpUrl,
+      timeoutMs: p4WaitBudgetMs(),
+      minTools: MIN_TOOLS,
+    });
+    return {
+      product: this.id,
+      owner: ownerEmail ?? "",
+      second: secondEmail ?? "",
+      distinct: ownerEmail !== null && secondEmail !== null && ownerEmail !== secondEmail,
+      ownerTools: ownerMcp.toolNames.length,
+      secondTools: secondMcp.toolNames.length,
+    };
   }
 
   /** Creates the owner with manage.py when login fails, then logs in and checks the profile email. */
