@@ -24,6 +24,18 @@ describe("nextcloud-env", () => {
     assert.notEqual(real, generateNextcloudSecret());
   });
 
+  it("never starts a secret with a dash (occ reads it as an option), and keeps the length and alphabet", () => {
+    // 0xfb in the first byte makes the first base64url character "-".
+    const dashFirst = (n: number) => Buffer.alloc(n, 0xfb);
+    assert.equal(dashFirst(24).toString("base64url").startsWith("-"), true, "the fixture really starts with a dash");
+    const secret = generateNextcloudSecret(dashFirst);
+    assert.equal(secret.startsWith("-"), false);
+    assert.match(secret, /^[A-Za-z0-9_-]{32}$/);
+    for (let i = 0; i < 2000; i++) {
+      assert.equal(generateNextcloudSecret().startsWith("-"), false);
+    }
+  });
+
   it("reuses secrets from text and replaces unusable text", () => {
     const kept = nextcloudSecretsFromText(JSON.stringify({ dbPassword: "db-a", ownerPassword: "own-a" }));
     assert.deepEqual(kept, { dbPassword: "db-a", ownerPassword: "own-a" });

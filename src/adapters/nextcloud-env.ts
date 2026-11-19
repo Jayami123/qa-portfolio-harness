@@ -16,9 +16,14 @@ export interface NextcloudSecrets {
   ownerPassword: string;
 }
 
-/** A url-safe random secret, 24 bytes (32 characters). Never logged. */
+/**
+ * A url-safe random secret, 24 bytes (32 characters). Never logged. It never starts with "-": the image's entrypoint passes
+ * the passwords to `occ maintenance:install` as separate arguments, and a leading dash makes Symfony Console read the value
+ * as an option (for example `The "-c" option does not exist.`). base64url includes "-", so about 1 secret in 64 did.
+ */
 export function generateNextcloudSecret(randomBytes: (n: number) => Buffer = crypto.randomBytes): string {
-  return randomBytes(24).toString("base64url");
+  const secret = randomBytes(24).toString("base64url");
+  return secret.startsWith("-") ? `A${secret.slice(1)}` : secret;
 }
 
 /**
