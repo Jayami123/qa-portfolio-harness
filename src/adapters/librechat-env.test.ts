@@ -32,6 +32,9 @@ describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
     assert.equal(librechatMcpServerFor("twenty").url, "http://twenty-server:3000/mcp");
     assert.equal(librechatMcpServerFor("penpot").url, "http://penpot-mcp:4401/mcp");
     assert.equal(librechatMcpServerFor("mattermost").url, "http://mattermost-mcp:8066/mcp");
+    // H5: the attack-lab entry. No credential, so the env builder never reads run state for it.
+    assert.equal(librechatMcpServerFor("lab").url, "http://p4-attack-lab:9010/mcp");
+    assert.equal(librechatMcpServerFor("lab").authEnv, null);
   });
 
   it("rejects a product that has no MCP server", () => {

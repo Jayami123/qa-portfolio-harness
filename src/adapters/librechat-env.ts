@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { harnessComposeFile } from "../internal/compose.js";
 import { LITELLM_ALIASES, LITELLM_NIGHTLY_ALIAS, LITELLM_STUB_ALIAS, type P4LlmMode } from "./litellm-env.js";
+import { toolApprovalYamlLines, type LibreChatToolApproval } from "./librechat-approval.js";
 
 /** Pinned in docs/pins/p4.md. v0.8.9 is the newest stable tag (tag date 2026-11-17; checked by git tag and by pulling the tag, 2026-11-19). */
 export const LIBRECHAT_IMAGE =
@@ -46,6 +47,9 @@ export function librechatMcpServerFor(product: string): LibreChatMcpServer {
       return { name: "penpot", url: "http://penpot-mcp:4401/mcp", authEnv: null };
     case "mattermost":
       return { name: "mattermost", url: "http://mattermost-mcp:8066/mcp", authEnv: "P4_MATTERMOST_MCP_AUTHORIZATION" };
+    case "lab":
+      // The attack lab (L2 plan). Its alias on qa-harness-p4 and container port 9010. It takes no credential.
+      return { name: "lab", url: "http://p4-attack-lab:9010/mcp", authEnv: null };
     default:
       throw new Error(`LIBRECHAT_MCP_UNKNOWN: no MCP server is defined for "${product}"`);
   }
@@ -84,7 +88,7 @@ export function resolveLibreChatModels(raw: string | undefined, mode: P4LlmMode)
  * Builds librechat.yaml. No secret value appears: Authorization values are ${VAR} placeholders read from the env
  * file (D16). The file is safe to keep at mode 0644.
  */
-export function librechatYaml(opts: { models: string[]; servers: LibreChatMcpServer[] }): string {
+export function librechatYaml(opts: { models: string[]; servers: LibreChatMcpServer[]; toolApproval?: LibreChatToolApproval | null }): string {
   const lines: string[] = [`version: ${LIBRECHAT_CONFIG_VERSION}`, "cache: true", "mcpSettings:", "  allowedDomains:"];
   for (const host of allowedDomainsFor(opts.servers)) {
     lines.push(`    - "${host}"`);
@@ -108,6 +112,7 @@ export function librechatYaml(opts: { models: string[]; servers: LibreChatMcpSer
   }
   lines.push(
     "endpoints:",
+    ...(opts.toolApproval ? toolApprovalYamlLines(opts.toolApproval) : []),
     "  custom:",
     '    - name: "P4 LiteLLM"',
     '      apiKey: "${P4_LITELLM_API_KEY}"',

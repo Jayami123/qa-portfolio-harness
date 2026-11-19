@@ -17,6 +17,8 @@ import {
   resolveOpenClawNightlyModel,
 } from "./adapters/openclaw-env.js";
 import { resolveLibreChatModels } from "./adapters/librechat-env.js";
+import { parseSecondIdentityFlag } from "./adapters/p4-second-identity.js";
+import { type LibreChatToolApproval, parseToolApprovalFlag, parseToolApprovalMode, parseToolApprovalRules } from "./adapters/librechat-approval.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
@@ -125,6 +127,8 @@ const envSchema = z.object({
   // and writes it to .harness/<product>-run.json (CLAUDE.md: no passwords in committed files).
   NEXTCLOUD_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8080"),
   NEXTCLOUD_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8765/mcp"),
+  /** H2: P4_SECOND_IDENTITY=1 creates a second user per server (off by default). */
+  P4_SECOND_IDENTITY: z.string().trim().default(""),
   NEXTCLOUD_DB_URL: z.string().trim().min(1).default("postgres://nextcloud@127.0.0.1:5460/nextcloud"),
   OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3011"),
   OUTLINE_DB_URL: z.string().trim().min(1).default("postgres://outline@127.0.0.1:5461/outline"),
@@ -146,6 +150,12 @@ const envSchema = z.object({
   LIBRECHAT_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3080"),
   LIBRECHAT_DB_URL: z.string().trim().min(1).default("mongodb://127.0.0.1:27017/LibreChat"),
   LIBRECHAT_MCP_PRODUCTS: z.string().trim().default("nextcloud,outline,twenty,penpot,mattermost"),
+  /** H3: LibreChat tool-approval policy (endpoints.agents.toolApproval). Off unless LIBRECHAT_TOOL_APPROVAL=1. */
+  LIBRECHAT_TOOL_APPROVAL: z.string().trim().default(""),
+  LIBRECHAT_TOOL_APPROVAL_MODE: z.string().trim().default(""),
+  LIBRECHAT_TOOL_APPROVAL_ALLOW: z.string().trim().default(""),
+  LIBRECHAT_TOOL_APPROVAL_DENY: z.string().trim().default(""),
+  LIBRECHAT_TOOL_APPROVAL_ASK: z.string().trim().default(""),
   OPENCLAW_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:18789"),
   // Opt-in, exact value "1": enables the gateway's POST /v1/responses endpoint so runTask() works. Unset changes nothing.
   OPENCLAW_RESPONSES_API: z.string().trim().default(""),
@@ -203,6 +213,8 @@ export interface TwentyConfig extends ProductConfig {
 export interface NextcloudConfig extends ProductConfig {
   id: "nextcloud";
   mcpUrl: string;
+  /** H2: a second user, its app password in nextcloud-b-run.json. Off unless P4_SECOND_IDENTITY=1. */
+  secondIdentity: boolean;
 }
 
 export interface OutlineConfig extends ProductConfig {
@@ -235,6 +247,8 @@ export interface LibreChatConfig extends ProductConfig {
   mcpProducts: string[];
   /** Model aliases LibreChat lists, in order. The first is the default. Never includes p4-nightly in stub mode. */
   models: string[];
+  /** H3: the endpoints.agents.toolApproval policy, or null (off, the default). */
+  toolApproval: LibreChatToolApproval | null;
 }
 
 export interface OpenClawConfig extends ProductConfig {
@@ -367,6 +381,7 @@ function buildNextcloudConfig(parsed: ParsedEnv): NextcloudConfig {
     baseUrl: parsed.NEXTCLOUD_BASE_URL.replace(/\/$/, ""),
     dbUrl: parsed.NEXTCLOUD_DB_URL,
     mcpUrl: parsed.NEXTCLOUD_MCP_URL.replace(/\/$/, ""),
+    secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
   };
 }
 
@@ -422,6 +437,26 @@ function buildLibreChatConfig(parsed: ParsedEnv): LibreChatConfig {
       .map((s) => s.trim())
       .filter((s) => s !== ""),
     models: resolveLibreChatModels(parsed.LIBRECHAT_MODELS, parseP4LlmMode(parsed.P4_LLM_MODE)),
+    toolApproval: buildLibreChatToolApproval(parsed),
+  };
+}
+
+/** H3. Off unless LIBRECHAT_TOOL_APPROVAL=1; rules without the flag are refused rather than ignored. */
+function buildLibreChatToolApproval(parsed: ParsedEnv): LibreChatToolApproval | null {
+  const servers = parsed.LIBRECHAT_MCP_PRODUCTS.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  const on = parseToolApprovalFlag(parsed.LIBRECHAT_TOOL_APPROVAL);
+  const rules = [parsed.LIBRECHAT_TOOL_APPROVAL_ALLOW, parsed.LIBRECHAT_TOOL_APPROVAL_DENY, parsed.LIBRECHAT_TOOL_APPROVAL_ASK, parsed.LIBRECHAT_TOOL_APPROVAL_MODE];
+  if (!on) {
+    if (rules.some((r) => r.trim() !== "")) {
+      throw new Error("LIBRECHAT_TOOL_APPROVAL_NEEDS_FLAG: the approval rules need LIBRECHAT_TOOL_APPROVAL=1");
+    }
+    return null;
+  }
+  return {
+    mode: parseToolApprovalMode(parsed.LIBRECHAT_TOOL_APPROVAL_MODE),
+    allow: parseToolApprovalRules(parsed.LIBRECHAT_TOOL_APPROVAL_ALLOW, servers),
+    deny: parseToolApprovalRules(parsed.LIBRECHAT_TOOL_APPROVAL_DENY, servers),
+    ask: parseToolApprovalRules(parsed.LIBRECHAT_TOOL_APPROVAL_ASK, servers),
   };
 }
 
