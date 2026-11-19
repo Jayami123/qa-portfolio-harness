@@ -15,6 +15,9 @@ export const PENPOT_MCP_IMAGE =
 export const PENPOT_COMPOSE_PROJECT = "qa-harness-penpot";
 export const PENPOT_OWNER_EMAIL = "qa-owner@p4.test";
 export const PENPOT_OWNER_NAME = "QA Owner";
+/** H2 second identity (P4_SECOND_IDENTITY=1): a second profile on the same backend. */
+export const PENPOT_SECOND_EMAIL = "qa-user-b@p4.test";
+export const PENPOT_SECOND_NAME = "QA User B";
 
 /**
  * Flags used by the harness stack (spike, 2026-11-17). `disable-admin-console` is needed because the admin console is on

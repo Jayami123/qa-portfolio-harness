@@ -11,6 +11,11 @@ export const TWENTY_IMAGE_REPO = "twentycrm/twenty";
 export const TWENTY_DEV_SEED_PASSWORD = "tim@apple.dev";
 
 export const TWENTY_DEFAULT_ADMIN_EMAIL = "jane.austen@apple.dev";
+/**
+ * H2 second identity (P4_SECOND_IDENTITY=1): a Member the dev seeder creates in the same workspace, signed in with the
+ * shared TWENTY_PASSWORD. Its MCP key is minted with its own workspace token.
+ */
+export const TWENTY_SECOND_MEMBER_EMAIL = "jony.ive@apple.dev";
 
 /**
  * Seed workspace subdomains, from the fork's dev seeder at 7cbdfec6:

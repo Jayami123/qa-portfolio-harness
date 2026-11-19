@@ -53,7 +53,7 @@ jobs:
   full-set:
     name: agent hosts and five products, readiness, bind check and RAM
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       P4_LLM_MODE: stub
       # Twenty's MCP is opt-in. The probe script also sets TWENTY_MCP=1 for the Twenty step.
@@ -144,6 +144,41 @@ jobs:
       - name: Stop the H3 approval fixture
         if: always() && inputs.tool_approval
         run: pkill -f scripts/live/approval-stub.mjs || true
+
+      # H2 (second_identity only). The probe above stops every product it started, so the H2 check gets its own stack for
+      # the five MCP products. P4_SECOND_IDENTITY=1 is set at job level; each adapter then seeds its second identity.
+      - name: "H2 stack up (second_identity only): nextcloud, outline, twenty, penpot, mattermost"
+        if: inputs.second_identity
+        run: |
+          set -euo pipefail
+          npm run up -- nextcloud
+          npm run up -- outline
+          npm run up -- twenty
+          npm run up -- penpot
+          npm run up -- mattermost
+
+      - name: "Live H2 check (second_identity only): two identities per server, separate users, the MCP accepts both"
+        if: inputs.second_identity
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node scripts/live/second-identity.mjs nextcloud outline twenty penpot mattermost | tee evidence/h2-live-check.txt
+
+      - name: "H2 stack down (second_identity only)"
+        if: always() && inputs.second_identity
+        run: |
+          for product in mattermost penpot twenty outline nextcloud; do
+            npm run down -- "$product" || true
+          done
+
+      - name: Upload H2 evidence (second_identity only)
+        if: always() && inputs.second_identity
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: h2-live-check
+          path: evidence/h2-live-check.txt
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Upload RAM evidence
         if: always()

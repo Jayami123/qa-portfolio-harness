@@ -207,6 +207,8 @@ export interface TwentyConfig extends ProductConfig {
   password: string;
   apiKey?: string;
   imageTag: string;
+  /** H2: a second workspace member (the seeder's shared password), its key in twenty-b-run.json. Off unless P4_SECOND_IDENTITY=1. */
+  secondIdentity: boolean;
 }
 
 /** P4 products. productRoot is .harness/<product> (ADR 0006, D1); no fork is read. */
@@ -221,16 +223,22 @@ export interface OutlineConfig extends ProductConfig {
   id: "outline";
   /** Outline's built-in MCP lives on the app origin at /mcp (ADR 0006). */
   mcpUrl: string;
+  /** H2: a second user with its own API key, in outline-b-run.json. Off unless P4_SECOND_IDENTITY=1. */
+  secondIdentity: boolean;
 }
 
 export interface PenpotConfig extends ProductConfig {
   id: "penpot";
   mcpUrl: string;
+  /** H2: a second profile, logged in over RPC. The MCP is single-user and takes no credential. Off unless P4_SECOND_IDENTITY=1. */
+  secondIdentity: boolean;
 }
 
 export interface MattermostConfig extends ProductConfig {
   id: "mattermost";
   mcpUrl: string;
+  /** H2: a second member account with its own PAT, in mattermost-b-run.json. Off unless P4_SECOND_IDENTITY=1. */
+  secondIdentity: boolean;
 }
 
 /** LiteLLM proxy (ADR 0007). No database in B1. The stub alias is config-level mock_response (review answer 0.9). */
@@ -366,6 +374,7 @@ function buildTwentyConfig(parsed: ParsedEnv, productsRoot: string): TwentyConfi
     password: parsed.TWENTY_PASSWORD,
     apiKey: parsed.TWENTY_API_KEY,
     imageTag: parsed.TWENTY_IMAGE_TAG,
+    secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
   };
 }
 
@@ -393,6 +402,7 @@ function buildOutlineConfig(parsed: ParsedEnv): OutlineConfig {
     baseUrl,
     dbUrl: parsed.OUTLINE_DB_URL,
     mcpUrl: `${baseUrl}/mcp`,
+    secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
   };
 }
 
@@ -403,6 +413,7 @@ function buildPenpotConfig(parsed: ParsedEnv): PenpotConfig {
     baseUrl: parsed.PENPOT_BASE_URL.replace(/\/$/, ""),
     dbUrl: parsed.PENPOT_DB_URL,
     mcpUrl: parsed.PENPOT_MCP_URL.replace(/\/$/, ""),
+    secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
   };
 }
 
@@ -413,6 +424,7 @@ function buildMattermostConfig(parsed: ParsedEnv): MattermostConfig {
     baseUrl: parsed.MATTERMOST_BASE_URL.replace(/\/$/, ""),
     dbUrl: parsed.MATTERMOST_DB_URL,
     mcpUrl: parsed.MATTERMOST_MCP_URL.replace(/\/$/, ""),
+    secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
   };
 }
 
