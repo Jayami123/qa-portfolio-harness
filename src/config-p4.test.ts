@@ -302,3 +302,29 @@ describe("H2 config: P4_SECOND_IDENTITY reaches Outline, Penpot, Mattermost and 
     }
   });
 });
+
+describe("H7 config: P4_SECOND_POSTS is off by default and needs P4_SECOND_IDENTITY", () => {
+  it("is false when unset, true with 1 and the identity on, and throws without the identity", () => {
+    const savedPosts = process.env.P4_SECOND_POSTS;
+    const savedIdentity = process.env.P4_SECOND_IDENTITY;
+    try {
+      delete process.env.P4_SECOND_POSTS;
+      delete process.env.P4_SECOND_IDENTITY;
+      resetConfigCache();
+      assert.equal((loadProductConfig("mattermost") as unknown as { secondPosts: boolean }).secondPosts, false);
+      process.env.P4_SECOND_IDENTITY = "1";
+      process.env.P4_SECOND_POSTS = "1";
+      resetConfigCache();
+      assert.equal((loadProductConfig("mattermost") as unknown as { secondPosts: boolean }).secondPosts, true);
+      delete process.env.P4_SECOND_IDENTITY;
+      resetConfigCache();
+      assert.throws(() => loadProductConfig("mattermost"), /MATTERMOST_POSTS_NEEDS_SECOND_IDENTITY/);
+    } finally {
+      if (savedPosts === undefined) delete process.env.P4_SECOND_POSTS;
+      else process.env.P4_SECOND_POSTS = savedPosts;
+      if (savedIdentity === undefined) delete process.env.P4_SECOND_IDENTITY;
+      else process.env.P4_SECOND_IDENTITY = savedIdentity;
+      resetConfigCache();
+    }
+  });
+});
