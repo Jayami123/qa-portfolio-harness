@@ -18,6 +18,7 @@ import {
 } from "./adapters/openclaw-env.js";
 import { resolveLibreChatModels } from "./adapters/librechat-env.js";
 import { parseSecondIdentityFlag } from "./adapters/p4-second-identity.js";
+import { mattermostPostsOption } from "./adapters/mattermost-posts.js";
 import { type LibreChatToolApproval, parseToolApprovalFlag, parseToolApprovalMode, parseToolApprovalRules } from "./adapters/librechat-approval.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
@@ -129,6 +130,8 @@ const envSchema = z.object({
   NEXTCLOUD_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8765/mcp"),
   /** H2: P4_SECOND_IDENTITY=1 creates a second user per server (off by default). */
   P4_SECOND_IDENTITY: z.string().trim().default(""),
+  /** H7: P4_SECOND_POSTS=1 makes the second identity seed posts in Mattermost. Needs P4_SECOND_IDENTITY=1. Off by default. */
+  P4_SECOND_POSTS: z.string().trim().default(""),
   NEXTCLOUD_DB_URL: z.string().trim().min(1).default("postgres://nextcloud@127.0.0.1:5460/nextcloud"),
   OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3011"),
   OUTLINE_DB_URL: z.string().trim().min(1).default("postgres://outline@127.0.0.1:5461/outline"),
@@ -239,6 +242,8 @@ export interface MattermostConfig extends ProductConfig {
   mcpUrl: string;
   /** H2: a second member account with its own PAT, in mattermost-b-run.json. Off unless P4_SECOND_IDENTITY=1. */
   secondIdentity: boolean;
+  /** H7: the second identity posts in town-square. Off unless P4_SECOND_POSTS=1 (which needs secondIdentity). */
+  secondPosts: boolean;
 }
 
 /** LiteLLM proxy (ADR 0007). No database in B1. The stub alias is config-level mock_response (review answer 0.9). */
@@ -425,6 +430,7 @@ function buildMattermostConfig(parsed: ParsedEnv): MattermostConfig {
     dbUrl: parsed.MATTERMOST_DB_URL,
     mcpUrl: parsed.MATTERMOST_MCP_URL.replace(/\/$/, ""),
     secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
+    secondPosts: mattermostPostsOption(parsed.P4_SECOND_POSTS, parsed.P4_SECOND_IDENTITY),
   };
 }
 

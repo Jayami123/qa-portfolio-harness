@@ -1,4 +1,17 @@
 import { derivedSecondPassword, type SecondIdentityProbe, secondIdentityProduct } from "./p4-second-identity.js";
+import {
+  channelByNameRequest,
+  channelPostsRequest,
+  type ChannelPost,
+  createPostRequest,
+  missingPostMessages,
+  parseChannelId,
+  parseChannelPosts,
+  SEED_CHANNEL_NAME,
+  seededPosts,
+  seedPostMessages,
+  type SeededPostsProbe,
+} from "./mattermost-posts.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { MattermostConfig } from "../config.js";
@@ -264,6 +277,9 @@ export class MattermostAdapter extends BaseAdapter<MattermostConfig> {
     if (this.cfg.secondIdentity) {
       await this.seedSecond(owner.token, [...redact, this.secondPassword(secrets)]);
       users.push({ email: MATTERMOST_AGENT_B_EMAIL, role: "member", notes: "second identity (H2); PAT in its own run state" });
+      if (this.cfg.secondPosts) {
+        await this.seedSecondPosts();
+      }
     }
     return {
       product: this.id,
@@ -339,16 +355,87 @@ export class MattermostAdapter extends BaseAdapter<MattermostConfig> {
     console.log("Mattermost auth probe: PAT belongs to the member account, no admin role (HTTP 200)");
   }
 
-  /** users/me for one PAT: the username and roles. The PAT is never printed. */
-  private async me(session: AuthSession): Promise<{ username: string; roles: unknown }> {
+  /**
+   * H7. The second member posts the missing messages from SEED_POST_PREFIX in town-square. It logs in with its derived
+   * password (the same account H2 created) and reads the channel first, so a kept volume posts only what is missing.
+   */
+  private async seedSecondPosts(): Promise<void> {
+    const secrets = this.secrets ?? this.secretsFromDisk();
+    const session = await this.login(MATTERMOST_AGENT_B_USERNAME, this.secondPassword(secrets));
+    if (session === null) {
+      throw new Error("MATTERMOST_SECOND_LOGIN_FAILED: the second member account does not log in for the H7 posts");
+    }
+    const channelId = await this.channelIdFor(session.token);
+    const existing = (await this.channelPosts(session.token, channelId)).map((post) => post.message);
+    for (const message of missingPostMessages(existing)) {
+      const req = createPostRequest(this.cfg.baseUrl, session.token, channelId, message);
+      const response = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(REQUEST_MS) });
+      if (response.status !== 201 && response.status !== 200) {
+        throw new Error(`Mattermost post (second identity, H7) returned HTTP ${response.status}`);
+      }
+    }
+  }
+
+  /** The channel id of SEED_CHANNEL_NAME in the harness team, read with the given token. */
+  private async channelIdFor(token: string): Promise<string> {
+    const req = channelByNameRequest(this.cfg.baseUrl, token, MATTERMOST_TEAM_NAME, SEED_CHANNEL_NAME);
+    const response = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(REQUEST_MS) });
+    if (response.status !== 200) {
+      throw new Error(`Mattermost channel lookup returned HTTP ${response.status}`);
+    }
+    return parseChannelId(await response.json());
+  }
+
+  private async channelPosts(token: string, channelId: string): Promise<ChannelPost[]> {
+    const req = channelPostsRequest(this.cfg.baseUrl, token, channelId);
+    const response = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(REQUEST_MS) });
+    if (response.status !== 200) {
+      throw new Error(`Mattermost channel posts returned HTTP ${response.status}`);
+    }
+    return parseChannelPosts(await response.json());
+  }
+
+  /**
+   * H7 live probe. Reads the channel as the owner (the MCP's own PAT, a team member) and checks that every seeded message
+   * exists exactly once and that its author is the second identity's user id. Returns counts and the second username only.
+   */
+  async probeSeededPosts(): Promise<SeededPostsProbe> {
+    const ownerAuth = requireMcpAuthorization(readP4McpCredentials("mattermost", this.mcpRunStateFile()), "mattermost");
+    const secondAuth = requireMcpAuthorization(readP4McpCredentials(secondIdentityProduct("mattermost"), this.secondRunStateFile()), "mattermost");
+    const second = await this.me({ product: this.id, baseUrl: this.cfg.baseUrl, authorizationHeader: secondAuth, raw: { source: "run-state" } });
+    const ownerBearer = ownerAuth.replace(/^Bearer /, "");
+    const channelId = await this.channelIdFor(ownerBearer);
+    const posts = seededPosts(await this.channelPosts(ownerBearer, channelId));
+    const expected = seedPostMessages();
+    const missing = missingPostMessages(posts.map((post) => post.message)).length;
+    const duplicates = posts.length - new Set(posts.map((post) => post.message)).size;
+    const authoredBySecond = posts.filter((post) => post.userId === second.id).length;
+    return {
+      product: this.id,
+      channel: SEED_CHANNEL_NAME,
+      expected: expected.length,
+      found: posts.length,
+      missing,
+      duplicates,
+      authoredBySecond,
+      secondAuthor: second.username,
+    };
+  }
+
+  /** users/me for one PAT: the id, username and roles. The PAT is never printed. */
+  private async me(session: AuthSession): Promise<{ id: string; username: string; roles: unknown }> {
     const bearer = session.authorizationHeader.replace(/^Bearer /, "");
     const req = usersMeRequest(this.cfg.baseUrl, bearer);
     const response = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(REQUEST_MS) });
     if (response.status !== 200) {
       throw new Error(`Mattermost proveAuth users/me returned HTTP ${response.status}`);
     }
-    const body = (await response.json()) as { username?: unknown; roles?: unknown };
-    return { username: typeof body.username === "string" ? body.username : "", roles: body.roles };
+    const body = (await response.json()) as { id?: unknown; username?: unknown; roles?: unknown };
+    return {
+      id: typeof body.id === "string" ? body.id : "",
+      username: typeof body.username === "string" ? body.username : "",
+      roles: body.roles,
+    };
   }
 
   /** H2: MCP readiness and the users/me identity for the second PAT (its own run state). */
