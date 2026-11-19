@@ -1,0 +1,77 @@
+# Harness v0.6.5: LibreChat L3 primitives (H1 to H9)
+
+- Branch: `feat/2026-11-19-librechat-l3-primitives`, from `main` at `63e4422` (v0.6.4). One release, `v0.6.5`. Draft PR only. No merge, no tag.
+- Source: the suite's L3 plan `docs/plans/2026-11-18-l3.md` (section 6, "Blockers", issues H1 to H9) and the master plan's Appendix A. The suite is `Jayami123/ai-agent-mcp-eval-suite`, read from its default branch by a shallow clone on 2026-11-19. The master plan is not a separate file in the suite repo; the L3 plan's Appendix A is read as the source for the coverage table.
+- Rules kept: every option is off by default; an unset option leaves the written `librechat.yaml` and env file byte-identical to 0.6.4; no product fork is edited; no secret is printed or written except the existing 0600 `secrets.json` and env file.
+
+## How the docs were obtained
+
+The image was pulled by digest and its source copied out, not read from the web. Pinned image: `ghcr.io/librechat-ai/librechat:v0.8.7@sha256:c5db3331b845e1f289f8d04c0c77936c4bbe372f76730a804abc1c37e44d23a9` (unchanged from `src/adapters/librechat-env.ts`).
+
+```bash
+IMG="ghcr.io/librechat-ai/librechat:v0.8.7@sha256:c5db3331b845e1f289f8d04c0c77936c4bbe372f76730a804abc1c37e44d23a9"
+docker pull "$IMG"
+CID=$(docker create "$IMG")
+docker cp "$CID":/app ./app      # source tree, includes packages/*/src
+docker rm "$CID"
+```
+
+## Config keys and their pinned-source quotes
+
+| Key | Pinned source (image path) | Quote |
+|---|---|---|
+| `mcpServers.<name>.requiresOAuth` | `packages/data-provider/src/mcp.ts:190` | "Whether this server requires OAuth authentication. If not specified, will be auto-detected during construction" |
+| `mcpServers.<name>.startup` | `packages/data-provider/src/mcp.ts` (BaseOptionsSchema) | "true (default): Server is initialized during app startup" |
+| `mcpServers.<name>.chatMenu` | `packages/data-provider/src/mcp.ts` (BaseOptionsSchema) | "Controls visibility in chat dropdown menu (MCPSelect)" |
+| `mcpSettings.allowedDomains`, `mcpSettings.allowedAddresses` | `packages/data-provider/src/config.ts:1721-1726` | `mcpSettings: z.object({ allowedDomains: z.array(z.string()).optional(), allowedAddresses: allowedAddressesSchema })` |
+| `interface.mcpServers.{use,create,share,public,configureObo,placeholder,trustCheckbox}` | `packages/data-provider/src/config.ts:1133-1150` | UI permission and label keys only. None is a tool policy. |
+| Any per-tool ask / allow / deny key | searched: `packages/data-provider/src/mcp.ts`, `packages/data-provider/src/config.ts`, `packages/api/src/mcp/**`, `packages/data-schemas/src/app/**` | No match for `toolApproval`, `autoApprove`, `alwaysAllow`, `allowedTools`, `disabledTools`, `requireConfirm`. The only "allow" lists are domain and address lists (`MCPServersRegistry.ts`). |
+
+The `mcpServers` object is parsed by `MCPOptionsSchema`. The image does not state whether unknown keys are rejected; the harness never writes an unknown key.
+
+## H1: mail catcher for Nextcloud
+
+- **Status: not attempted in this pass.** The L3 plan says H1 is needed only if S2 finds a Nextcloud mail tool. S2 is not recorded in the suite repo. Not built. Needs the S2 answer first.
+
+## H2: second identity on each of the five MCP servers
+
+- **Status: not built in this pass.** Each server needs its own second-user seed (Nextcloud user B, Outline viewer, Mattermost second author, Twenty second workspace key, a second LibreChat login). Every one needs a live run against its pinned image to prove the seed. No unit-only version is worth shipping. Left for a follow-up PR.
+
+## H3: LibreChat tool-approval policy knob
+
+- **Status: BLOCKED. Cannot be built against the pinned image (v0.8.7).** There is no `librechat.yaml` key for tool approval, ask, allow or deny globs in v0.8.7 (see the table above). The L3 plan's assumption that such a key exists is not met by this image. Per the rule "stop that item, record why", nothing is written for H3.
+- What this blocks: 56 cases tagged `APPR`. The owner needs to decide whether they can use the LibreChat UI approval flow instead (not built here), or move to a LibreChat version that has the key. Neither is chosen here.
+
+## H4: OAuth sign-in mode
+
+- **Status: not built in this pass.** Would set `requiresOAuth: true` for servers that publish OAuth metadata. The current code writes `requiresOAuth: false` on purpose (see `src/adapters/librechat-env.ts`, comment on `requiresOAuth`), and changing that for a live run needs S3 (which servers are OAuth-capable). S3 is not recorded. Not built.
+
+## H5: attack-lab entry in the harness
+
+- **Files:** `src/adapters/librechat-env.ts` (`librechatMcpServerFor`), `src/adapters/librechat-env.test.ts`.
+- **Option:** none. A new product name `lab` in `librechatMcpServerFor`. It is used only when `LIBRECHAT_MCP_PRODUCTS` names `lab`, so the default list is unchanged.
+- **Effect:** `librechatMcpServerFor("lab")` returns `{ name: "lab", url: "http://p4-attack-lab:9010/mcp", authEnv: null }`. The alias and port come from the L2 plan (`docs/plans/2026-11-18-l2-attack-lab.md`, `LAB_RESOURCE` and alias `p4-attack-lab`, host ports on `127.0.0.1:9010-9012` only). `authEnv: null` because the lab takes no credential.
+- **Live status:** the lab container is not in this repo yet (it is L2 work, outside this harness release). So the entry is unit-tested only.
+
+## H6: browser tab that keeps Penpot's plugin running
+
+- **Status: not built in this pass.** Needs Playwright (a pinned dependency, lane D5 in the L3 plan) and a live Penpot run. Not attempted.
+
+## H7: seeded Mattermost posts from the second user
+
+- **Status: not built in this pass.** Depends on H2 (the second identity). Not attempted.
+
+## H8: nothing to build
+
+- The L3 plan lists H8 as "not needed". Seed helpers are lane code, not a harness change. Recorded here only, as the plan asks.
+
+## H9: recording proxy
+
+- **Status: not built in this pass.** Optional in the L3 plan ("optional until D5 PR"). Not attempted.
+
+## Findings
+
+- **F1. H3 cannot be built on the pinned LibreChat image.** The search above shows no tool-approval key in v0.8.7. The 56 `APPR` cases stay blocked. Owner decision needed (see H3).
+- **F2. The L3 plan's source is in the suite repo, not in this repo.** The plan and its Appendix A are read from the suite's default branch.
+- **F3. Most H items are not built in this pass.** H1, H2, H4, H6, H7 and H9 each need a live run against a pinned image or a decision from the suite (S2, S3). They are recorded as not attempted, not as blocked, so the next PR can take them one at a time.
+- **F4. H5 is unit-tested only.** The lab container is not in the harness, so no live run of the lab entry is possible in this release.
