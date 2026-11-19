@@ -6,6 +6,7 @@ import { LIBRECHAT_IMAGE, LIBRECHAT_MONGO_IMAGE } from "./librechat-env.js";
 import { LITELLM_IMAGE } from "./litellm-env.js";
 import { OPENCLAW_IMAGE } from "./openclaw-env.js";
 import { MATTERMOST_IMAGE, MATTERMOST_MM_AGENTS_COMMIT } from "./mattermost-env.js";
+import { GREENMAIL_IMAGE } from "./greenmail-env.js";
 import { NEXTCLOUD_IMAGE, NEXTCLOUD_MCP_IMAGE } from "./nextcloud-env.js";
 import { OUTLINE_API_KEY_PREFIX } from "./outline-env.js";
 import { PENPOT_BACKEND_IMAGE, PENPOT_EXPORTER_IMAGE, PENPOT_FRONTEND_IMAGE, PENPOT_MCP_IMAGE } from "./penpot-env.js";
@@ -15,6 +16,7 @@ const PINS = path.resolve("docs", "pins", "p4.md");
 const COMPOSE_FILES = [
   "docker/nextcloud.compose.yml",
   "docker/nextcloud.mcp.compose.yml",
+  "docker/greenmail.compose.yml",
   "docker/outline.compose.yml",
   "docker/penpot.compose.yml",
   "docker/mattermost.compose.yml",
@@ -77,6 +79,7 @@ describe("P4 pins (docs/pins/p4.md is the source of truth)", () => {
     for (const pin of [
       NEXTCLOUD_IMAGE,
       NEXTCLOUD_MCP_IMAGE,
+      GREENMAIL_IMAGE,
       PENPOT_FRONTEND_IMAGE,
       PENPOT_BACKEND_IMAGE,
       PENPOT_EXPORTER_IMAGE,

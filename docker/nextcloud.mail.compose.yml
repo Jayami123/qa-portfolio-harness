@@ -1,0 +1,12 @@
+# Adds the Nextcloud app container to the qa-harness-p4 network, so the Mail app can reach GreenMail by its alias (H1,
+# P4_MAIL=1). Use it only together with docker/nextcloud.compose.yml (same project). Without P4_MAIL this file is not used.
+services:
+  app:
+    networks:
+      default: {}
+      p4: {}
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4
