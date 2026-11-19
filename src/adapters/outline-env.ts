@@ -6,6 +6,9 @@ import { generateNextcloudSecret } from "./nextcloud-env.js";
 export const OUTLINE_COMPOSE_PROJECT = "qa-harness-outline";
 export const OUTLINE_OWNER_EMAIL = "qa-owner@p4.test";
 export const OUTLINE_OWNER_USERNAME = "qa-owner";
+/** H2 second identity (P4_SECOND_IDENTITY=1): a member of the same team, with its own API key. */
+export const OUTLINE_SECOND_EMAIL = "qa-user-b@p4.test";
+export const OUTLINE_SECOND_NAME = "QA User B";
 /** Outline prefixes every API key (models/ApiKey.js: ApiKey.prefix = "ol_api_", verified in the 1.13.0 build). */
 export const OUTLINE_API_KEY_PREFIX = "ol_api_";
 

@@ -10,6 +10,9 @@ const OWNER_EMAIL = "qa-owner@p4.test";
 const OWNER_NAME = "QA Owner";
 const TEAM_NAME = "QA Harness";
 const TEAM_SUBDOMAIN = "qa";
+// H2 second identity: only when the adapter passes P4_SECOND_IDENTITY=1 to `docker compose exec`.
+const SECOND_EMAIL = "qa-user-b@p4.test";
+const SECOND_NAME = "QA User B";
 
 require(`${SERVER}/storage/database`);
 const { Team, User, ApiKey } = require(`${SERVER}/models`);
@@ -31,7 +34,23 @@ const { Team, User, ApiKey } = require(`${SERVER}/models`);
   }
   // An empty scope gets 403 on the MCP endpoint; "*" is the full scope for this fake owner (spike, 2026-11-17).
   const key = await ApiKey.create({ name: "p4-mcp", userId: user.id, scope: ["*"] });
-  process.stdout.write(`${JSON.stringify({ apiKey: key.value, teamId: team.id, userId: user.id })}\n`);
+  const line = { apiKey: key.value, teamId: team.id, userId: user.id };
+  if (process.env.P4_SECOND_IDENTITY === "1") {
+    // H2: a second member of the same team. Its own API key, so the MCP sees a different authenticated user.
+    let second = await User.findOne({ where: { email: SECOND_EMAIL } });
+    if (!second) {
+      second = await User.create({
+        email: SECOND_EMAIL,
+        name: SECOND_NAME,
+        teamId: team.id,
+        role: "member",
+        lastActiveAt: new Date(),
+      });
+    }
+    const secondKey = await ApiKey.create({ name: "p4-mcp-b", userId: second.id, scope: ["*"] });
+    line.second = { apiKey: secondKey.value, userId: second.id };
+  }
+  process.stdout.write(`${JSON.stringify(line)}\n`);
   process.exit(0);
 })().catch((err) => {
   process.stderr.write(`outline seed failed: ${err && err.name ? err.name : "error"}\n`);

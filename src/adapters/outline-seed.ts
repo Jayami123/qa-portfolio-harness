@@ -1,9 +1,20 @@
-import { OUTLINE_API_KEY_PREFIX, OUTLINE_OWNER_EMAIL } from "./outline-env.js";
+import { OUTLINE_API_KEY_PREFIX, OUTLINE_OWNER_EMAIL, OUTLINE_SECOND_EMAIL } from "./outline-env.js";
 
 export interface OutlineSeedOutput {
   apiKey: string;
   teamId: string;
   userId: string;
+  /** H2: present only when the seed ran with P4_SECOND_IDENTITY=1. */
+  second?: { apiKey: string; userId: string };
+}
+
+/** Argv after `docker compose exec -T`: the flag is passed as an env value (never a secret), only when H2 is on. */
+export function outlineSeedExecEnv(secondIdentity: boolean): string[] {
+  return secondIdentity ? ["-e", "P4_SECOND_IDENTITY=1"] : [];
+}
+
+function isKey(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith(OUTLINE_API_KEY_PREFIX) && value.length >= 40;
 }
 
 /**
@@ -24,13 +35,18 @@ export function parseOutlineSeedOutput(stdout: string): OutlineSeedOutput {
       continue;
     }
     if (
-      typeof parsed.apiKey === "string" &&
-      parsed.apiKey.startsWith(OUTLINE_API_KEY_PREFIX) &&
-      parsed.apiKey.length >= 40 &&
+      isKey(parsed.apiKey) &&
       typeof parsed.teamId === "string" &&
-      typeof parsed.userId === "string"
+      typeof parsed.userId === "string" &&
+      (parsed.second === undefined ||
+        (typeof parsed.second === "object" && parsed.second !== null && isKey(parsed.second.apiKey) && typeof parsed.second.userId === "string"))
     ) {
-      return { apiKey: parsed.apiKey, teamId: parsed.teamId, userId: parsed.userId };
+      return {
+        apiKey: parsed.apiKey,
+        teamId: parsed.teamId,
+        userId: parsed.userId,
+        ...(parsed.second ? { second: { apiKey: parsed.second.apiKey, userId: parsed.second.userId } } : {}),
+      };
     }
     throw new Error("OUTLINE_SEED_OUTPUT_INVALID: the seed output did not have the expected fields (not printed)");
   }
@@ -76,4 +92,9 @@ export function maskOutlineApiKeys(chunk: string, carry: string): { text: string
 
 export function ownerEmailMatches(email: string): boolean {
   return email === OUTLINE_OWNER_EMAIL;
+}
+
+/** H2: auth.info email check for the second identity. */
+export function secondEmailMatches(email: string): boolean {
+  return email === OUTLINE_SECOND_EMAIL;
 }
