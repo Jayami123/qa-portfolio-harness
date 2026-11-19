@@ -18,6 +18,7 @@ import {
 } from "./adapters/openclaw-env.js";
 import { resolveLibreChatModels } from "./adapters/librechat-env.js";
 import { parseSecondIdentityFlag } from "./adapters/p4-second-identity.js";
+import { parseMailFlag } from "./adapters/greenmail-env.js";
 import { mattermostPostsOption } from "./adapters/mattermost-posts.js";
 import { penpotPluginOption } from "./adapters/penpot-plugin.js";
 import { type LibreChatToolApproval, parseToolApprovalFlag, parseToolApprovalMode, parseToolApprovalRules } from "./adapters/librechat-approval.js";
@@ -135,6 +136,8 @@ const envSchema = z.object({
   P4_SECOND_POSTS: z.string().trim().default(""),
   /** H6: P4_PENPOT_PLUGIN=1 runs the Penpot MCP per user, with a browser tab per profile. Needs P4_SECOND_IDENTITY=1. */
   P4_PENPOT_PLUGIN: z.string().trim().default(""),
+  /** H1: P4_MAIL=1 starts GreenMail and configures the Nextcloud Mail app against it. Off by default. */
+  P4_MAIL: z.string().trim().default(""),
   NEXTCLOUD_DB_URL: z.string().trim().min(1).default("postgres://nextcloud@127.0.0.1:5460/nextcloud"),
   OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3011"),
   OUTLINE_DB_URL: z.string().trim().min(1).default("postgres://outline@127.0.0.1:5461/outline"),
@@ -223,6 +226,8 @@ export interface NextcloudConfig extends ProductConfig {
   mcpUrl: string;
   /** H2: a second user, its app password in nextcloud-b-run.json. Off unless P4_SECOND_IDENTITY=1. */
   secondIdentity: boolean;
+  /** H1: GreenMail and the Mail app accounts for each identity. Off unless P4_MAIL=1. */
+  mail: boolean;
 }
 
 export interface OutlineConfig extends ProductConfig {
@@ -401,6 +406,7 @@ function buildNextcloudConfig(parsed: ParsedEnv): NextcloudConfig {
     dbUrl: parsed.NEXTCLOUD_DB_URL,
     mcpUrl: parsed.NEXTCLOUD_MCP_URL.replace(/\/$/, ""),
     secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
+    mail: parseMailFlag(parsed.P4_MAIL),
   };
 }
 

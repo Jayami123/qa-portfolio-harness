@@ -29,6 +29,7 @@ import {
   type NextcloudSecrets,
   nextcloudComposeEnv,
   nextcloudComposeFiles,
+  generateNextcloudSecret,
   nextcloudSecretsFromText,
   parseNextcloudStatus,
 } from "./nextcloud-env.js";
@@ -43,10 +44,29 @@ import {
 import { p4WaitBudgetMs } from "./p4-wait.js";
 import { describeFetchFailure } from "../wait/readiness-error.js";
 import { failIfContainerExited, printReadinessDiagnostics } from "../wait/readiness-diagnostics.js";
+import { GREENMAIL_HOST } from "./greenmail-env.js";
+import {
+  accountIdFor,
+  configureMailIdentity,
+  installMailApp,
+  mcpCallFor,
+  type MailFlowResult,
+  runMailFlow,
+  startGreenmail,
+  stopGreenmail,
+  type MailIdentity,
+} from "./nextcloud-mail-seed.js";
 
 /** The Nextcloud app container (compose project qa-harness-nextcloud, service app). */
 const NEXTCLOUD_APP_CONTAINER = "qa-harness-nextcloud-app-1";
 import type { McpReadiness } from "./types.js";
+
+/** H1 live check result: counts and flags per identity. No password, token or message body. */
+export interface MailProbe {
+  product: "nextcloud";
+  owner: MailFlowResult & { email: string };
+  second?: MailFlowResult & { email: string };
+}
 
 const STATUS_POLL_MS = 2000;
 const STATUS_REQUEST_MS = 5000;
@@ -94,7 +114,7 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
   private composeOpts(withMcp: boolean): ComposeOptions {
     return {
       projectName: NEXTCLOUD_COMPOSE_PROJECT,
-      files: nextcloudComposeFiles(withMcp),
+      files: nextcloudComposeFiles(withMcp, this.cfg.mail),
       cwd: HARNESS_DOCKER_DIR,
       env: nextcloudComposeEnv(process.env, this.secrets ?? this.secretsFromDisk()),
     };
@@ -105,9 +125,16 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
     await ensureP4Network();
     this.secrets = this.secretsFromDisk();
     this.writeSecrets(this.secrets);
+    if (this.cfg.mail) {
+      // H1: GreenMail first, so the Mail app can reach it when the app container joins the network.
+      await startGreenmail(p4WaitBudgetMs());
+    }
     await composeUp(this.composeOpts(false), { wait: true });
     await this.waitHealthy();
     await this.seed();
+    if (this.cfg.mail) {
+      await this.seedMail();
+    }
     await composeUp(this.composeOpts(true), { wait: true });
     await this.waitMcp();
     console.log(
@@ -118,6 +145,8 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
   async down(): Promise<void> {
     removeP4RunState(this.mcpRunStateFile());
     removeP4RunState(this.secondRunStateFile());
+    // Always stopped, even when P4_MAIL is unset in this shell: a run that was started with it must not leave GreenMail behind.
+    await stopGreenmail();
     const opts = this.composeOpts(true);
     if (process.env.NEXTCLOUD_DOWN_VOLUMES === "1") {
       // Removing volumes also removes the saved secrets, since the volumes they initialise are gone.
@@ -227,6 +256,81 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
       mcpAuthorization: basicAuthorization(NEXTCLOUD_SECOND_USERNAME, appPassword),
       owner: { username: NEXTCLOUD_SECOND_USERNAME, email: NEXTCLOUD_SECOND_EMAIL },
     });
+  }
+
+  /**
+   * H1. Installs the pinned Mail app, then configures a Mail account for each identity against GreenMail. Each identity's
+   * GreenMail password is new for this run, and it is never printed or written to a file.
+   */
+  private async seedMail(): Promise<void> {
+    await installMailApp(NEXTCLOUD_APP_CONTAINER);
+    const owner = readP4McpCredentials("nextcloud", this.mcpRunStateFile());
+    const identities: MailIdentity[] = [
+      {
+        uid: NEXTCLOUD_OWNER_USERNAME,
+        name: "QA owner",
+        email: NEXTCLOUD_OWNER_EMAIL,
+        authorization: requireMcpAuthorization(owner, "nextcloud"),
+      },
+    ];
+    if (this.cfg.secondIdentity) {
+      const second = readP4McpCredentials(secondIdentityProduct("nextcloud"), this.secondRunStateFile());
+      identities.push({
+        uid: NEXTCLOUD_SECOND_USERNAME,
+        name: "QA user B",
+        email: NEXTCLOUD_SECOND_EMAIL,
+        authorization: requireMcpAuthorization(second, "nextcloud"),
+      });
+    }
+    for (const identity of identities) {
+      await configureMailIdentity({
+        container: NEXTCLOUD_APP_CONTAINER,
+        baseUrl: this.cfg.baseUrl,
+        identity,
+        makePassword: () => generateNextcloudSecret(),
+      });
+    }
+    console.log(`Nextcloud Mail: ${identities.map((i) => i.email).join(", ")} configured against ${GREENMAIL_HOST} (passwords not printed).`);
+  }
+
+  /**
+   * H1 live check. The owner's MCP lists the accounts and the inbox, and sends a marked message to the owner. With the
+   * second identity, the owner also sends to qa-user-b, and that identity's own MCP credential lists it. Each message must
+   * reach GreenMail and then appear in the recipient's MCP inbox after a Mail sync. Returns ids, counts and flags only.
+   */
+  async probeMail(): Promise<MailProbe> {
+    if (!this.cfg.mail) {
+      throw new Error("H1_MAIL_NOT_ENABLED: run with P4_MAIL=1 (the flag is not set)");
+    }
+    const budgetMs = p4WaitBudgetMs();
+    const ownerCreds = readP4McpCredentials("nextcloud", this.mcpRunStateFile());
+    const ownerCall = await mcpCallFor(ownerCreds.mcpUrl, requireMcpAuthorization(ownerCreds, "nextcloud"));
+    const ownerAccount = await accountIdFor(ownerCall, NEXTCLOUD_OWNER_EMAIL);
+    const owner = await runMailFlow({
+      container: NEXTCLOUD_APP_CONTAINER,
+      senderCall: ownerCall,
+      fromAccountId: ownerAccount,
+      to: NEXTCLOUD_OWNER_EMAIL,
+      recipientCall: ownerCall,
+      recipientAccountId: ownerAccount,
+      budgetMs,
+    });
+    let second: MailFlowResult | undefined;
+    if (this.cfg.secondIdentity) {
+      const secondCreds = readP4McpCredentials(secondIdentityProduct("nextcloud"), this.secondRunStateFile());
+      const secondCall = await mcpCallFor(secondCreds.mcpUrl, requireMcpAuthorization(secondCreds, "nextcloud"));
+      const secondAccount = await accountIdFor(secondCall, NEXTCLOUD_SECOND_EMAIL);
+      second = await runMailFlow({
+        container: NEXTCLOUD_APP_CONTAINER,
+        senderCall: ownerCall,
+        fromAccountId: ownerAccount,
+        to: NEXTCLOUD_SECOND_EMAIL,
+        recipientCall: secondCall,
+        recipientAccountId: secondAccount,
+        budgetMs,
+      });
+    }
+    return { product: this.id, owner: { email: NEXTCLOUD_OWNER_EMAIL, ...owner }, second: second && { email: NEXTCLOUD_SECOND_EMAIL, ...second } };
   }
 
   async authenticate(): Promise<AuthSession> {

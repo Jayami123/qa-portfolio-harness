@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       second_identity:
-        description: "Turn on P4_SECOND_IDENTITY=1 (H2, all five servers) and P4_SECOND_POSTS=1 (H7, Mattermost posts from the second user)"
+        description: "Turn on P4_SECOND_IDENTITY=1 (H2, all five servers), P4_SECOND_POSTS=1 (H7, Mattermost posts from the second user) and P4_MAIL=1 (H1, GreenMail and the Nextcloud Mail app for both users)"
         type: boolean
         default: false
   pull_request:
@@ -29,12 +29,17 @@ on:
       - "docker/librechat*"
       - "docker/openclaw*"
       - "docker/nextcloud*"
+      - "docker/greenmail*"
+      - "src/adapters/greenmail*"
+      - "src/adapters/nextcloud-mail*"
+      - "src/adapters/mcp-call*"
       - "docker/outline*"
       - "docker/penpot*"
       - "docker/mattermost*"
       - "docker/twenty*.yml"
       - "scripts/p4-*"
       - "scripts/penpot-plugin-tabs.mjs"
+      - "scripts/live/mail.mjs"
       - "scripts/lib.mjs"
       - "docs/pins/p4.md"
       - ".github/workflows/p4-agent-hosts.yml"
@@ -67,6 +72,8 @@ jobs:
       P4_SECOND_POSTS: ${{ inputs.second_identity && '1' || '' }}
       # H6 needs H2 (one tab per H2 profile). The browser tabs run Playwright's Chromium, installed below.
       P4_PENPOT_PLUGIN: ${{ inputs.second_identity && '1' || '' }}
+      # H1 (GreenMail and the Nextcloud Mail app) follows the same dispatch input: qa-owner, and qa-user-b when H2 is on.
+      P4_MAIL: ${{ inputs.second_identity && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL: ${{ inputs.tool_approval && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_list_addressbooks' || '' }}
       LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_delete_addressbook' || '' }}
@@ -177,6 +184,15 @@ jobs:
           node scripts/live/second-identity.mjs nextcloud outline twenty penpot mattermost | tee evidence/h2-live-check.txt
           node scripts/live/mattermost-posts.mjs | tee evidence/h7-live-check.txt
 
+      # H1: the Nextcloud stack above was started with P4_MAIL=1. The owner sends to self and qa-user-b sends to the second
+      # identity; GreenMail must store each message, and the MCP inbox of the recipient must list it after a Mail sync.
+      - name: "Live H1 check (second_identity only): the Mail app sends through GreenMail and nc_mail_* lists the inbox"
+        if: inputs.second_identity
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node scripts/live/mail.mjs | tee evidence/h1-live-check.txt
+
       # H6: the two tabs were opened by `up -- penpot` (P4_PENPOT_PLUGIN=1). This step prints the result to the step log.
       - name: "Live H6 check (second_identity only): the MCP answers through each open tab with its own profile's file"
         if: inputs.second_identity
@@ -197,6 +213,7 @@ jobs:
         with:
           name: h2-live-check
           path: |
+            evidence/h1-live-check.txt
             evidence/h2-live-check.txt
             evidence/h7-live-check.txt
           if-no-files-found: warn

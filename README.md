@@ -513,6 +513,15 @@ LibreChat L3 primitives (v0.6.5, plan `docs/plans/2026-11-19-librechat-l3-primit
 
 H3 (tool-approval knob) cannot be built on the pinned v0.8.7. LibreChat v0.8.8 adds `endpoints.agents.toolApproval`; a pin move is the owner's decision (plan, Session 2).
 
+Nextcloud mail (H1, v0.6.6, plan `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 6). Off by default.
+
+| | Option | Effect |
+|---|---|---|
+| H1 | `P4_MAIL=1` (exactly 1) | Starts GreenMail 2.1.15 (digest-pinned) on `qa-harness-p4` as `greenmail`, installs the Nextcloud Mail app 5.13.3 (SHA-256 pinned, copied in from the host), and makes a Mail account for `qa-owner` (and `qa-user-b` with `P4_SECOND_IDENTITY=1`). Each run makes new GreenMail passwords; they are never printed or written to a file. |
+| H1 | `node scripts/live/mail.mjs` (with `P4_MAIL=1`) | Checks the `nc_mail_*` tools: list accounts and inbox, send, GreenMail stores the message, the recipient's MCP inbox lists it after a Mail sync. |
+
+`down nextcloud` always stops GreenMail. With the flag unset, nothing here runs.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.

@@ -1,0 +1,26 @@
+# Harness-owned mail server for the Nextcloud Mail app (H1, P4_MAIL=1, off by default). GreenMail serves IMAP and SMTP on the
+# qa-harness-p4 network (alias "greenmail"). Users are created over its REST API by the adapter, with a password made for
+# each run, so no password is in this file or in the container environment. Its state is in memory: `up` recreates it.
+#
+#   P4_MAIL=1 node scripts/up.mjs nextcloud   (starts this file, then the Nextcloud overlay)
+name: qa-harness-greenmail
+
+services:
+  greenmail:
+    image: greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f
+    networks:
+      p4:
+        aliases:
+          - greenmail
+    ports:
+      # IMAP is published on loopback only, so the adapter can create the Sent folder. SMTP stays on the network.
+      - "127.0.0.1:3143:3143"
+      # The REST API (create users, list a user's messages) on loopback only.
+      - "127.0.0.1:8029:8080"
+    environment:
+      GREENMAIL_OPTS: "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0"
+
+networks:
+  p4:
+    external: true
+    name: qa-harness-p4
