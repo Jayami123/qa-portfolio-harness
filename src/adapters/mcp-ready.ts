@@ -199,3 +199,65 @@ export async function waitForMcp(product: string, opts: McpProbeOptions): Promis
     `${MCP_NOT_READY}: ${product} MCP at ${opts.url} not ready after ${opts.timeoutMs} ms (last: ${last})`,
   );
 }
+
+/** Thrown when a tool call returns an error. The tool's text is not included: it can hold data from the file. */
+export const MCP_TOOL_ERROR = "MCP_TOOL_ERROR";
+
+/**
+ * Calls one MCP tool over a fresh handshake and returns the first text block of its result. Headers (for example a
+ * per-user token in the URL is not a header, but an Authorization value would be) are never logged or put in an error.
+ */
+export async function callMcpTool(opts: {
+  url: string;
+  headers?: Record<string, string>;
+  name: string;
+  args: Record<string, unknown>;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const init = await post(
+    fetchImpl,
+    opts.url,
+    opts.headers,
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "qa-portfolio-harness", version: "p4" } },
+    },
+    null,
+  );
+  if (init.status !== 200) {
+    throw new Error(`initialize HTTP ${init.status}`);
+  }
+  assertJsonRpcResult(init.body, "initialize");
+  const notified = await post(fetchImpl, opts.url, opts.headers, { jsonrpc: "2.0", method: "notifications/initialized" }, init.sessionId);
+  if (notified.status !== 200 && notified.status !== 202) {
+    throw new Error(`notifications/initialized HTTP ${notified.status}`);
+  }
+  const call = await post(
+    fetchImpl,
+    opts.url,
+    opts.headers,
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: opts.name, arguments: opts.args } },
+    init.sessionId,
+  );
+  if (call.status !== 200) {
+    throw new Error(`tools/call HTTP ${call.status}`);
+  }
+  assertJsonRpcResult(call.body, "tools/call");
+  return firstTextBlock(call.body);
+}
+
+/** The first text block of a tools/call result. A result flagged isError throws MCP_TOOL_ERROR without its text. */
+export function firstTextBlock(reply: unknown): string {
+  const result = (reply as { result?: { isError?: unknown; content?: { type?: unknown; text?: unknown }[] } } | null)?.result;
+  if (result?.isError === true) {
+    throw new Error(`${MCP_TOOL_ERROR}: the tool returned an error (text not printed)`);
+  }
+  const block = (result?.content ?? []).find((item) => item.type === "text" && typeof item.text === "string");
+  if (!block || typeof block.text !== "string") {
+    throw new Error(`${MCP_TOOL_ERROR}: the tool result had no text block (body not printed)`);
+  }
+  return block.text;
+}
