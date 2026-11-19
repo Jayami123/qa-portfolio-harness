@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Nextcloud (P4): generated passwords never start with `-`. The pinned image's entrypoint passes them to `occ maintenance:install` as separate arguments, and a leading dash makes Symfony Console read the value as an option (`The "-c" option does not exist.`), so about 1 run in 32 failed the install and the readiness wait. Reproduced against the pinned image by digest.
+
 ## [0.6.3] - 2026-11-18
 
 - OpenClaw (P4): with `OPENCLAW_RESPONSES_API=1` the gateway config now also writes `tools.toolSearch: false`. Tool Search is on by default for embedded runs and defers tool schemas behind `tool_search` / `dispatch_action`; the pinned docs say "Set `tools.toolSearch: false` to restore direct schemas" (`docs/tools/tool-search.md` at `2026.10.33`). With the flag unset, the config is byte-identical to 0.6.2.
