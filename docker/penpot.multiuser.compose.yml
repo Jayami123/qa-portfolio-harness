@@ -1,5 +1,13 @@
-# H6 (P4_PENPOT_PLUGIN=1 only). Overrides the Penpot MCP command to multi-user mode, so each MCP request must name its
-# user with ?userToken=. Added by the adapter after penpot.compose.yml, never used by default. Nothing secret here.
+# H6 (P4_PENPOT_PLUGIN=1 only). Added by the adapter after penpot.compose.yml; never used by default. Nothing secret here.
+# - mcp: multi-user mode, so each MCP request names its user with ?userToken=.
+# - frontend and backend: the same PENPOT_FLAGS as penpot.compose.yml, plus enable-mcp, which shows the MCP toolbar
+#   (the workspace checks contains? flags :mcp). The base file is unchanged.
 services:
   mcp:
     command: ["node", "index.js", "--multi-user"]
+  frontend:
+    environment:
+      PENPOT_FLAGS: "enable-login-with-password disable-registration disable-email-verification disable-onboarding-questions disable-admin-console enable-prepl-server enable-mcp"
+  backend:
+    environment:
+      PENPOT_FLAGS: "enable-login-with-password disable-registration disable-email-verification disable-onboarding-questions disable-admin-console enable-prepl-server enable-mcp"
