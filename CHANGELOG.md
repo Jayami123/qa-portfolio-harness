@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- H2 (P4): `P4_SECOND_IDENTITY=1` now gives a second identity on all five MCP servers (Nextcloud, Outline, Twenty, Penpot, Mattermost), off by default. Each second identity has its own run-state file (`<product>-b-run.json`) and a live probe (`scripts/live/second-identity.mjs`). Outline: a second team member with its own API key. Mattermost: a second team member with its own PAT. Twenty: a second workspace member; its MCP key is minted by the admin (Twenty denies API-key management to members) and recorded against that member. Penpot: a second profile; the MCP is single-user and takes no credential, so its handshake is shared.
 - Twenty (P4): `seed()` now checks that the seed it ran left a usable workspace membership (the same signIn and loginToken exchange that `/mcp` needs). If not, it wipes the harness-owned Twenty volumes, starts the stack again and seeds again, up to twice (three attempts in all), then fails with a clear error that names the reset command. `workspace:seed:dev` cannot be re-run on top of a seeded database (Twenty v2.44.0: the second run fails in `synchronizeTwentyStandardApplication` with `WorkspaceMigrationBuilderException`), and the command exits 0 even when the seeder fails inside it, so a seed that timed out in CI (`Query read timeout`) used to pass here and fail later with `User is not a member of the workspace`. A kept volume that already has the seed user is skipped as before.
 
 ## [0.6.5] - 2026-11-19
