@@ -511,7 +511,7 @@ LibreChat L3 primitives (v0.6.5, plan `docs/plans/2026-11-19-librechat-l3-primit
 |---|---|---|
 | H5 | `LIBRECHAT_MCP_PRODUCTS` including `lab` | Attaches the attack-lab MCP at `http://p4-attack-lab:9010/mcp`, no credential. The default product list is unchanged. The lab container is not in this repo yet. |
 
-H3 (tool-approval knob) cannot be built: LibreChat v0.8.7 has no such key in `librechat.yaml`.
+H3 (tool-approval knob) cannot be built on the pinned v0.8.7. LibreChat v0.8.8 adds `endpoints.agents.toolApproval`; a pin move is the owner's decision (plan, Session 2).
 
 ## License
 

@@ -75,3 +75,51 @@ The `mcpServers` object is parsed by `MCPOptionsSchema`. The image does not stat
 - **F2. The L3 plan's source is in the suite repo, not in this repo.** The plan and its Appendix A are read from the suite's default branch.
 - **F3. Most H items are not built in this pass.** H1, H2, H4, H6, H7 and H9 each need a live run against a pinned image or a decision from the suite (S2, S3). They are recorded as not attempted, not as blocked, so the next PR can take them one at a time.
 - **F4. H5 is unit-tested only.** The lab container is not in the harness, so no live run of the lab entry is possible in this release.
+
+## Session 2 results (2026-11-19, same branch)
+
+### H3 re-check: a tool-approval key exists in LibreChat v0.8.8, not in the pinned v0.8.7
+
+Source: the LibreChat git tags (`git clone` of `danny-avila/LibreChat`, tags `v0.8.7`, `v0.8.8`, `v0.8.9`). The GitHub release API was not reachable from this session, so release notes were not read; the source was.
+
+- v0.8.7 (tag date 2026-06-24): no tool-approval key (searched `packages/data-provider`, `packages/api/src/mcp`, `packages/data-schemas`, `librechat.example.yaml`).
+- **v0.8.8 (tag date 2026-09-30) adds `endpoints.agents.toolApproval`.** Schema: `packages/data-provider/src/config.ts` (`toolApprovalPolicySchema`, placed in the agents endpoint schema next to `toolApproval: toolApprovalPolicySchema`). Documented in `librechat.example.yaml` inside the commented `endpoints.agents` block:
+  - `enabled` (boolean), `mode` (`default` | `dontAsk` | `bypass`), `allow`, `deny`, `ask` (string arrays of globs), `reason` (string with `{tool}`), `hooks` (module-loaded policy hooks).
+  - Example from the file: `allow: ["mcp:trusted-server:read_*"]`, `deny: ["mcp:*:delete_*"]`, `ask: ["mcp:*:*"]`.
+  - Its own comment: "Require user approval before matching tool calls. Disabled by default." and "`dontAsk`: deny anything not explicitly allowed (headless / API-key flows)".
+  - Also needs a durable checkpointer (`endpoints.agents.checkpointer`, default `mongo`).
+- v0.8.9 (tag date 2026-11-17) keeps the same key and adds approval handling in `packages/api/src/mcp/approval.ts` and `tools/approval`.
+
+**Consequence:** the pinned image cannot provide the H3 knob. The owner decides whether to move the LibreChat pin to v0.8.8 or v0.8.9. A pin move changes every LibreChat run and must be a separate PR with its own live check. No workaround is built here.
+
+**Pin correction:** `src/adapters/librechat-env.ts` and `docs/pins/p4.md` say v0.8.7 was "the newest stable tag at 2026-11-18". That was wrong: v0.8.8 (2026-09-30) and v0.8.9 (2026-11-17) already existed. The comment needs fixing in the pin PR.
+
+### S2: does the Nextcloud MCP expose a mail tool? Yes.
+
+Image `ghcr.io/cbcoutinho/nextcloud-mcp-server:0.213.2@sha256:655c2864…d325`, package `/opt/venv/lib/python3.14/site-packages/nextcloud_mcp_server/server/mail.py`. Tools: `nc_mail_list_accounts`, `nc_mail_list_mailboxes`, `nc_mail_list_messages`, `nc_mail_get_message`, `nc_mail_send_message`, `nc_mail_save_draft`, `nc_mail_get_attachment`, `nc_mail_view_attachment`, `nc_mail_get_message_source`, `nc_mail_set_flags`, `nc_mail_create_tag`, `nc_mail_set_tag`, `nc_mail_remove_tag`, `nc_mail_move_message`, `nc_mail_delete_message`.
+
+They call `nextcloud_client.mail` (`/opt/venv/.../nextcloud_client/mail.py`), which uses the **Nextcloud Mail app** REST and OCS routes (`/index.php/apps/mail/api/...`, `/ocs/v2.php/apps/mail/...`). So the mail app must be installed, with a mail account configured.
+
+**Decision: H1 is blocked, not built.** The read tools (list, get, source, attachments) need an IMAP account, and the pinned catcher cannot serve IMAP. The pinned Mailpit `axllent/mailpit:v1.22.3@sha256:f7f7c31d…0fe08` has SMTP (`--smtp`) and POP3 (`--pop3`) only (checked with `--help` from the pinned image). So `nc_mail_send_message` could reach a sink, but the inbox cases could not be read back. Fixing this needs an IMAP-capable image (for example Dovecot), a new pin the owner must approve. Not built.
+
+### S3: which servers support OAuth discovery
+
+| Server | Discovery evidence (pinned image or fork) | Result |
+|---|---|---|
+| Nextcloud MCP 0.213.2 | `nextcloud_mcp_server/app.py` ~3089: `/.well-known/oauth-protected-resource` (`authorization_servers` = the MCP itself) inside its OAuth mode (`oauth_enabled`). Default mode does not publish it. | Only in OAuth mode. Needs an OIDC setup. Not built. |
+| Twenty v2.44.0 (fork HEAD `7cbdfec6`) | `packages/twenty-server/src/engine/api/mcp/guards/mcp-auth.guard.ts:27` sends `resource_metadata` pointing to `/.well-known/oauth-protected-resource/mcp`; `oauth-discovery.controller.ts:94` sets `authorization_servers: [base]`. | Yes. |
+| Mattermost MCP @ `96ecd17` | `mcpserver/oauth_metadata.go`, `http_server.go:540`: `/.well-known/oauth-protected-resource` always on; the authorization server is the Mattermost site URL. | Yes, but Mattermost's own OAuth metadata was not verified. |
+| Outline 1.13.0 | No `oauth-protected-resource` or `oauth-authorization-server` in `/app` or `/usr/src`. | No. |
+| Penpot MCP 2.19.2 | None; the MCP uses a user token (`?userToken=`). | No. |
+
+### H4: not built
+
+LibreChat's `requiresOAuth: true` (schema at `packages/data-provider/src/mcp.ts:190`) makes LibreChat run a browser sign-in and consent. That needs an interactive browser (Playwright, the D5 dependency) to prove, and the harness has no such test. Mattermost's authorization server is not verified. So a knob written without a live proof would be unverified. Not built. Live verification is needed first.
+
+### H2, H6, H7: not attempted in this session
+
+Each needs a live seed or a browser run for each server, with its own proof. Not started. H9 is left for a later PR, as the owner asked.
+
+### Full-stack CI
+
+The new options in this PR are unchanged from the first push: H5 (lab, excluded by the owner's request) is the only one. The "every new option on" run therefore has nothing new to enable. The existing P4 workflows were run on `232d1a4`; results are in the PR.
