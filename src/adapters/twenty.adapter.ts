@@ -177,21 +177,7 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
       const names = await this.listDockerVolumes();
       assertTwentyFreshOrRefuse({ requireFresh, volumes: { listVolumes: () => names }, projectName: COMPOSE_PROJECT });
     }
-    writeTwentyRuntimeOverride({ env: process.env });
-    await this.prepareDockerEnvAsync();
-    await composeUp(this.composeOpts(), { wait: true });
-    if (pgStatsEnabled(process.env)) {
-      // Same defaults the fork's compose substitutes when PG_DATABASE_USER and PG_DATABASE_NAME are unset.
-      await enablePgStatsExtension({
-        project: COMPOSE_PROJECT,
-        files: this.composeOpts().files,
-        service: "db",
-        user: process.env.PG_DATABASE_USER ?? "postgres",
-        db: process.env.PG_DATABASE_NAME ?? "default",
-        cwd: this.dockerDir(),
-      });
-    }
-    await this.assertRunningServerImage();
+    await this.startStack();
     // Opt-in (TWENTY_MCP=1 exactly). Off by default, so the defaults above are unchanged.
     if (twentyMcpEnabled(process.env)) {
       // seed() is idempotent (seedAlreadyPresent): a kept-volume restart skips it. A fresh volume needs it first,
@@ -209,6 +195,35 @@ Twenty stack is up (image ${twentyImageRef(this.cfg.imageTag)}).
 Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
   docker compose -p ${COMPOSE_PROJECT} -f docker-compose.yml exec -T server yarn command:prod workspace:seed:dev
 `);
+  }
+
+  /** The start sequence of up(), after the network, tag and freshness checks. Also used to start again after a seed reset. */
+  private async startStack(): Promise<void> {
+    writeTwentyRuntimeOverride({ env: process.env });
+    await this.prepareDockerEnvAsync();
+    await composeUp(this.composeOpts(), { wait: true });
+    if (pgStatsEnabled(process.env)) {
+      // Same defaults the fork's compose substitutes when PG_DATABASE_USER and PG_DATABASE_NAME are unset.
+      await enablePgStatsExtension({
+        project: COMPOSE_PROJECT,
+        files: this.composeOpts().files,
+        service: "db",
+        user: process.env.PG_DATABASE_USER ?? "postgres",
+        db: process.env.PG_DATABASE_NAME ?? "default",
+        cwd: this.dockerDir(),
+      });
+    }
+    await this.assertRunningServerImage();
+  }
+
+  /**
+   * Wipes the harness-owned Twenty volumes and starts the stack again, so a seed retry starts from an empty database.
+   * `workspace:seed:dev` cannot be re-run on top of a partial seed (see TwentySeedAttemptIo.reset). Only called after a seed
+   * this adapter ran itself on a database that had no seed user, so no earlier data is lost.
+   */
+  private async resetForSeedRetry(): Promise<void> {
+    await composeDown(this.composeOpts(), ["-v", "--remove-orphans"]);
+    await this.startStack();
   }
 
   async down(): Promise<void> {
@@ -359,9 +374,9 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     }
     await this.prepareDockerEnvAsync();
 
-    // Present means the seed user signs in AND its workspace membership works. A half-seeded database (user present,
-    // membership missing) is not "seeded": it goes through the retry below instead of being skipped.
-    if ((await this.seedAlreadyPresent()) && (await this.membershipOk())) {
+    // A kept volume that already has the seed user is skipped, as before. The membership check and the reset below only
+    // apply to a seed this call ran itself on an empty database.
+    if (await this.seedAlreadyPresent()) {
       const notes = seedSkippedMessage(TWENTY_SEED_PRESENCE_EMAIL);
       this.seedResult = {
         product: this.id,
@@ -387,6 +402,7 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
           );
         },
         membershipOk: () => this.membershipOk(),
+        reset: () => this.resetForSeedRetry(),
         log: (line) => console.log(line),
       },
       TWENTY_SEED_PRESENCE_EMAIL,

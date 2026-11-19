@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Twenty (P4): `seed()` now checks that the seed left a usable workspace membership (the same signIn and loginToken exchange that `/mcp` needs) and retries `workspace:seed:dev` up to twice, three attempts in all. A seed that exits 0 but leaves no membership, as happened in CI when upstream's seeder hit `Query read timeout`, used to pass here and fail later with `User is not a member of the workspace`. A half-seeded database is no longer skipped as "already seeded". After the last attempt it fails with a clear error that names the reset command. Reset with `TWENTY_DOWN_VOLUMES=1 npm run down -- twenty` as before.
+- Twenty (P4): `seed()` now checks that the seed it ran left a usable workspace membership (the same signIn and loginToken exchange that `/mcp` needs). If not, it wipes the harness-owned Twenty volumes, starts the stack again and seeds again, up to twice (three attempts in all), then fails with a clear error that names the reset command. `workspace:seed:dev` cannot be re-run on top of a seeded database (Twenty v2.44.0: the second run fails in `synchronizeTwentyStandardApplication` with `WorkspaceMigrationBuilderException`), and the command exits 0 even when the seeder fails inside it, so a seed that timed out in CI (`Query read timeout`) used to pass here and fail later with `User is not a member of the workspace`. A kept volume that already has the seed user is skipped as before.
 
 ## [0.6.4] - 2026-11-18
 
