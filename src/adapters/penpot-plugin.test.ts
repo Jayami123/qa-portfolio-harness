@@ -91,6 +91,7 @@ describe("H6 requests and results", () => {
   it("reads a JSON string or plain text from the execute_code reply", () => {
     assert.equal(fileNameFromToolText(JSON.stringify("h6-owner-file")), "h6-owner-file");
     assert.equal(fileNameFromToolText("h6-second-file\n"), "h6-second-file");
+    assert.equal(fileNameFromToolText(JSON.stringify({ result: "h6-owner-file", log: "" })), "h6-owner-file");
   });
   it("takes the first text block of a tools/call result, and throws without echoing an error", () => {
     assert.equal(firstTextBlock({ result: { content: [{ type: "text", text: "hi" }] } }), "hi");

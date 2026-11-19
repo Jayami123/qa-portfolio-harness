@@ -61,11 +61,17 @@ export function withUserToken(mcpUrl: string, token: string): string {
   return url.toString();
 }
 
-/** The execute_code reply is the value the code returned: a JSON string, or plain text. */
+/**
+ * The execute_code reply carries the value the code returned. The plugin wraps it as {"result": ..., "log": ...}; a bare
+ * JSON string or plain text is read as the value too.
+ */
 export function fileNameFromToolText(text: string): string {
   try {
     const parsed: unknown = JSON.parse(text);
     if (typeof parsed === "string") return parsed;
+    if (parsed !== null && typeof parsed === "object" && typeof (parsed as { result?: unknown }).result === "string") {
+      return (parsed as { result: string }).result;
+    }
   } catch {
     // not JSON: the text is the value
   }
