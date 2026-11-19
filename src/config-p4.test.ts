@@ -240,6 +240,31 @@ describe("H2 config: P4_SECOND_IDENTITY is off by default and reaches the Nextcl
   });
 });
 
+describe("H1 config: P4_MAIL is off by default, exactly 1 turns it on, and it reaches the Nextcloud config", () => {
+  it("is false when unset, true with exactly 1, and throws without echoing any other value", () => {
+    const saved = process.env.P4_MAIL;
+    try {
+      delete process.env.P4_MAIL;
+      resetConfigCache();
+      assert.equal(loadProductConfig("nextcloud").mail, false);
+      process.env.P4_MAIL = "1";
+      resetConfigCache();
+      assert.equal(loadProductConfig("nextcloud").mail, true);
+      process.env.P4_MAIL = "on-secret-x";
+      resetConfigCache();
+      assert.throws(() => loadProductConfig("nextcloud"), (error: Error) => {
+        assert.match(error.message, /P4_MAIL_INVALID/);
+        assert.equal(error.message.includes("on-secret-x"), false);
+        return true;
+      });
+    } finally {
+      if (saved === undefined) delete process.env.P4_MAIL;
+      else process.env.P4_MAIL = saved;
+      resetConfigCache();
+    }
+  });
+});
+
 describe("H3 config: LIBRECHAT_TOOL_APPROVAL is off by default and validated", () => {
   const KEYS_H3 = ["LIBRECHAT_TOOL_APPROVAL", "LIBRECHAT_TOOL_APPROVAL_MODE", "LIBRECHAT_TOOL_APPROVAL_ALLOW", "LIBRECHAT_TOOL_APPROVAL_DENY", "LIBRECHAT_TOOL_APPROVAL_ASK"];
   const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {

@@ -54,9 +54,15 @@ export function nextcloudSecretsFromText(
   return make();
 }
 
-/** Compose files for the stack. The MCP file is added only after the app is installed (plan section 6, Task 3). */
-export function nextcloudComposeFiles(withMcp: boolean): string[] {
+/**
+ * Compose files for the stack. The MCP file is added only after the app is installed (plan section 6, Task 3). The mail
+ * file (H1, P4_MAIL=1) puts the app container on the network GreenMail is on, so the Mail app can reach it.
+ */
+export function nextcloudComposeFiles(withMcp: boolean, withMail = false): string[] {
   const files = [harnessComposeFile("nextcloud.compose.yml")];
+  if (withMail) {
+    files.push(harnessComposeFile("nextcloud.mail.compose.yml"));
+  }
   if (withMcp) {
     files.push(harnessComposeFile("nextcloud.mcp.compose.yml"));
   }

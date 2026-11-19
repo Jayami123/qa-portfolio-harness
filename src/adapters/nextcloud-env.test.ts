@@ -71,4 +71,12 @@ describe("nextcloud-env", () => {
     assert.equal(parseNextcloudStatus("garbage").ready, false);
     assert.equal(parseNextcloudStatus(null).ready, false);
   });
+
+  it("orders the compose files base, then mail (H1), then MCP, and adds only what is asked", () => {
+    const names = (files: string[]) => files.map((f) => f.replaceAll("\\", "/").split("/").pop());
+    assert.deepEqual(names(nextcloudComposeFiles(false)), ["nextcloud.compose.yml"]);
+    assert.deepEqual(names(nextcloudComposeFiles(false, true)), ["nextcloud.compose.yml", "nextcloud.mail.compose.yml"]);
+    assert.deepEqual(names(nextcloudComposeFiles(true, true)), ["nextcloud.compose.yml", "nextcloud.mail.compose.yml", "nextcloud.mcp.compose.yml"]);
+    assert.deepEqual(names(nextcloudComposeFiles(true)), ["nextcloud.compose.yml", "nextcloud.mcp.compose.yml"]);
+  });
 });
