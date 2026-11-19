@@ -17,7 +17,7 @@ const FIVE = ["nextcloud", "outline", "twenty", "penpot", "mattermost"];
 
 describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
   it("pins the app and mongo images by digest", () => {
-    assert.match(LIBRECHAT_IMAGE, /^ghcr\.io\/librechat-ai\/librechat:v0\.8\.7@sha256:[0-9a-f]{64}$/);
+    assert.match(LIBRECHAT_IMAGE, /^ghcr\.io\/librechat-ai\/librechat:v0\.8\.9@sha256:[0-9a-f]{64}$/);
     assert.match(LIBRECHAT_MONGO_IMAGE, /@sha256:[0-9a-f]{64}$/);
   });
 
@@ -55,8 +55,8 @@ describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
 
   it("writes the pinned config version, the allowlist, five servers and the LiteLLM endpoint", () => {
     const y = librechatYaml({ models: ["p4-stub"], servers: FIVE.map(librechatMcpServerFor) });
-    assert.equal(LIBRECHAT_CONFIG_VERSION, "1.3.13");
-    assert.match(y, /^version: 1\.3\.13$/m);
+    assert.equal(LIBRECHAT_CONFIG_VERSION, "1.3.19");
+    assert.match(y, /^version: 1\.3\.19$/m);
     assert.match(y, /allowedDomains:\n {4}- "nextcloud-mcp"/);
     assert.equal((y.match(/type: streamable-http/g) ?? []).length, 5);
     assert.match(y, /baseURL: "http:\/\/litellm:4000\/v1"/);

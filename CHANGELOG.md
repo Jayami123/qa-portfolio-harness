@@ -2,12 +2,14 @@
 
 ## Unreleased
 
+- Twenty (P4): `seed()` now checks that the seed it ran left a usable workspace membership (the same signIn and loginToken exchange that `/mcp` needs). If not, it wipes the harness-owned Twenty volumes, starts the stack again and seeds again, up to twice (three attempts in all), then fails with a clear error that names the reset command. `workspace:seed:dev` cannot be re-run on top of a seeded database (Twenty v2.44.0: the second run fails in `synchronizeTwentyStandardApplication` with `WorkspaceMigrationBuilderException`), and the command exits 0 even when the seeder fails inside it, so a seed that timed out in CI (`Query read timeout`) used to pass here and fail later with `User is not a member of the workspace`. A kept volume that already has the seed user is skipped as before.
+
 ## [0.6.5] - 2026-11-19
 
 LibreChat L3 primitives (plan `docs/plans/2026-11-19-librechat-l3-primitives.md`). Partial release: one item built, one blocked, the rest not attempted in this pass. The plan records each.
 
 - H5: `librechatMcpServerFor("lab")` returns the attack-lab entry `http://p4-attack-lab:9010/mcp` with no credential. It is used only when `LIBRECHAT_MCP_PRODUCTS` names `lab`; the default list and the written `librechat.yaml` are unchanged. Unit tested only: the lab container is not in this repo yet.
-- H3 is not built. The pinned LibreChat v0.8.7 has no tool-approval key. v0.8.8 adds `endpoints.agents.toolApproval`; moving the pin is the owner's decision (plan, Session 2).
+- H3 is not built in this entry (the pin was v0.8.7 when it was checked; v0.8.8 adds `endpoints.agents.toolApproval`, and the pin moved to v0.8.9 in #70).
 - H1, H2, H4, H6, H7 and H9 are not built in this pass (see the plan). H8 needs no harness change.
 
 ## [0.6.4] - 2026-11-18
