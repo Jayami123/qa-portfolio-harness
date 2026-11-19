@@ -123,3 +123,52 @@ Each needs a live seed or a browser run for each server, with its own proof. Not
 ### Full-stack CI
 
 The new options in this PR are unchanged from the first push: H5 (lab, excluded by the owner's request) is the only one. The "every new option on" run therefore has nothing new to enable. The existing P4 workflows were run on `232d1a4`; results are in the PR.
+
+## Session 3 results (2026-11-19, after #70 merged)
+
+- `main` (with the v0.8.9 pin, #70) merged into this branch (merge commit `f41abce`). `npm run check`: 782 pass.
+
+### H2, Nextcloud: built and live-verified
+
+- Flag `P4_SECOND_IDENTITY=1` (exact value; any other value throws without echoing it). Unset: nothing changes.
+- With the flag on, `NextcloudAdapter.seed()` creates `qa-user-b` over OCS as the owner (`POST /ocs/v2.php/cloud/users`), or resets its password if it already exists (code 102). The password is random per run and never written to disk. An app password is minted as that user and written to `.harness/nextcloud-b-run.json` (mode 0600).
+- Live check (`npm run up -- nextcloud` with `P4_SECOND_IDENTITY=1`, then a probe that reads the run-state files and prints only identities and statuses): `nextcloud` → OCS `cloud/user` id `qa-owner`, MCP initialize HTTP 200; `nextcloud-b` → OCS `cloud/user` id `qa-user-b`, MCP initialize HTTP 200. Then `npm run down -- nextcloud`: both run-state files removed, no `qa-harness` containers left.
+- Not done for H2: Outline, Twenty, Penpot and Mattermost second identities.
+
+### H3, tool approval: built, unit-tested, partly live-verified
+
+- Flag `LIBRECHAT_TOOL_APPROVAL=1`. Mode `LIBRECHAT_TOOL_APPROVAL_MODE` (`default`, `dontAsk` or `bypass`; default `default`). Rule lists `LIBRECHAT_TOOL_APPROVAL_ALLOW`, `_DENY`, `_ASK`: comma-separated `mcp:<server>:<tool>` globs. `<server>` must be `*` or an entry in `LIBRECHAT_MCP_PRODUCTS`. Rules without the flag throw `LIBRECHAT_TOOL_APPROVAL_NEEDS_FLAG`.
+- Off by default: the YAML is byte-identical to 0.6.4 (unit tested).
+- Written block (v0.8.9 schema: `agentsEndpointSchema` in `packages/data-provider/src/config.ts`, key `toolApproval` at line ~1889):
+
+  ```yaml
+  endpoints:
+    agents:
+      toolApproval:
+        enabled: true
+        mode: default
+        allow: [...]
+        deny: [...]
+        ask: [...]
+    custom:
+      ...
+  ```
+- Unit tests: 795 pass, including flag and mode parsing, rule validation (form, unknown server), YAML with the policy off (byte-identical) and on (order and keys), and config loading.
+- **Live, verified:** LibreChat v0.8.9 starts with `LIBRECHAT_MCP_PRODUCTS=nextcloud`, `LIBRECHAT_TOOL_APPROVAL=1`, `LIBRECHAT_TOOL_APPROVAL_ASK=mcp:nextcloud:*`. The generated `librechat.yaml` has the block above, and the app log shows `Custom config file loaded` with a `toolApproval` object. The adapter's readiness, login, seed and MCP wait all passed.
+- **Live, NOT verified:** that an ask-listed tool really pauses for approval. That needs a model that emits a tool call (for example, an OpenAI-compatible stub behind `P4_STUB_API_BASE`), an agent that has the Nextcloud tool, a chat turn, and the pause event from `POST /api/agents/chat` followed by `POST /resume`. Not built in this session. Until it is, H3 is **unit-tested plus config-verified**, not behavior-verified.
+
+### Incidents this session
+
+- The Docker daemon was not running when the bring-up started. It was started the way `.claude/hooks/session-start.sh` starts it (`setsid -f dockerd`).
+- The container's temp volume filled during a run. The first LibreChat start then failed in MongoDB's WiredTiger recovery (exit 1, no fatal line). The cause is most likely a write that failed on the full disk. The harness-owned LibreChat Mongo volume was removed (it held no seeded data), and LibreChat started on the next try. No other data was touched.
+- Scratch copies made during this session were removed to free space: an extracted LibreChat source tree, a Nextcloud MCP image extract, a Penpot MCP extract, and two clones. The findings they produced are recorded above.
+
+### Still open
+
+- H3 behavior check (above).
+- H2 for Outline, Twenty, Penpot, Mattermost.
+- H7 (Mattermost posts from the second user; needs H2 for Mattermost).
+- H6 (Penpot browser tab; needs Playwright, a D5 dependency).
+- H1 (digest-pinned IMAP and SMTP server, for example GreenMail, and the Nextcloud Mail account). Not built.
+- H4 and H9: moved to a later PR, as the owner asked.
+- Full-stack run on this branch with every new option on except `lab`. Not dispatched in this session.
