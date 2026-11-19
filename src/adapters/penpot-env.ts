@@ -69,8 +69,13 @@ export function penpotSecretsFromText(
   return make();
 }
 
-export function penpotComposeFiles(): string[] {
-  return [harnessComposeFile("penpot.compose.yml")];
+/** H6: the multi-user override is added only when the per-user plugin option is on. Off, the files are unchanged. */
+export function penpotComposeFiles(perUserPlugin = false): string[] {
+  const files = [harnessComposeFile("penpot.compose.yml")];
+  if (perUserPlugin) {
+    files.push(harnessComposeFile("penpot.multiuser.compose.yml"));
+  }
+  return files;
 }
 
 export function penpotComposeEnv(base: NodeJS.ProcessEnv, secrets: PenpotSecrets): NodeJS.ProcessEnv {

@@ -1,0 +1,19 @@
+# H6 (P4_PENPOT_PLUGIN=1 only). Added by the adapter after penpot.compose.yml; never used by default. Nothing secret here.
+# - mcp: multi-user mode, so each MCP request names its user with ?userToken=.
+# - frontend: enable-mcp shows the MCP toolbar (the workspace checks contains? flags :mcp), and the image then serves
+#   /mcp/ws and /mcp/stream itself from PENPOT_MCP_URI_WS and PENPOT_MCP_URI. The harness overlay penpot-mcp-ws.conf
+#   would duplicate /mcp/ws, so this file mounts an empty one over it.
+# - backend: the same PENPOT_FLAGS, so the backend agrees with the frontend about enable-mcp.
+services:
+  mcp:
+    command: ["node", "index.js", "--multi-user"]
+  frontend:
+    environment:
+      PENPOT_FLAGS: "enable-login-with-password disable-registration disable-email-verification disable-onboarding-questions disable-admin-console enable-prepl-server enable-mcp"
+      PENPOT_MCP_URI: http://mcp:4401
+      PENPOT_MCP_URI_WS: http://mcp:4402
+    volumes:
+      - ./penpot-mcp-ws.none.conf:/etc/nginx/overrides/server.d/penpot-mcp-ws.conf:ro
+  backend:
+    environment:
+      PENPOT_FLAGS: "enable-login-with-password disable-registration disable-email-verification disable-onboarding-questions disable-admin-console enable-prepl-server enable-mcp"

@@ -19,6 +19,7 @@ import {
 import { resolveLibreChatModels } from "./adapters/librechat-env.js";
 import { parseSecondIdentityFlag } from "./adapters/p4-second-identity.js";
 import { mattermostPostsOption } from "./adapters/mattermost-posts.js";
+import { penpotPluginOption } from "./adapters/penpot-plugin.js";
 import { type LibreChatToolApproval, parseToolApprovalFlag, parseToolApprovalMode, parseToolApprovalRules } from "./adapters/librechat-approval.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
@@ -132,6 +133,8 @@ const envSchema = z.object({
   P4_SECOND_IDENTITY: z.string().trim().default(""),
   /** H7: P4_SECOND_POSTS=1 makes the second identity seed posts in Mattermost. Needs P4_SECOND_IDENTITY=1. Off by default. */
   P4_SECOND_POSTS: z.string().trim().default(""),
+  /** H6: P4_PENPOT_PLUGIN=1 runs the Penpot MCP per user, with a browser tab per profile. Needs P4_SECOND_IDENTITY=1. */
+  P4_PENPOT_PLUGIN: z.string().trim().default(""),
   NEXTCLOUD_DB_URL: z.string().trim().min(1).default("postgres://nextcloud@127.0.0.1:5460/nextcloud"),
   OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3011"),
   OUTLINE_DB_URL: z.string().trim().min(1).default("postgres://outline@127.0.0.1:5461/outline"),
@@ -235,6 +238,8 @@ export interface PenpotConfig extends ProductConfig {
   mcpUrl: string;
   /** H2: a second profile, logged in over RPC. The MCP is single-user and takes no credential. Off unless P4_SECOND_IDENTITY=1. */
   secondIdentity: boolean;
+  /** H6: P4_PENPOT_PLUGIN=1 runs the MCP in multi-user mode and keeps a browser tab per profile with the plugin running. Off by default. */
+  perUserPlugin: boolean;
 }
 
 export interface MattermostConfig extends ProductConfig {
@@ -419,6 +424,7 @@ function buildPenpotConfig(parsed: ParsedEnv): PenpotConfig {
     dbUrl: parsed.PENPOT_DB_URL,
     mcpUrl: parsed.PENPOT_MCP_URL.replace(/\/$/, ""),
     secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
+    perUserPlugin: penpotPluginOption(parsed.P4_PENPOT_PLUGIN, parsed.P4_SECOND_IDENTITY),
   };
 }
 
