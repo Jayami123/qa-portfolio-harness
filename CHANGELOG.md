@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.6.5] - 2026-11-19
+
+LibreChat L3 primitives (plan `docs/plans/2026-11-19-librechat-l3-primitives.md`). Partial release: one item built, one blocked, the rest not attempted in this pass. The plan records each.
+
+- H5: `librechatMcpServerFor("lab")` returns the attack-lab entry `http://p4-attack-lab:9010/mcp` with no credential. It is used only when `LIBRECHAT_MCP_PRODUCTS` names `lab`; the default list and the written `librechat.yaml` are unchanged. Unit tested only: the lab container is not in this repo yet.
+- H3 is not built. LibreChat v0.8.7 (pinned image, source copied out by digest) has no tool-approval policy key in `librechat.yaml`; the plan's finding F1 records the search.
+- H1, H2, H4, H6, H7 and H9 are not built in this pass (see the plan). H8 needs no harness change.
+
 ## [0.6.4] - 2026-11-18
 
 OpenClaw L4 primitives (plan `docs/plans/2026-11-18-openclaw-l4-primitives.md`). Every option is off by default; with none set the written config is deep-equal to 0.6.3. The `tools.exec` ask/allowlist lock is unchanged under every combination (unit tested). Config keys are quoted from the docs of the pinned image (`2026.10.33`, copied out by digest).
