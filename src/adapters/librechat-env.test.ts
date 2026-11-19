@@ -37,6 +37,33 @@ describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
     assert.equal(librechatMcpServerFor("lab").authEnv, null);
   });
 
+  it("maps lab2 to its own alias and port, with no credential", () => {
+    assert.deepEqual(librechatMcpServerFor("lab2"), { name: "lab2", url: "http://p4-attack-lab-2:9011/mcp", authEnv: null });
+    assert.notEqual(librechatMcpServerFor("lab2").url, librechatMcpServerFor("lab").url);
+  });
+
+  it("is off by default: the five-server YAML names no lab server", () => {
+    const y = librechatYaml({ models: ["p4-stub"], servers: FIVE.map(librechatMcpServerFor) });
+    assert.ok(!y.includes("lab"), "no lab or lab2 entry unless the product list names one");
+    assert.ok(!y.includes("p4-attack-lab"));
+  });
+
+  it("writes both lab servers and their hosts when lab and lab2 are both listed", () => {
+    const servers = [...FIVE, "lab", "lab2"].map(librechatMcpServerFor);
+    const y = librechatYaml({ models: ["p4-stub"], servers });
+    assert.match(y, /^ {2}lab:\n {4}type: streamable-http\n {4}url: http:\/\/p4-attack-lab:9010\/mcp$/m);
+    assert.match(y, /^ {2}lab2:\n {4}type: streamable-http\n {4}url: http:\/\/p4-attack-lab-2:9011\/mcp$/m);
+    assert.ok(allowedDomainsFor(servers).includes("p4-attack-lab-2"), "lab2's host is on the allowlist");
+    assert.ok(allowedDomainsFor(servers).includes("p4-attack-lab"), "lab's host is on the allowlist");
+    assert.doesNotMatch(y, /lab2:\n[\s\S]*Authorization/, "neither lab server takes a credential");
+  });
+
+  it("writes lab2 alone when only lab2 is listed", () => {
+    const y = librechatYaml({ models: ["p4-stub"], servers: [librechatMcpServerFor("lab2")] });
+    assert.ok(y.includes("  lab2:\n"));
+    assert.ok(!y.includes("  lab:\n"));
+  });
+
   it("rejects a product that has no MCP server", () => {
     assert.throws(() => librechatMcpServerFor("cal"), /LIBRECHAT_MCP_UNKNOWN/);
   });
