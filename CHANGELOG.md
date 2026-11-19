@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.6.7] - 2026-11-20
+
+LibreChat Always allow (`allowAlways`) and a second attack-lab server (`lab2`). Plan: `docs/plans/2026-11-20-librechat-allowalways-lab2.md`. Both options are off by default; an unset option leaves the written `librechat.yaml` byte-identical to 0.6.6 (unit tested).
+
+- Always allow (H3 follow-up): `LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS=1` (exactly 1, off by default) writes `endpoints.agents.toolApproval.allowAlways: true` as the last key of the block. Key and default are from the LibreChat v0.8.9 schema (`toolApprovalPolicySchema` in `packages/data-provider/src/config.ts`, placed under `agentsEndpointSchema.toolApproval`). The flag is refused without `LIBRECHAT_TOOL_APPROVAL=1` and with `LIBRECHAT_TOOL_APPROVAL_MODE=dontAsk`, where LibreChat ignores remembered choices. Any other value throws without echoing it.
+- Live check: the H3 check (`scripts/live/librechat-approval.mjs`) approves the ask-listed call with `scope: "session"` when Always allow is on, then sends a second call of the same tool in the same conversation. That call must run with no pause. With the flag off, the same second call must pause again (the control). The dispatch input `allow_always` (under `tool_approval`) turns it on in `p4-agent-hosts.yml`.
+- lab2: `librechatMcpServerFor("lab2")` returns `{ name: "lab2", url: "http://p4-attack-lab-2:9011/mcp", authEnv: null }`. It is used only when `LIBRECHAT_MCP_PRODUCTS` names `lab2`. The lab container is not in this repo, so the entry is unit tested only.
+
 ## [0.6.6] - 2026-11-19
 
 Mail for Nextcloud (H1). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 6.
