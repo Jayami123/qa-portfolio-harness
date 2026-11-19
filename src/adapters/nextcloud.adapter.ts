@@ -18,7 +18,7 @@ import {
   parseOcsProvisionStatus,
   parseOcsUserId,
 } from "./nextcloud-seed.js";
-import { secondIdentityProduct } from "./p4-second-identity.js";
+import { type SecondIdentityProbe, secondIdentityProduct } from "./p4-second-identity.js";
 import { randomBytes } from "node:crypto";
 import {
   NEXTCLOUD_COMPOSE_PROJECT,
@@ -250,6 +250,38 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
       throw new Error(`Nextcloud proveAuth: expected user ${NEXTCLOUD_OWNER_USERNAME}, got ${id}`);
     }
     console.log(`Nextcloud auth probe: cloud/user id=${id} (HTTP ${response.status})`);
+  }
+
+  /**
+   * H2 live probe. Both app passwords resolve to their own users over OCS (different ids), and the MCP handshake and tools
+   * list pass for both. Returns ids and counts only; no password is returned or printed.
+   */
+  async probeSecondIdentity(): Promise<SecondIdentityProbe> {
+    const ownerCreds = readP4McpCredentials("nextcloud", this.mcpRunStateFile());
+    const secondCreds = readP4McpCredentials(secondIdentityProduct("nextcloud"), this.secondRunStateFile());
+    const ownerAuth = requireMcpAuthorization(ownerCreds, "nextcloud");
+    const secondAuth = requireMcpAuthorization(secondCreds, "nextcloud");
+    const ownerId = await this.cloudUserIdFor(ownerAuth);
+    const secondId = await this.cloudUserIdFor(secondAuth);
+    const ownerMcp = await mcpReadinessFor("nextcloud", { url: ownerCreds.mcpUrl, authorization: ownerAuth, timeoutMs: p4WaitBudgetMs(), minTools: 1 });
+    const secondMcp = await mcpReadinessFor("nextcloud", { url: secondCreds.mcpUrl, authorization: secondAuth, timeoutMs: p4WaitBudgetMs(), minTools: 1 });
+    return {
+      product: this.id,
+      owner: ownerId,
+      second: secondId,
+      distinct: ownerId !== secondId,
+      ownerTools: ownerMcp.toolNames.length,
+      secondTools: secondMcp.toolNames.length,
+    };
+  }
+
+  private async cloudUserIdFor(authorization: string): Promise<string> {
+    const req = cloudUserRequest(this.cfg.baseUrl, authorization);
+    const response = await fetch(req.url, req.init);
+    if (response.status !== 200) {
+      throw new Error(`Nextcloud cloud/user returned HTTP ${response.status}`);
+    }
+    return parseOcsUserId(await response.json());
   }
 
   /** MCP readiness: a real handshake with the pass-through credential, then the Nextcloud user check. */
