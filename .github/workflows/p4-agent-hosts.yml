@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tool_approval:
-        description: "Turn on LIBRECHAT_TOOL_APPROVAL=1 (ask nc_notes_list_notes, deny nc_notes_delete_note) and run the live H3 check"
+        description: "Turn on LIBRECHAT_TOOL_APPROVAL=1 (ask nc_contacts_list_addressbooks, deny nc_contacts_delete_addressbook) and run the live H3 check"
         type: boolean
         default: false
       second_identity:
@@ -63,8 +63,8 @@ jobs:
       # H2 and H3 options. Each is off unless its dispatch input is true (the empty string is the off value).
       P4_SECOND_IDENTITY: ${{ inputs.second_identity && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL: ${{ inputs.tool_approval && '1' || '' }}
-      LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_notes_list_notes' || '' }}
-      LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_notes_delete_note' || '' }}
+      LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_list_addressbooks' || '' }}
+      LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_delete_addressbook' || '' }}
       # The H3 fixture stub runs on the runner host; LiteLLM reaches it through host.docker.internal.
       P4_STUB_API_BASE: ${{ inputs.tool_approval && 'http://host.docker.internal:9099/v1' || '' }}
     steps:

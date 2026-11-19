@@ -2,8 +2,8 @@
 // through P4_STUB_API_BASE (http://host.docker.internal:<port>/v1). It never calls a real model.
 //
 // Behaviour, keyed on the last user message:
-//   [approval-test:ask]     -> one tool call to nc_notes_list_notes (the ask-listed tool)
-//   [approval-test:deny]    -> one tool call to nc_notes_delete_note with the id given as [note:<id>]
+//   [approval-test:ask]     -> one tool call to nc_contacts_list_addressbooks (the ask-listed tool)
+//   [approval-test:deny]    -> one tool call to nc_contacts_delete_addressbook for the book named in [addressbook:<name>]
 //   last message is a tool result -> a plain final answer
 // GET /stats reports how many tool results the stub has received and the names of the tools it offered.
 // POST /reset clears the counters. Nothing here prints a secret; the stub holds none.
@@ -35,13 +35,13 @@ function decide(body) {
   const user = [...messages].reverse().find((m) => m.role === "user");
   const text = textOf(user?.content);
   if (text.includes("[approval-test:ask]")) {
-    const name = pickTool(body.tools, "nc_notes_list_notes");
+    const name = pickTool(body.tools, "nc_contacts_list_addressbooks");
     return name ? { kind: "tool", name, args: {} } : { kind: "text", text: "list tool not offered" };
   }
   if (text.includes("[approval-test:deny]")) {
-    const name = pickTool(body.tools, "nc_notes_delete_note");
-    const id = /\[note:(\d+)\]/.exec(text)?.[1] ?? "0";
-    return name ? { kind: "tool", name, args: { note_id: Number(id) } } : { kind: "text", text: "delete tool not offered" };
+    const name = pickTool(body.tools, "nc_contacts_delete_addressbook");
+    const book = /\[addressbook:([A-Za-z0-9_-]+)\]/.exec(text)?.[1] ?? "none";
+    return name ? { kind: "tool", name, args: { name: book } } : { kind: "text", text: "delete tool not offered" };
   }
   return { kind: "text", text: "No approval test marker in the message." };
 }
