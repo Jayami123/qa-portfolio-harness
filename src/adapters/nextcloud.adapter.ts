@@ -206,17 +206,13 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
   async seedSecondIdentity(ownerPassword: string): Promise<void> {
     const password = randomBytes(24).toString("base64url");
     const created = ocsCreateUserRequest(this.cfg.baseUrl, NEXTCLOUD_OWNER_USERNAME, ownerPassword, NEXTCLOUD_SECOND_USERNAME, password, NEXTCLOUD_SECOND_EMAIL);
+    // The decision is the OCS status code, not the HTTP status: Nextcloud answers "user already exists" (OCS 102) with
+    // HTTP 400, so a kept volume must not fail here (proved live: 2026-11-19, POST cloud/users on an existing user).
     const createdResponse = await fetch(created.url, created.init);
-    if (createdResponse.status !== 200) {
-      throw new Error(`Nextcloud cloud/users returned HTTP ${createdResponse.status}`);
-    }
-    if (parseOcsProvisionStatus(await createdResponse.json()) === "exists") {
+    if (parseOcsProvisionStatus(await createdResponse.json().catch(() => undefined)) === "exists") {
       const reset = ocsSetPasswordRequest(this.cfg.baseUrl, NEXTCLOUD_OWNER_USERNAME, ownerPassword, NEXTCLOUD_SECOND_USERNAME, password);
       const resetResponse = await fetch(reset.url, reset.init);
-      if (resetResponse.status !== 200) {
-        throw new Error(`Nextcloud cloud/users reset returned HTTP ${resetResponse.status}`);
-      }
-      parseOcsProvisionStatus(await resetResponse.json());
+      parseOcsProvisionStatus(await resetResponse.json().catch(() => undefined));
     }
     const req = appPasswordRequest(this.cfg.baseUrl, NEXTCLOUD_SECOND_USERNAME, password);
     const response = await fetch(req.url, req.init);

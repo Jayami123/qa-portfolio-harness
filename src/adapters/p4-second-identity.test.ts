@@ -45,6 +45,10 @@ describe("H2 Nextcloud: provisioning builders", () => {
     assert.equal(req.init.method, "PUT");
     assert.equal(new URLSearchParams(String(req.init.body)).get("key"), "password");
   });
+  it("decides by the OCS status code: 102 (exists) is not an error whatever the HTTP status was", () => {
+    // Nextcloud answers "User already exists" with HTTP 400 and OCS 102 (proved live on a kept volume).
+    assert.equal(parseOcsProvisionStatus({ ocs: { meta: { statuscode: 102, message: "User already exists" } } }), "exists");
+  });
   it("reads the OCS status: 100 created, 200 ok, 102 exists, anything else throws without the body", () => {
     assert.equal(parseOcsProvisionStatus({ ocs: { meta: { statuscode: 100 } } }), "created");
     assert.equal(parseOcsProvisionStatus({ ocs: { meta: { statuscode: 200 } } }), "ok");
