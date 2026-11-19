@@ -11,6 +11,10 @@ on:
         description: "Turn on LIBRECHAT_TOOL_APPROVAL=1 (ask nc_contacts_list_addressbooks, deny nc_contacts_delete_addressbook) and run the live H3 check"
         type: boolean
         default: false
+      allow_always:
+        description: "With tool_approval: turn on LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS=1 (Always allow). The H3 check then approves with scope session and checks that a second call in the same conversation runs with no pause"
+        type: boolean
+        default: false
       second_identity:
         description: "Turn on P4_SECOND_IDENTITY=1 (H2, all five servers), P4_SECOND_POSTS=1 (H7, Mattermost posts from the second user) and P4_MAIL=1 (H1, GreenMail and the Nextcloud Mail app for both users)"
         type: boolean
@@ -75,7 +79,11 @@ jobs:
       # H1 (GreenMail and the Nextcloud Mail app) follows the same dispatch input: qa-owner, and qa-user-b when H2 is on.
       P4_MAIL: ${{ inputs.second_identity && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL: ${{ inputs.tool_approval && '1' || '' }}
-      LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_list_addressbooks' || '' }}
+      # Always allow needs the approval policy, so it follows tool_approval (it is ignored unless both inputs are true).
+      LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: ${{ inputs.tool_approval && inputs.allow_always && '1' || '' }}
+      # With allow_always the ask rule is left out: LibreChat never offers Always allow for an ask-matched tool. The tool then
+      # pauses through mode default's unmatched-tool fallback.
+      LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && !inputs.allow_always && 'mcp:nextcloud:nc_contacts_list_addressbooks' || '' }}
       LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_delete_addressbook' || '' }}
       # The H3 fixture stub runs on the runner host; LiteLLM reaches it through host.docker.internal.
       P4_STUB_API_BASE: ${{ inputs.tool_approval && 'http://host.docker.internal:9099/v1' || '' }}

@@ -50,6 +50,11 @@ export function librechatMcpServerFor(product: string): LibreChatMcpServer {
     case "lab":
       // The attack lab (L2 plan). Its alias on qa-harness-p4 and container port 9010. It takes no credential.
       return { name: "lab", url: "http://p4-attack-lab:9010/mcp", authEnv: null };
+    case "lab2":
+      // A second attack-lab instance, for cases that need two lab servers at once (cross-server shadowing). Opt-in: used only
+      // when LIBRECHAT_MCP_PRODUCTS names lab2. Its own alias and container port 9011 (the next host port after lab's 9010).
+      // It takes no credential. No lab2 container is in this repo; the entry is unit-tested only.
+      return { name: "lab2", url: "http://p4-attack-lab-2:9011/mcp", authEnv: null };
     default:
       throw new Error(`LIBRECHAT_MCP_UNKNOWN: no MCP server is defined for "${product}"`);
   }

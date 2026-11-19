@@ -513,6 +513,13 @@ LibreChat L3 primitives (v0.6.5, plan `docs/plans/2026-11-19-librechat-l3-primit
 
 H3 (tool-approval knob) cannot be built on the pinned v0.8.7. LibreChat v0.8.8 adds `endpoints.agents.toolApproval`; a pin move is the owner's decision (plan, Session 2).
 
+LibreChat Always allow and a second lab server (v0.6.7, plan `docs/plans/2026-11-20-librechat-allowalways-lab2.md`). Both are off by default.
+
+| | Option | Effect |
+|---|---|---|
+| Always allow | `LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS=1` (exactly 1; needs `LIBRECHAT_TOOL_APPROVAL=1`; refused with `LIBRECHAT_TOOL_APPROVAL_MODE=dontAsk`) | Writes `endpoints.agents.toolApproval.allowAlways: true` (LibreChat v0.8.9). The approval card offers "Always allow", which remembers that tool for the conversation. Unset: `librechat.yaml` is byte-identical. |
+| lab2 | `LIBRECHAT_MCP_PRODUCTS` including `lab2` | Attaches a second attack-lab MCP at `http://p4-attack-lab-2:9011/mcp`, no credential. The default list is unchanged. No lab2 container is in this repo yet. |
+
 Nextcloud mail (H1, v0.6.6, plan `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 6). Off by default.
 
 | | Option | Effect |

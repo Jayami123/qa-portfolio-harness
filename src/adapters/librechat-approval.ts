@@ -16,6 +16,11 @@ export interface LibreChatToolApproval {
   allow: string[];
   deny: string[];
   ask: string[];
+  /**
+   * Offer "Always allow" on the approval card (v0.8.9 `toolApproval.allowAlways`, default false). Absent or false writes no
+   * key, so the YAML is unchanged. Set only when true.
+   */
+  allowAlways?: boolean;
 }
 
 /** Exactly "1" turns the policy on. Unset is off. Any other value throws without echoing it. */
@@ -23,6 +28,13 @@ export function parseToolApprovalFlag(raw: string): boolean {
   if (raw === "") return false;
   if (raw === "1") return true;
   throw new Error(`${LIBRECHAT_TOOL_APPROVAL_INVALID}: LIBRECHAT_TOOL_APPROVAL must be exactly "1" or unset (value not printed)`);
+}
+
+/** LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: exactly "1" turns "Always allow" on. Unset is off. Any other value throws without echoing it. */
+export function parseAllowAlwaysFlag(raw: string): boolean {
+  if (raw === "") return false;
+  if (raw === "1") return true;
+  throw new Error(`${LIBRECHAT_TOOL_APPROVAL_INVALID}: LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS must be exactly "1" or unset (value not printed)`);
 }
 
 export function parseToolApprovalMode(raw: string): ToolApprovalMode {
@@ -54,7 +66,10 @@ export function parseToolApprovalRules(raw: string, servers: string[]): string[]
   return [...new Set(rules)];
 }
 
-/** The `endpoints.agents` block, one line per key. Only called when the policy is on. */
+/**
+ * The `endpoints.agents` block, one line per key. Only called when the policy is on. `allowAlways` is written as the last
+ * key and only when true, so a policy without it (or with false) produces the same lines as before.
+ */
 export function toolApprovalYamlLines(policy: LibreChatToolApproval): string[] {
   const list = (items: string[]) => `[${items.map((i) => `"${i}"`).join(", ")}]`;
   return [
@@ -65,5 +80,6 @@ export function toolApprovalYamlLines(policy: LibreChatToolApproval): string[] {
     `      allow: ${list(policy.allow)}`,
     `      deny: ${list(policy.deny)}`,
     `      ask: ${list(policy.ask)}`,
+    ...(policy.allowAlways === true ? ["      allowAlways: true"] : []),
   ];
 }

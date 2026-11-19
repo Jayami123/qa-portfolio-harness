@@ -266,7 +266,7 @@ describe("H1 config: P4_MAIL is off by default, exactly 1 turns it on, and it re
 });
 
 describe("H3 config: LIBRECHAT_TOOL_APPROVAL is off by default and validated", () => {
-  const KEYS_H3 = ["LIBRECHAT_TOOL_APPROVAL", "LIBRECHAT_TOOL_APPROVAL_MODE", "LIBRECHAT_TOOL_APPROVAL_ALLOW", "LIBRECHAT_TOOL_APPROVAL_DENY", "LIBRECHAT_TOOL_APPROVAL_ASK"];
+  const KEYS_H3 = ["LIBRECHAT_TOOL_APPROVAL", "LIBRECHAT_TOOL_APPROVAL_MODE", "LIBRECHAT_TOOL_APPROVAL_ALLOW", "LIBRECHAT_TOOL_APPROVAL_DENY", "LIBRECHAT_TOOL_APPROVAL_ASK", "LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS"];
   const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {
     const saved = new Map<string, string | undefined>();
     for (const k of KEYS_H3) saved.set(k, process.env[k]);
@@ -289,7 +289,36 @@ describe("H3 config: LIBRECHAT_TOOL_APPROVAL is off by default and validated", (
   it("builds the policy when on, with the rule lists", () => {
     withEnv(
       { LIBRECHAT_TOOL_APPROVAL: "1", LIBRECHAT_TOOL_APPROVAL_MODE: "dontAsk", LIBRECHAT_TOOL_APPROVAL_ASK: "mcp:twenty:*" },
-      () => assert.deepEqual(loadProductConfig("librechat").toolApproval, { mode: "dontAsk", allow: [], deny: [], ask: ["mcp:twenty:*"] }),
+      () => assert.deepEqual(loadProductConfig("librechat").toolApproval, { mode: "dontAsk", allow: [], deny: [], ask: ["mcp:twenty:*"], allowAlways: false }),
+    );
+  });
+  it("allowAlways is false when unset and true only for exactly 1", () => {
+    withEnv({ LIBRECHAT_TOOL_APPROVAL: "1" }, () => assert.equal(loadProductConfig("librechat").toolApproval?.allowAlways, false));
+    withEnv({ LIBRECHAT_TOOL_APPROVAL: "1", LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: "1" }, () =>
+      assert.equal(loadProductConfig("librechat").toolApproval?.allowAlways, true),
+    );
+  });
+  it("rejects an invalid allowAlways value without echoing it", () => {
+    withEnv({ LIBRECHAT_TOOL_APPROVAL: "1", LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: "zz-always" }, () =>
+      assert.throws(
+        () => loadProductConfig("librechat"),
+        (error: Error) => {
+          assert.match(error.message, /LIBRECHAT_TOOL_APPROVAL_INVALID/);
+          assert.match(error.message, /LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS/);
+          assert.equal(error.message.includes("zz-always"), false);
+          return true;
+        },
+      ),
+    );
+  });
+  it("refuses allowAlways when the flag is off, rather than ignoring it", () => {
+    withEnv({ LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: "1" }, () =>
+      assert.throws(() => loadProductConfig("librechat"), /LIBRECHAT_TOOL_APPROVAL_NEEDS_FLAG/),
+    );
+  });
+  it("refuses allowAlways under mode dontAsk, where LibreChat ignores remembered choices", () => {
+    withEnv({ LIBRECHAT_TOOL_APPROVAL: "1", LIBRECHAT_TOOL_APPROVAL_MODE: "dontAsk", LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: "1" }, () =>
+      assert.throws(() => loadProductConfig("librechat"), /LIBRECHAT_TOOL_APPROVAL_INVALID: LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS=1 needs mode default or bypass/),
     );
   });
   it("refuses rules when the flag is off, rather than ignoring them", () => {

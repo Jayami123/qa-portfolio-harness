@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   LIBRECHAT_TOOL_APPROVAL_INVALID,
+  parseAllowAlwaysFlag,
   parseToolApprovalFlag,
   parseToolApprovalMode,
   parseToolApprovalRules,
@@ -73,5 +74,41 @@ describe("H3 tool approval: librechat.yaml", () => {
   });
   it("writes empty lists as []", () => {
     assert.ok(toolApprovalYamlLines({ mode: "default", allow: [], deny: [], ask: [] }).includes("      ask: []"));
+  });
+});
+
+describe("H3 tool approval: allowAlways (Always allow) is off by default and written only when true", () => {
+  const servers = FIVE_NAMES.map((n) => librechatMcpServerFor(n));
+  const base = { mode: "default" as const, allow: [], deny: ["mcp:*:delete_*"], ask: ["mcp:nextcloud:nc_contacts_list_addressbooks"] };
+
+  it("parses the env value: unset is off, exactly 1 is on, anything else throws without echoing it", () => {
+    assert.equal(parseAllowAlwaysFlag(""), false);
+    assert.equal(parseAllowAlwaysFlag("1"), true);
+    for (const bad of ["zz-always", "true", "yes", "0", "1 "]) {
+      assert.throws(
+        () => parseAllowAlwaysFlag(bad),
+        (err: Error) => err.message.startsWith(LIBRECHAT_TOOL_APPROVAL_INVALID) && err.message.includes("LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS") && !err.message.includes("zz-"),
+      );
+    }
+  });
+
+  it("emits the same lines as before when allowAlways is absent or false", () => {
+    const before = toolApprovalYamlLines(base);
+    assert.deepEqual(toolApprovalYamlLines({ ...base, allowAlways: false }), before);
+    assert.ok(!before.some((l) => l.includes("allowAlways")));
+  });
+
+  it("keeps the whole librechat.yaml byte-identical when allowAlways is false", () => {
+    const withoutKey = librechatYaml({ models: ["p4-stub"], servers, toolApproval: base });
+    const withFalse = librechatYaml({ models: ["p4-stub"], servers, toolApproval: { ...base, allowAlways: false } });
+    assert.equal(withFalse, withoutKey);
+    assert.ok(!withFalse.includes("allowAlways"));
+  });
+
+  it("emits allowAlways: true as the last key of endpoints.agents.toolApproval", () => {
+    const y = librechatYaml({ models: ["p4-stub"], servers, toolApproval: { ...base, allowAlways: true } });
+    assert.ok(y.includes("      ask: [\"mcp:nextcloud:nc_contacts_list_addressbooks\"]\n      allowAlways: true\n  custom:\n"), y);
+    assert.equal(y.split("allowAlways").length - 1, 1, "the key is written once");
+    assert.ok(y.indexOf("allowAlways: true") < y.indexOf("  custom:"), "the key sits inside endpoints, before endpoints.custom");
   });
 });
