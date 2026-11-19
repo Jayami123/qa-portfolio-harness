@@ -15,6 +15,9 @@ export const MATTERMOST_OWNER_EMAIL = "qa-owner@p4.test";
 /** The MCP's PAT belongs to this member account, which is not a system admin (least privilege). */
 export const MATTERMOST_AGENT_USERNAME = "qa-agent";
 export const MATTERMOST_AGENT_EMAIL = "qa-agent@p4.test";
+/** H2 second identity (P4_SECOND_IDENTITY=1): a second member of the same team, with its own PAT. */
+export const MATTERMOST_AGENT_B_USERNAME = "qa-agent-b";
+export const MATTERMOST_AGENT_B_EMAIL = "qa-agent-b@p4.test";
 /** Roles a PAT needs. Granted to the agent by the admin, so the agent never holds admin rights. */
 export const MATTERMOST_PAT_ROLES = "system_user system_user_access_token";
 
