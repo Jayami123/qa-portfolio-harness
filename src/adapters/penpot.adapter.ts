@@ -80,7 +80,7 @@ export class PenpotAdapter extends BaseAdapter<PenpotConfig> {
   private composeOpts(): ComposeOptions {
     return {
       projectName: PENPOT_COMPOSE_PROJECT,
-      files: penpotComposeFiles(),
+      files: penpotComposeFiles(this.cfg.perUserPlugin),
       cwd: HARNESS_DOCKER_DIR,
       env: penpotComposeEnv(process.env, this.secrets ?? this.secretsFromDisk()),
     };

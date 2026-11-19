@@ -1,0 +1,5 @@
+# H6 (P4_PENPOT_PLUGIN=1 only). Overrides the Penpot MCP command to multi-user mode, so each MCP request must name its
+# user with ?userToken=. Added by the adapter after penpot.compose.yml, never used by default. Nothing secret here.
+services:
+  mcp:
+    command: ["node", "index.js", "--multi-user"]
