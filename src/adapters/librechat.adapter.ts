@@ -106,7 +106,7 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     const secrets = this.secrets(true);
     const mcp = librechatMcpEnv(this.cfg.mcpProducts);
 
-    fs.writeFileSync(this.configFile(), librechatYaml({ models: this.cfg.models, servers: mcp.servers }), {
+    fs.writeFileSync(this.configFile(), librechatYaml({ models: this.cfg.models, servers: mcp.servers, toolApproval: this.cfg.toolApproval }), {
       encoding: "utf8",
       mode: 0o644,
     });

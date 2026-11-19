@@ -239,3 +239,37 @@ describe("H2 config: P4_SECOND_IDENTITY is off by default and reaches the Nextcl
     }
   });
 });
+
+describe("H3 config: LIBRECHAT_TOOL_APPROVAL is off by default and validated", () => {
+  const KEYS_H3 = ["LIBRECHAT_TOOL_APPROVAL", "LIBRECHAT_TOOL_APPROVAL_MODE", "LIBRECHAT_TOOL_APPROVAL_ALLOW", "LIBRECHAT_TOOL_APPROVAL_DENY", "LIBRECHAT_TOOL_APPROVAL_ASK"];
+  const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {
+    const saved = new Map<string, string | undefined>();
+    for (const k of KEYS_H3) saved.set(k, process.env[k]);
+    try {
+      for (const k of KEYS_H3) delete process.env[k];
+      for (const [k, v] of Object.entries(env)) if (v !== undefined) process.env[k] = v;
+      resetConfigCache();
+      fn();
+    } finally {
+      for (const [k, v] of saved) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      resetConfigCache();
+    }
+  };
+  it("is null when unset", () => {
+    withEnv({}, () => assert.equal(loadProductConfig("librechat").toolApproval, null));
+  });
+  it("builds the policy when on, with the rule lists", () => {
+    withEnv(
+      { LIBRECHAT_TOOL_APPROVAL: "1", LIBRECHAT_TOOL_APPROVAL_MODE: "dontAsk", LIBRECHAT_TOOL_APPROVAL_ASK: "mcp:twenty:*" },
+      () => assert.deepEqual(loadProductConfig("librechat").toolApproval, { mode: "dontAsk", allow: [], deny: [], ask: ["mcp:twenty:*"] }),
+    );
+  });
+  it("refuses rules when the flag is off, rather than ignoring them", () => {
+    withEnv({ LIBRECHAT_TOOL_APPROVAL_ASK: "mcp:*:*" }, () =>
+      assert.throws(() => loadProductConfig("librechat"), /LIBRECHAT_TOOL_APPROVAL_NEEDS_FLAG/),
+    );
+  });
+});
