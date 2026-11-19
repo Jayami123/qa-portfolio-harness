@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       second_identity:
-        description: "Turn on P4_SECOND_IDENTITY=1 (Nextcloud second user, H2)"
+        description: "Turn on P4_SECOND_IDENTITY=1 (H2, all five servers) and P4_SECOND_POSTS=1 (H7, Mattermost posts from the second user)"
         type: boolean
         default: false
   pull_request:
@@ -62,6 +62,8 @@ jobs:
       LIBRECHAT_MCP_PRODUCTS: "nextcloud,outline,twenty,penpot,mattermost"
       # H2 and H3 options. Each is off unless its dispatch input is true (the empty string is the off value).
       P4_SECOND_IDENTITY: ${{ inputs.second_identity && '1' || '' }}
+      # H7 needs H2 (the posts are written by the second identity), so it follows the same dispatch input.
+      P4_SECOND_POSTS: ${{ inputs.second_identity && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL: ${{ inputs.tool_approval && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_list_addressbooks' || '' }}
       LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_delete_addressbook' || '' }}
@@ -163,6 +165,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           node scripts/live/second-identity.mjs nextcloud outline twenty penpot mattermost | tee evidence/h2-live-check.txt
+          node scripts/live/mattermost-posts.mjs | tee evidence/h7-live-check.txt
 
       - name: "H2 stack down (second_identity only)"
         if: always() && inputs.second_identity
@@ -176,7 +179,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: h2-live-check
-          path: evidence/h2-live-check.txt
+          path: |
+            evidence/h2-live-check.txt
+            evidence/h7-live-check.txt
           if-no-files-found: warn
           retention-days: 30
 

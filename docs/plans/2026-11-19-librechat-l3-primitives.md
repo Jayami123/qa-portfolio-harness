@@ -213,3 +213,42 @@ The full-stack workflow (`p4-agent-hosts.yml`) has two `workflow_dispatch` input
 - **H1, mail.** Nextcloud's `nc_mail_*` tools read through the Mail app's IMAP account. The pinned Mailpit has SMTP and POP3 only. Needs a digest-pinned IMAP and SMTP server (GreenMail is a candidate) and a new image pin the owner must approve. The Mail app is also not installed in the Nextcloud image.
 - **H4, OAuth sign-in mode.** Needs an interactive consent run to prove.
 - **H9, recording proxy.** Optional; left for a later PR, as the owner asked.
+
+## Session 4 addendum: PR #71 results (H2 on five servers) and H7
+
+This addendum records what #71 built and proved, and the limits that were found. It is recorded here, not in a new plan, so the next reader has one place for H-item status.
+
+### #71: H2 second identity on five servers (merged)
+
+- Branch `feat/2026-11-19-l3-h2-identities`, merged into `main` as merge commit `d5666b5` at 2026-11-19 13:34:59Z by the owner's account. The PR was marked ready by the agent. The merge was not made by the agent.
+- Dispatch `P4 agent hosts` with `second_identity=true`, on head `67ef6eb`: run `44531609090`, success. Its H2 steps passed: the five-product start and readiness probe (RAM budget included), `H2 stack up`, `Live H2 check`, `H2 stack down`, `Upload H2 evidence`, `No harness containers left`. The H3 steps were skipped as designed.
+- PR-triggered run on the same head: `44531604752`, success. CodeQL, actionlint, typecheck and build, semantic title and the P4 adapters checks were green.
+- Local live check (same code, before the dispatch), all five passed, each with two distinct identities and tools listed for both credentials: Nextcloud (110 tools per credential), Outline (20), Twenty (7), Penpot (5), Mattermost (121).
+
+| Server | Second identity | What the MCP proves | Limit |
+|---|---|---|---|
+| Nextcloud | second user, its own app password | 110 tools per credential, two OCS user ids | none |
+| Outline | second team member, its own API key | 20 tools per key; auth.info emails differ | none |
+| Twenty | dev seeder's Member, shared password | 7 tools per key; currentUser emails differ | see below |
+| Penpot | second profile over RPC | 5 tools; the two profiles differ | see below |
+| Mattermost | second member, its own PAT | 121 tools per PAT; users/me names differ | none |
+
+**Twenty: the second MCP credential is a workspace key, not a per-member key.** A Member is denied API-key management (`getApiKeyRoles`: "Entity performing the request does not have permission", live 2026-11-19). Keys belong to the workspace, not to a user. The second key is therefore minted by the workspace admin, with the owner's least-privilege role, and recorded against the Member. The Member's own sign-in is proven by `currentUser`. The MCP cannot tell the two members apart.
+
+**Penpot: the MCP is single-user and cannot be bound per user.** The harness runs the MCP without `--multi-user`, and its plugin sends no token, so the MCP takes no credential for either profile. Its per-user mode (`?userToken=`) needs the browser plugin, which is H6. The identity proof for Penpot is the two profiles, through RPC login and `get-profile`, not the MCP.
+
+**Mattermost, local only.** The MCP image build failed in this sandbox with `TLS: server certificate not trusted` on `apk`, because the sandbox proxy's CA is not in the build image. It was worked around with the existing `MATTERMOST_EXTRA_CA_FILE` option. CI did not need it. This is an environment fact, not a harness change.
+
+### H7: Mattermost posts from the second user (this PR, not merged in this addendum)
+
+- Branch `feat/2026-11-19-l3-h7-mattermost-posts`, from `main` after #71.
+- Option `P4_SECOND_POSTS=1` (exact value, off by default). It needs `P4_SECOND_IDENTITY=1`: config fails with `MATTERMOST_POSTS_NEEDS_SECOND_IDENTITY` otherwise. The value is never echoed.
+- The second member logs in with its derived password (the H2 account), reads town-square of team `qa`, and posts only the missing messages from three fixed ones, prefixed `p4-h7:`. A kept volume posts nothing new.
+- The dispatch sets `P4_SECOND_POSTS` from the same `second_identity` input, so the full-stack run covers H7 without a new input. `scripts/live/mattermost-posts.mjs` reads the channel as the owner, and passes only if each message exists once, none is missing, and every one is authored by the second user's id. Its evidence is uploaded with H2's.
+
+### Still open after this addendum
+
+- H6 (Penpot browser tab, needs Playwright). Also the only route to a per-user Penpot MCP.
+- H1 (IMAP and SMTP catcher for Nextcloud mail).
+- H4 and H9, as before.
+
