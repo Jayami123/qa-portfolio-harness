@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { CAL_POSTGRES_SERVICE } from "../adapters/cal.adapter.js";
 import { pgStatsComposeFilePaths } from "../adapters/pg-stats.js";
-import { composeUpArgs, type ComposeOptions } from "./compose.js";
+import { composeExecArgs, composeRestartArgs, composeUpArgs, type ComposeOptions } from "./compose.js";
 
 const calOptions = (env: NodeJS.ProcessEnv): ComposeOptions => ({
   projectName: "qa-harness-cal",
@@ -71,5 +71,20 @@ describe("composeUpArgs for Cal", () => {
       waitServices: [CAL_POSTGRES_SERVICE],
     });
     assert.equal(argv[argv.indexOf("--wait") + 1], "postgres");
+  });
+});
+
+describe("compose restart and exec argv (H6, H2, H3)", () => {
+  const opts: ComposeOptions = { projectName: "qa-harness-openclaw", files: ["/harness/docker/openclaw.compose.yml"], cwd: "/harness/docker" };
+
+  it("restarts one service and nothing else", () => {
+    assert.deepEqual(composeRestartArgs(opts, "openclaw"), ["compose", "-p", "qa-harness-openclaw", "-f", "/harness/docker/openclaw.compose.yml", "restart", "openclaw"]);
+  });
+
+  it("execs without a tty and passes the command as separate argv entries", () => {
+    assert.deepEqual(composeExecArgs(opts, "openclaw", ["openclaw", "approvals", "get", "--json"]), [
+      "compose", "-p", "qa-harness-openclaw", "-f", "/harness/docker/openclaw.compose.yml",
+      "exec", "-T", "openclaw", "openclaw", "approvals", "get", "--json",
+    ]);
   });
 });

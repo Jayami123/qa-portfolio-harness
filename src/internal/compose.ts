@@ -47,6 +47,23 @@ export async function composeDown(
   });
 }
 
+/** The argv for `docker compose restart <service>`. It keeps volumes and the env file as they are. */
+export function composeRestartArgs(options: ComposeOptions, service: string): string[] {
+  return composeArgs(options, ["restart", service]);
+}
+
+export async function composeRestart(options: ComposeOptions, service: string): Promise<void> {
+  await run("docker", composeRestartArgs(options, service), { cwd: options.cwd, env: options.env });
+}
+
+/**
+ * The argv for `docker compose exec -T <service> <command...>`. The command is passed as separate argv entries, never as a
+ * shell string, so no value is ever re-parsed by a shell. `-T` means no TTY, so stdin and stdout are plain pipes.
+ */
+export function composeExecArgs(options: ComposeOptions, service: string, command: string[]): string[] {
+  return composeArgs(options, ["exec", "-T", service, ...command]);
+}
+
 export function harnessComposeFile(name: string): string {
   return `${HARNESS_DOCKER_DIR.replaceAll("\\", "/")}/${name}`;
 }
