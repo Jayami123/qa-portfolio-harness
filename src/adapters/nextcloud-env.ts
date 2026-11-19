@@ -10,6 +10,9 @@ export const NEXTCLOUD_MCP_IMAGE =
 export const NEXTCLOUD_COMPOSE_PROJECT = "qa-harness-nextcloud";
 export const NEXTCLOUD_OWNER_USERNAME = "qa-owner";
 export const NEXTCLOUD_OWNER_EMAIL = "qa-owner@p4.test";
+/** H2 second identity (P4_SECOND_IDENTITY=1). A plain user, not an admin. */
+export const NEXTCLOUD_SECOND_USERNAME = "qa-user-b";
+export const NEXTCLOUD_SECOND_EMAIL = "qa-user-b@p4.test";
 
 export interface NextcloudSecrets {
   dbPassword: string;

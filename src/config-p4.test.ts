@@ -221,3 +221,21 @@ describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () =>
     assert.equal(P4_PRODUCT_IDS.length, 7);
   });
 });
+
+describe("H2 config: P4_SECOND_IDENTITY is off by default and reaches the Nextcloud config", () => {
+  it("is false when unset and true with exactly 1", () => {
+    const saved = process.env.P4_SECOND_IDENTITY;
+    try {
+      delete process.env.P4_SECOND_IDENTITY;
+      resetConfigCache();
+      assert.equal(loadProductConfig("nextcloud").secondIdentity, false);
+      process.env.P4_SECOND_IDENTITY = "1";
+      resetConfigCache();
+      assert.equal(loadProductConfig("nextcloud").secondIdentity, true);
+    } finally {
+      if (saved === undefined) delete process.env.P4_SECOND_IDENTITY;
+      else process.env.P4_SECOND_IDENTITY = saved;
+      resetConfigCache();
+    }
+  });
+});

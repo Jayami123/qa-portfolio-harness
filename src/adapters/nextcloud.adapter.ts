@@ -8,11 +8,24 @@ import { HARNESS_DOCKER_DIR } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
-import { appPasswordRequest, basicAuthorization, cloudUserRequest, parseAppPassword, parseOcsUserId } from "./nextcloud-seed.js";
+import {
+  appPasswordRequest,
+  basicAuthorization,
+  cloudUserRequest,
+  ocsCreateUserRequest,
+  ocsSetPasswordRequest,
+  parseAppPassword,
+  parseOcsProvisionStatus,
+  parseOcsUserId,
+} from "./nextcloud-seed.js";
+import { secondIdentityProduct } from "./p4-second-identity.js";
+import { randomBytes } from "node:crypto";
 import {
   NEXTCLOUD_COMPOSE_PROJECT,
   NEXTCLOUD_OWNER_EMAIL,
   NEXTCLOUD_OWNER_USERNAME,
+  NEXTCLOUD_SECOND_EMAIL,
+  NEXTCLOUD_SECOND_USERNAME,
   type NextcloudSecrets,
   nextcloudComposeEnv,
   nextcloudComposeFiles,
@@ -53,6 +66,11 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
 
   mcpRunStateFile(): string {
     return p4RunStateFile("nextcloud");
+  }
+
+  /** The second identity's run state (H2). Only written when the option is on. */
+  secondRunStateFile(): string {
+    return p4RunStateFile(secondIdentityProduct("nextcloud"));
   }
 
   private secretsFile(): string {
@@ -99,6 +117,7 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
 
   async down(): Promise<void> {
     removeP4RunState(this.mcpRunStateFile());
+    removeP4RunState(this.secondRunStateFile());
     const opts = this.composeOpts(true);
     if (process.env.NEXTCLOUD_DOWN_VOLUMES === "1") {
       // Removing volumes also removes the saved secrets, since the volumes they initialise are gone.
@@ -160,18 +179,58 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
       mcpAuthorization: basicAuthorization(NEXTCLOUD_OWNER_USERNAME, appPassword),
       owner: { username: NEXTCLOUD_OWNER_USERNAME, email: NEXTCLOUD_OWNER_EMAIL },
     });
+    const users: SeedResult["users"] = [
+      {
+        email: NEXTCLOUD_OWNER_EMAIL,
+        role: "admin",
+        notes: "app password minted over OCS; the MCP uses it, not the login password",
+      },
+    ];
+    if (this.cfg.secondIdentity) {
+      await this.seedSecondIdentity(secrets.ownerPassword);
+      users.push({ email: NEXTCLOUD_SECOND_EMAIL, role: "user", notes: "second identity (H2); app password in its own run state" });
+    }
     return {
       product: this.id,
       created: true,
-      users: [
-        {
-          email: NEXTCLOUD_OWNER_EMAIL,
-          role: "admin",
-          notes: "app password minted over OCS; the MCP uses it, not the login password",
-        },
-      ],
-      notes: "Minted one app password for the owner and wrote it to the run state (not printed).",
+      users,
+      notes: "Minted app passwords and wrote them to the run state (not printed).",
     };
+  }
+
+  /**
+   * H2. Creates the second user over OCS as the owner, or resets its password when it already exists. The password is a
+   * fresh random value for this run; it is never written to disk. The app password minted as that user goes to
+   * nextcloud-b-run.json, which the MCP credential reader uses the same way as the owner's.
+   */
+  async seedSecondIdentity(ownerPassword: string): Promise<void> {
+    const password = randomBytes(24).toString("base64url");
+    const created = ocsCreateUserRequest(this.cfg.baseUrl, NEXTCLOUD_OWNER_USERNAME, ownerPassword, NEXTCLOUD_SECOND_USERNAME, password, NEXTCLOUD_SECOND_EMAIL);
+    const createdResponse = await fetch(created.url, created.init);
+    if (createdResponse.status !== 200) {
+      throw new Error(`Nextcloud cloud/users returned HTTP ${createdResponse.status}`);
+    }
+    if (parseOcsProvisionStatus(await createdResponse.json()) === "exists") {
+      const reset = ocsSetPasswordRequest(this.cfg.baseUrl, NEXTCLOUD_OWNER_USERNAME, ownerPassword, NEXTCLOUD_SECOND_USERNAME, password);
+      const resetResponse = await fetch(reset.url, reset.init);
+      if (resetResponse.status !== 200) {
+        throw new Error(`Nextcloud cloud/users reset returned HTTP ${resetResponse.status}`);
+      }
+      parseOcsProvisionStatus(await resetResponse.json());
+    }
+    const req = appPasswordRequest(this.cfg.baseUrl, NEXTCLOUD_SECOND_USERNAME, password);
+    const response = await fetch(req.url, req.init);
+    if (response.status !== 200) {
+      throw new Error(`Nextcloud getapppassword (second identity) returned HTTP ${response.status}`);
+    }
+    const appPassword = parseAppPassword(await response.json());
+    writeP4RunState(this.secondRunStateFile(), {
+      version: 1,
+      product: secondIdentityProduct("nextcloud"),
+      mcpUrl: this.cfg.mcpUrl,
+      mcpAuthorization: basicAuthorization(NEXTCLOUD_SECOND_USERNAME, appPassword),
+      owner: { username: NEXTCLOUD_SECOND_USERNAME, email: NEXTCLOUD_SECOND_EMAIL },
+    });
   }
 
   async authenticate(): Promise<AuthSession> {

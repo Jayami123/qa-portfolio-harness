@@ -45,3 +45,63 @@ export function cloudUserRequest(baseUrl: string, authorization: string): { url:
     init: { method: "GET", headers: { "OCS-APIRequest": "true", Authorization: authorization } },
   };
 }
+
+/**
+ * POST /ocs/v2.php/cloud/users, made as the admin (owner). Creates a user with a password. Nextcloud answers 102 when the
+ * user already exists; the caller then resets the password (see ocsSetPasswordRequest).
+ */
+export function ocsCreateUserRequest(
+  baseUrl: string,
+  adminUsername: string,
+  adminPassword: string,
+  userid: string,
+  password: string,
+  email: string,
+): { url: string; init: RequestInit } {
+  const body = new URLSearchParams({ userid, password, email }).toString();
+  return {
+    url: `${baseUrl}/ocs/v2.php/cloud/users?format=json`,
+    init: {
+      method: "POST",
+      headers: {
+        "OCS-APIRequest": "true",
+        Authorization: basicAuthorization(adminUsername, adminPassword),
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body,
+    },
+  };
+}
+
+/** PUT /ocs/v2.php/cloud/users/{userid}, made as the admin. Sets the user's password. */
+export function ocsSetPasswordRequest(
+  baseUrl: string,
+  adminUsername: string,
+  adminPassword: string,
+  userid: string,
+  password: string,
+): { url: string; init: RequestInit } {
+  return {
+    url: `${baseUrl}/ocs/v2.php/cloud/users/${encodeURIComponent(userid)}?format=json`,
+    init: {
+      method: "PUT",
+      headers: {
+        "OCS-APIRequest": "true",
+        Authorization: basicAuthorization(adminUsername, adminPassword),
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ key: "password", value: password }).toString(),
+    },
+  };
+}
+
+/**
+ * Reads ocs.meta.statuscode from a provisioning reply. 100 and 200 are success; 102 means the user already exists.
+ * Anything else throws a fixed message and never echoes the body.
+ */
+export function parseOcsProvisionStatus(body: unknown): "created" | "exists" | "ok" {
+  const code = (body as { ocs?: { meta?: { statuscode?: unknown } } } | null)?.ocs?.meta?.statuscode;
+  if (code === 100 || code === 200) return code === 100 ? "created" : "ok";
+  if (code === 102) return "exists";
+  throw new Error(`NEXTCLOUD_PROVISION_FAILED: provisioning returned statuscode ${String(code)} (body not printed)`);
+}

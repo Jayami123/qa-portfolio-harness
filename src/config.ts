@@ -17,6 +17,7 @@ import {
   resolveOpenClawNightlyModel,
 } from "./adapters/openclaw-env.js";
 import { resolveLibreChatModels } from "./adapters/librechat-env.js";
+import { parseSecondIdentityFlag } from "./adapters/p4-second-identity.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
@@ -125,6 +126,8 @@ const envSchema = z.object({
   // and writes it to .harness/<product>-run.json (CLAUDE.md: no passwords in committed files).
   NEXTCLOUD_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8080"),
   NEXTCLOUD_MCP_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:8765/mcp"),
+  /** H2: P4_SECOND_IDENTITY=1 creates a second user per server (off by default). */
+  P4_SECOND_IDENTITY: z.string().trim().default(""),
   NEXTCLOUD_DB_URL: z.string().trim().min(1).default("postgres://nextcloud@127.0.0.1:5460/nextcloud"),
   OUTLINE_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3011"),
   OUTLINE_DB_URL: z.string().trim().min(1).default("postgres://outline@127.0.0.1:5461/outline"),
@@ -203,6 +206,8 @@ export interface TwentyConfig extends ProductConfig {
 export interface NextcloudConfig extends ProductConfig {
   id: "nextcloud";
   mcpUrl: string;
+  /** H2: a second user, its app password in nextcloud-b-run.json. Off unless P4_SECOND_IDENTITY=1. */
+  secondIdentity: boolean;
 }
 
 export interface OutlineConfig extends ProductConfig {
@@ -367,6 +372,7 @@ function buildNextcloudConfig(parsed: ParsedEnv): NextcloudConfig {
     baseUrl: parsed.NEXTCLOUD_BASE_URL.replace(/\/$/, ""),
     dbUrl: parsed.NEXTCLOUD_DB_URL,
     mcpUrl: parsed.NEXTCLOUD_MCP_URL.replace(/\/$/, ""),
+    secondIdentity: parseSecondIdentityFlag(parsed.P4_SECOND_IDENTITY),
   };
 }
 
