@@ -111,12 +111,35 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:9099/stats >/dev/null && break; sleep 1; done
           curl -sf http://127.0.0.1:9099/stats >/dev/null
 
+      # The probe above starts and stops every product itself (its EXIT trap runs `down`, which removes the run-state
+      # files). The H3 check needs its own stack, so it is started here and torn down after the check.
+      - name: "H3 stack up (tool_approval only): nextcloud, litellm, librechat with the approval rules"
+        if: inputs.tool_approval
+        env:
+          LIBRECHAT_MCP_PRODUCTS: nextcloud
+        run: |
+          set -euo pipefail
+          npm run up -- nextcloud
+          npm run up -- litellm
+          npm run up -- librechat
+
       - name: "Live H3 check (tool_approval only): ask pauses and resumes, deny never runs"
         if: inputs.tool_approval
+        env:
+          LIBRECHAT_MCP_PRODUCTS: nextcloud
         run: |
           set -euo pipefail
           mkdir -p evidence
           node scripts/live/librechat-approval.mjs "$PWD" | tee evidence/h3-live-check.txt
+
+      - name: "H3 stack down (tool_approval only)"
+        if: always() && inputs.tool_approval
+        env:
+          LIBRECHAT_MCP_PRODUCTS: nextcloud
+        run: |
+          npm run down -- librechat || true
+          npm run down -- litellm || true
+          npm run down -- nextcloud || true
 
       - name: Stop the H3 approval fixture
         if: always() && inputs.tool_approval
