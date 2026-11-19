@@ -172,3 +172,44 @@ The new options in this PR are unchanged from the first push: H5 (lab, excluded 
 - H1 (digest-pinned IMAP and SMTP server, for example GreenMail, and the Nextcloud Mail account). Not built.
 - H4 and H9: moved to a later PR, as the owner asked.
 - Full-stack run on this branch with every new option on except `lab`. Not dispatched in this session.
+
+## Session 4: scope of this PR and the live H3 result
+
+### What this PR builds
+
+| Item | Status | Evidence |
+|---|---|---|
+| H5, attack-lab entry (`librechatMcpServerFor("lab")`) | Built, unit-tested. Not live: the lab container is not in this repo. | `librechat-env.test.ts` |
+| H3, `endpoints.agents.toolApproval` | Built, off by default (`LIBRECHAT_TOOL_APPROVAL=1`). **Live-verified** (see below). | `librechat-approval.test.ts`, `scripts/live/librechat-approval.mjs` |
+| H2, Nextcloud second identity | Built, off by default (`P4_SECOND_IDENTITY=1`). Live-verified (Session 3). | `p4-second-identity.test.ts`, `nextcloud.adapter.ts` |
+
+### Live H3 check (passes)
+
+`scripts/live/librechat-approval.mjs` drives LibreChat v0.8.9 through the real API. The model side is a fixture, `scripts/live/approval-stub.mjs`, an OpenAI-compatible stub that LiteLLM reaches through `P4_STUB_API_BASE`. It never calls a real model.
+
+- Policy: `LIBRECHAT_TOOL_APPROVAL=1`, ask `mcp:nextcloud:nc_contacts_list_addressbooks`, deny `mcp:nextcloud:nc_contacts_delete_addressbook`, mode `default`.
+- Agent: a saved agent with both Nextcloud tools, on `P4 LiteLLM` / `p4-stub`.
+- Flow A (ask-listed): the chat turn starts; `GET /api/agents/chat/status/{id}` reports `requires_action` with a `tool_approval` pending action naming the tool; the stub has received **0** tool results while paused; `POST /api/agents/chat/resume` with `decisions: [{tool_call_id, decision: "approve"}]` returns 200; the run finishes with the stub's final answer; the stub received **exactly 1** tool result.
+- Flow B (deny-listed): no pause at any point; the model receives a result for the deny-listed tool ("Blocked: Blocked by hook"); the address book the tool would delete still exists afterwards (checked through the Nextcloud MCP).
+
+Findings from getting the check to pass (each one is a bug in the check or the setup, not in the product):
+
+1. `POST /api/agents` returned `Illegal request`. Cause: LibreChat's `uaParser` middleware rejects any client that is not a recognized browser (`api/server/middleware/uaParser.js`). The check now sends a browser User-Agent on every LibreChat call.
+2. `POST /api/agents/chat` returns JSON (`streamId`, `conversationId`) at once and runs the generation in the background. The `conversationId` it returns can differ from the one sent, so the check uses the returned one. Cancelling the response body disconnects the client, and LibreChat then aborts the job; the check no longer does that.
+3. The status endpoint returns `active: false` and no status string once a job ends. So the check cannot wait for a "done" status. It waits for the stub's final answer in the messages instead.
+4. The Nextcloud `notes` app is not installed in this image, so every `nc_notes_*` tool answers "unavailable". The check uses the core contacts tools.
+5. The first deny result was a real pause, but the cause was the setup: the LibreChat container had been started with stale notes-tool rules in `librechat.yaml`, which are rendered at `up`. With the contacts rules in place, the deny tool is denied with no pause.
+6. The Nextcloud second-identity bootstrap failed on a kept volume: Nextcloud answers "user already exists" with HTTP 400 and OCS status 102. The adapter now decides by the OCS status code (fixed in `7d8297e`, with a unit test).
+
+### Dispatch with options on
+
+The full-stack workflow (`p4-agent-hosts.yml`) has two `workflow_dispatch` inputs, both off by default: `tool_approval` (sets `LIBRECHAT_TOOL_APPROVAL=1` with the ask and deny rules above, `P4_STUB_API_BASE` for the stub, starts the stub, and runs the live check) and `second_identity` (sets `P4_SECOND_IDENTITY=1`). The run with both on is recorded in the PR description with its run ID and result.
+
+### Follow-up PRs (not in this PR)
+
+- **H2 for Outline, Twenty, Penpot and Mattermost.** Each needs its own second-user seed and a live proof. Twenty and Mattermost publish OAuth discovery; see the Session 2 table.
+- **H7, Mattermost posts from the second user.** Depends on H2 for Mattermost.
+- **H6, Penpot browser tab.** Needs Playwright (lane D5).
+- **H1, mail.** Nextcloud's `nc_mail_*` tools read through the Mail app's IMAP account. The pinned Mailpit has SMTP and POP3 only. Needs a digest-pinned IMAP and SMTP server (GreenMail is a candidate) and a new image pin the owner must approve. The Mail app is also not installed in the Nextcloud image.
+- **H4, OAuth sign-in mode.** Needs an interactive consent run to prove.
+- **H9, recording proxy.** Optional; left for a later PR, as the owner asked.
