@@ -1,17 +1,29 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { PenpotConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
 import { ensureP4Network } from "../internal/p4-network.js";
 import { run, runCapture } from "../internal/run.js";
-import { HARNESS_DOCKER_DIR } from "../paths.js";
+import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
-import { mcpReadinessFor } from "./mcp-ready.js";
+import { callMcpTool, mcpReadinessFor } from "./mcp-ready.js";
 import { p4RunStateFile, readP4McpCredentials, removeP4RunState, writeP4RunState } from "./p4-run-state.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
 import { derivedSecondPassword, type SecondIdentityProbe, secondIdentityProduct } from "./p4-second-identity.js";
+import {
+  PENPOT_PLUGIN_CODE,
+  PENPOT_PLUGIN_FILE,
+  PENPOT_PLUGIN_READY,
+  type PerUserPluginProbe,
+  fileNameFromToolText,
+  parsePluginState,
+  perUserPluginOk,
+  pluginStateFileName,
+  withUserToken,
+} from "./penpot-plugin.js";
 import {
   PENPOT_COMPOSE_PROJECT,
   PENPOT_OWNER_EMAIL,
@@ -33,6 +45,18 @@ const CREATE_PROFILE_TIMEOUT_MS = 5 * 60 * 1000;
 /** The MCP plugin's tools; the check that the list is the real one, not a stub. */
 const REQUIRED_TOOL = "execute_code";
 const MIN_TOOLS = 4;
+const PLUGIN_TABS_TIMEOUT_MS = 5 * 60 * 1000;
+const PLUGIN_TABS_POLL_MS = 2000;
+
+/** True while a process with this pid exists. Signal 0 checks without sending anything. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Penpot with its official MCP server (ADR 0006). Starts the stack; creates the fake owner through the backend's
@@ -103,12 +127,101 @@ export class PenpotAdapter extends BaseAdapter<PenpotConfig> {
     if (this.cfg.secondIdentity) {
       await this.seedSecond();
     }
+    if (this.cfg.perUserPlugin) {
+      await this.startPluginTabs();
+    }
+    const mode = this.cfg.perUserPlugin ? "multi-user, one browser tab per profile with the MCP plugin connected" : "single-user";
     console.log(
-      `Penpot is up: ${this.cfg.baseUrl} (MCP ${this.cfg.mcpUrl}, single-user). Open the MCP plugin in a browser to edit designs. The run state is ${this.mcpRunStateFile()} and is not printed.`,
+      `Penpot is up: ${this.cfg.baseUrl} (MCP ${this.cfg.mcpUrl}, ${mode}). The run state is ${this.mcpRunStateFile()} and is not printed.`,
     );
   }
 
+  /**
+   * H6. Starts scripts/penpot-plugin-tabs.mjs detached: it logs in as each profile, opens that profile's own file, starts
+   * the MCP plugin and keeps the tab open. Waits until both tabs report the plugin connected. Its log holds no secrets.
+   */
+  private async startPluginTabs(): Promise<void> {
+    const secrets = this.secrets ?? this.secretsFromDisk();
+    const dir = this.cfg.productRoot;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.rmSync(path.join(dir, PENPOT_PLUGIN_READY), { force: true });
+    const logFd = fs.openSync(path.join(dir, "plugin-tabs.log"), "w", 0o600);
+    const child = spawn(process.execPath, [path.join(HARNESS_ROOT, "scripts", "penpot-plugin-tabs.mjs")], {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: {
+        ...process.env,
+        PENPOT_BASE_URL: this.cfg.baseUrl,
+        PENPOT_PLUGIN_STATE_DIR: dir,
+        PENPOT_OWNER_EMAIL: PENPOT_OWNER_EMAIL,
+        PENPOT_OWNER_PASSWORD: secrets.ownerPassword,
+        PENPOT_SECOND_EMAIL: PENPOT_SECOND_EMAIL,
+        PENPOT_SECOND_PASSWORD: this.secondPassword(secrets),
+      },
+    });
+    child.unref();
+    fs.closeSync(logFd);
+    if (child.pid === undefined) {
+      throw new Error("PENPOT_PLUGIN_TABS_FAILED: the tab process did not start");
+    }
+    fs.writeFileSync(path.join(dir, "plugin-tabs.pid"), String(child.pid), { mode: 0o600 });
+    const deadline = Date.now() + PLUGIN_TABS_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(path.join(dir, PENPOT_PLUGIN_READY))) {
+        return;
+      }
+      if (!processAlive(child.pid)) {
+        throw new Error("PENPOT_PLUGIN_TABS_FAILED: the tab process exited before both tabs connected (see plugin-tabs.log)");
+      }
+      await new Promise((resolve) => setTimeout(resolve, PLUGIN_TABS_POLL_MS));
+    }
+    throw new Error(`PENPOT_PLUGIN_TABS_TIMEOUT: the tabs did not both connect within ${PLUGIN_TABS_TIMEOUT_MS / 1000} s (see plugin-tabs.log)`);
+  }
+
+  /** Stops the tab process and removes its state files. Missing files are not an error. */
+  private stopPluginTabs(): void {
+    const dir = this.cfg.productRoot;
+    const pidFile = path.join(dir, "plugin-tabs.pid");
+    if (fs.existsSync(pidFile)) {
+      const pid = Number(fs.readFileSync(pidFile, "utf8"));
+      if (Number.isInteger(pid) && pid > 0 && processAlive(pid)) {
+        process.kill(pid, "SIGTERM");
+      }
+    }
+    for (const file of [pidFile, path.join(dir, PENPOT_PLUGIN_READY), path.join(dir, pluginStateFileName("owner")), path.join(dir, pluginStateFileName("second"))]) {
+      fs.rmSync(file, { force: true });
+    }
+  }
+
+  /**
+   * H6 live probe. Each tab's user token reaches the MCP and the plugin answers for that user: execute_code returns the
+   * name of the file that profile opened. The two names must differ and each must be its own profile's file.
+   */
+  async probePerUserPlugin(): Promise<PerUserPluginProbe> {
+    const dir = this.cfg.productRoot;
+    const read = (role: "owner" | "second") => parsePluginState(fs.readFileSync(path.join(dir, pluginStateFileName(role)), "utf8"), role);
+    const owner = read("owner");
+    const second = read("second");
+    const ownerUrl = withUserToken(this.cfg.mcpUrl, owner.mcpToken);
+    const secondUrl = withUserToken(this.cfg.mcpUrl, second.mcpToken);
+    const ownerTools = (await mcpReadinessFor("penpot", { url: ownerUrl, timeoutMs: p4WaitBudgetMs(), minTools: MIN_TOOLS })).toolNames.length;
+    const secondTools = (await mcpReadinessFor("penpot", { url: secondUrl, timeoutMs: p4WaitBudgetMs(), minTools: MIN_TOOLS })).toolNames.length;
+    const ownerFile = fileNameFromToolText(await callMcpTool({ url: ownerUrl, name: "execute_code", args: { code: PENPOT_PLUGIN_CODE } }));
+    const secondFile = fileNameFromToolText(await callMcpTool({ url: secondUrl, name: "execute_code", args: { code: PENPOT_PLUGIN_CODE } }));
+    const fields = {
+      ownerFile,
+      secondFile,
+      distinct: ownerFile !== secondFile,
+      ownerMatches: ownerFile === PENPOT_PLUGIN_FILE.owner,
+      secondMatches: secondFile === PENPOT_PLUGIN_FILE.second,
+      ownerTools,
+      secondTools,
+    };
+    return { product: this.id, ...fields, ok: perUserPluginOk(fields) };
+  }
+
   async down(): Promise<void> {
+    this.stopPluginTabs();
     removeP4RunState(this.mcpRunStateFile());
     removeP4RunState(this.secondRunStateFile());
     const opts = this.composeOpts();
