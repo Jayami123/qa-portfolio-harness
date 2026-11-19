@@ -56,8 +56,22 @@ function transitField(body, key) {
   return undefined;
 }
 
+// What the Penpot UI does when a user generates their MCP token: the profile gets the mcp-enabled prop, and an access
+// token of type "mcp" exists. Without the prop the workspace shows no MCP toolbar button.
+async function ensureMcpAccess(profile, cookie) {
+  const props = await rpc("update-profile-props", { props: { "mcp-enabled": true } }, cookie);
+  if (props.status !== 200) throw new Error(`update-profile-props returned HTTP ${props.status} for ${profile.role}`);
+  const tokens = await rpc("get-access-tokens", {}, cookie);
+  if (tokens.status !== 200) throw new Error(`get-access-tokens returned HTTP ${tokens.status} for ${profile.role}`);
+  if (!(await tokens.text()).includes('"mcp"')) {
+    const created = await rpc("create-access-token", { name: `p4-h6-${profile.role}`, type: "mcp" }, cookie);
+    if (created.status !== 200) throw new Error(`create-access-token returned HTTP ${created.status} for ${profile.role}`);
+  }
+}
+
 async function workspaceFor(profile) {
   const cookie = await login(profile);
+  await ensureMcpAccess(profile, cookie);
   const profileReply = await (await rpc("get-profile", {}, cookie)).json();
   const teamId = transitField(profileReply, "default-team-id");
   const projectId = transitField(profileReply, "default-project-id");
