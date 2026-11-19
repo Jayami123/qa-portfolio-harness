@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { TwentyConfig } from "../config.js";
+import { type SecondIdentityProbe, secondIdentityProduct } from "./p4-second-identity.js";
 import { composeDown, composeUp, harnessComposeFile } from "../internal/compose.js";
 import { ensureP4Network } from "../internal/p4-network.js";
 import { TWENTY_REPLICAS_COMPOSE_FILE, twentyServerReplicas } from "./twenty-replicas.js";
@@ -24,6 +25,7 @@ import {
   seedTwentyWithMembershipCheck,
   seedSkippedMessage,
   TWENTY_DEFAULT_ADMIN_EMAIL,
+  TWENTY_SECOND_MEMBER_EMAIL,
   TWENTY_SEED_PRESENCE_EMAIL,
   twentyComposeFilePaths,
   twentyImageRef,
@@ -185,6 +187,10 @@ export class TwentyAdapter extends BaseAdapter<TwentyConfig> {
       await this.seed();
       await this.prepareMcp();
       await this.waitMcp();
+      if (this.cfg.secondIdentity) {
+        await this.prepareSecondMcp();
+        await this.waitSecondMcp();
+      }
     }
     console.log(`
 Twenty stack is up (image ${twentyImageRef(this.cfg.imageTag)}).
@@ -227,6 +233,7 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
   }
 
   async down(): Promise<void> {
+    removeP4RunState(this.secondRunStateFile());
     // The MCP run state is removed whether or not TWENTY_MCP was set (a missing file is not an error).
     removeP4RunState(this.mcpRunStateFile());
     const opts = this.composeOpts();
@@ -257,14 +264,24 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     return p4RunStateFile("twenty");
   }
 
+  /** The second identity's run state (H2). Only written when P4_SECOND_IDENTITY=1. */
+  secondRunStateFile(): string {
+    return p4RunStateFile(secondIdentityProduct("twenty"));
+  }
+
   /**
    * The workspace token from the loginToken exchange. The plain signIn token is workspace-agnostic: /mcp rejects it and
    * createApiKey refuses it (probe, 2026-11-17). So the MCP path always takes the exchange route.
    */
   private async workspaceToken(): Promise<string> {
+    return this.workspaceTokenFor(this.cfg.email, this.cfg.password);
+  }
+
+  /** The workspace token for any member. The password is sent only in the GraphQL body, never printed. */
+  private async workspaceTokenFor(email: string, password: string): Promise<string> {
     const signIn = await this.metadataGraphql<SignInResultShape>(
       SIGN_IN_MUTATION,
-      { email: this.cfg.email, password: this.cfg.password },
+      { email, password },
       "mcp signIn",
     );
     const workspace = (signIn.signIn?.availableWorkspaces?.availableWorkspacesForSignIn ?? [])[0];
@@ -297,7 +314,16 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
 
   /** Mints a least-privilege API key, exchanges it for the MCP bearer, and writes the run state (mode 0600). */
   private async prepareMcp(): Promise<void> {
-    const token = await this.workspaceToken();
+    await this.mintMcpCredential(this.cfg.email, this.cfg.password, this.mcpRunStateFile(), "twenty");
+  }
+
+  /** H2: the same key minting for the second member, from its own workspace token, into its own run state. */
+  private async prepareSecondMcp(): Promise<void> {
+    await this.mintMcpCredential(TWENTY_SECOND_MEMBER_EMAIL, this.cfg.password, this.secondRunStateFile(), secondIdentityProduct("twenty"));
+  }
+
+  private async mintMcpCredential(email: string, password: string, runStateFile: string, product: string): Promise<void> {
+    const token = await this.workspaceTokenFor(email, password);
     const roles = await this.authedGraphql<{ getApiKeyRoles: ApiKeyRole[] }>(token, GET_API_KEY_ROLES, {}, "mcp getApiKeyRoles");
     const role = selectApiKeyRole(roles.getApiKeyRoles);
     const expiresAt = apiKeyExpiry(new Date());
@@ -314,14 +340,56 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
       "mcp generateApiKeyToken",
     );
     const apiKeyToken = extractApiKeyToken({ data: generated });
-    writeP4RunState(this.mcpRunStateFile(), {
+    writeP4RunState(runStateFile, {
       version: 1,
-      product: "twenty",
+      product,
       mcpUrl: twentyMcpUrl(this.cfg.baseUrl),
       mcpAuthorization: `Bearer ${apiKeyToken}`,
-      owner: { username: this.cfg.email, email: this.cfg.email },
+      owner: { username: email, email },
     });
-    console.log("Twenty MCP credential written to the run state. It is not printed.");
+    console.log(`Twenty MCP credential written to ${product}-run.json. It is not printed.`);
+  }
+
+  /** H2: MCP readiness for the second key (its own run state). The key is not printed. */
+  async waitSecondMcp(timeoutMs?: number): Promise<McpReadiness> {
+    const creds = readP4McpCredentials(secondIdentityProduct("twenty"), this.secondRunStateFile());
+    return mcpReadinessFor("twenty", {
+      url: creds.mcpUrl,
+      authorization: requireMcpAuthorization(creds, "twenty"),
+      timeoutMs: timeoutMs ?? p4WaitBudgetMs(),
+      minTools: 1,
+    });
+  }
+
+  /**
+   * H2 live probe. Both members sign in and their currentUser emails differ; the MCP handshake and tools list pass for both
+   * keys. Returns emails and counts only; no token or key is returned or printed.
+   */
+  async probeSecondIdentity(): Promise<SecondIdentityProbe> {
+    const ownerEmail = await this.currentEmailFor(await this.workspaceTokenFor(this.cfg.email, this.cfg.password));
+    const secondEmail = await this.currentEmailFor(await this.workspaceTokenFor(TWENTY_SECOND_MEMBER_EMAIL, this.cfg.password));
+    const ownerCreds = readP4McpCredentials("twenty", this.mcpRunStateFile());
+    const secondCreds = readP4McpCredentials(secondIdentityProduct("twenty"), this.secondRunStateFile());
+    const ownerMcp = await mcpReadinessFor("twenty", { url: ownerCreds.mcpUrl, authorization: requireMcpAuthorization(ownerCreds, "twenty"), timeoutMs: p4WaitBudgetMs(), minTools: 1 });
+    const secondMcp = await mcpReadinessFor("twenty", { url: secondCreds.mcpUrl, authorization: requireMcpAuthorization(secondCreds, "twenty"), timeoutMs: p4WaitBudgetMs(), minTools: 1 });
+    return {
+      product: this.id,
+      owner: ownerEmail,
+      second: secondEmail,
+      distinct: ownerEmail !== secondEmail,
+      ownerTools: ownerMcp.toolNames.length,
+      secondTools: secondMcp.toolNames.length,
+    };
+  }
+
+  /** currentUser.email for one workspace token. */
+  private async currentEmailFor(token: string): Promise<string> {
+    const body = await this.authedGraphql<{ currentUser?: { email?: string } }>(token, CURRENT_USER_QUERY, {}, "probe currentUser");
+    const email = body.currentUser?.email;
+    if (!email) {
+      throw new Error("Twenty probe: currentUser returned no email.");
+    }
+    return email;
   }
 
   /** MCP readiness: a real handshake and tools/list with the scoped key. The key is not printed. */
@@ -338,7 +406,7 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
   private seedUsers(): SeedResult["users"] {
     return [
       { email: TWENTY_DEFAULT_ADMIN_EMAIL, role: "Admin", notes: "shared TWENTY_PASSWORD (dev seeder)" },
-      { email: "jony.ive@apple.dev", role: "Member", notes: "shared TWENTY_PASSWORD (dev seeder)" },
+      { email: TWENTY_SECOND_MEMBER_EMAIL, role: "Member", notes: "shared TWENTY_PASSWORD (dev seeder); second identity (H2) when P4_SECOND_IDENTITY=1" },
       { email: "phil.schiler@apple.dev", role: "Guest", notes: "shared TWENTY_PASSWORD (dev seeder)" },
       { email: "tim@apple.dev", role: "Limited", notes: "shared TWENTY_PASSWORD (dev seeder)" },
     ];
