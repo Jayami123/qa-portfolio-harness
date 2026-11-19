@@ -21,7 +21,7 @@ import {
   selectWorkspaceOrigin,
   listTwentyDockerVolumeNames,
   parseDockerVolumeList,
-  seedExecFailedMessage,
+  seedTwentyWithMembershipCheck,
   seedSkippedMessage,
   TWENTY_DEFAULT_ADMIN_EMAIL,
   TWENTY_SEED_PRESENCE_EMAIL,
@@ -329,6 +329,16 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     ];
   }
 
+  /** The loginToken exchange that /mcp and the API key need. It fails with "User is not a member of the workspace" on a cut-short seed. */
+  private async membershipOk(): Promise<boolean> {
+    try {
+      await this.workspaceToken();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async seedAlreadyPresent(): Promise<boolean> {
     try {
       const data = await this.metadataGraphql<SignInResultShape>(
@@ -349,7 +359,9 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
     }
     await this.prepareDockerEnvAsync();
 
-    if (await this.seedAlreadyPresent()) {
+    // Present means the seed user signs in AND its workspace membership works. A half-seeded database (user present,
+    // membership missing) is not "seeded": it goes through the retry below instead of being skipped.
+    if ((await this.seedAlreadyPresent()) && (await this.membershipOk())) {
       const notes = seedSkippedMessage(TWENTY_SEED_PRESENCE_EMAIL);
       this.seedResult = {
         product: this.id,
@@ -361,30 +373,24 @@ Seed is separate and can take a long time on first boot. Smoke calls seed(), or:
       return this.seedResult;
     }
 
-    try {
-      await run(
-        "docker",
-        this.dockerComposeArgs([
-          "exec",
-          "-T",
-          "server",
-          "yarn",
-          "command:prod",
-          "workspace:seed:dev",
-        ]),
-        {
-          cwd: this.composeOpts().cwd,
-          env: this.composeOpts().env,
-          timeoutMs: 40 * 60 * 1000,
+    await seedTwentyWithMembershipCheck(
+      {
+        runSeed: async () => {
+          await run(
+            "docker",
+            this.dockerComposeArgs(["exec", "-T", "server", "yarn", "command:prod", "workspace:seed:dev"]),
+            {
+              cwd: this.composeOpts().cwd,
+              env: this.composeOpts().env,
+              timeoutMs: 40 * 60 * 1000,
+            },
+          );
         },
-      );
-    } catch (error) {
-      if (await this.seedAlreadyPresent()) {
-        const cause = error instanceof Error ? error.message : String(error);
-        throw new Error(seedExecFailedMessage(TWENTY_SEED_PRESENCE_EMAIL, cause), { cause: error });
-      }
-      throw error;
-    }
+        membershipOk: () => this.membershipOk(),
+        log: (line) => console.log(line),
+      },
+      TWENTY_SEED_PRESENCE_EMAIL,
+    );
 
     this.seedResult = {
       product: this.id,

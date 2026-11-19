@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Twenty (P4): `seed()` now checks that the seed left a usable workspace membership (the same signIn and loginToken exchange that `/mcp` needs) and retries `workspace:seed:dev` up to twice, three attempts in all. A seed that exits 0 but leaves no membership, as happened in CI when upstream's seeder hit `Query read timeout`, used to pass here and fail later with `User is not a member of the workspace`. A half-seeded database is no longer skipped as "already seeded". After the last attempt it fails with a clear error that names the reset command. Reset with `TWENTY_DOWN_VOLUMES=1 npm run down -- twenty` as before.
+
 ## [0.6.3] - 2026-11-18
 
 - OpenClaw (P4): with `OPENCLAW_RESPONSES_API=1` the gateway config now also writes `tools.toolSearch: false`. Tool Search is on by default for embedded runs and defers tool schemas behind `tool_search` / `dispatch_action`; the pinned docs say "Set `tools.toolSearch: false` to restore direct schemas" (`docs/tools/tool-search.md` at `2026.10.33`). With the flag unset, the config is byte-identical to 0.6.2.

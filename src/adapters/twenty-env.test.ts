@@ -14,7 +14,10 @@ import {
   parseDockerVolumeList,
   parseTwentyMetadataBody,
   seedExecFailedMessage,
+  seedMembershipFailedMessage,
   seedSkippedMessage,
+  seedTwentyWithMembershipCheck,
+  TWENTY_SEED_MAX_ATTEMPTS,
   selectWorkspaceOrigin,
   twentyComposeFilePaths,
   TWENTY_FORBIDDEN_COMPOSE_FRAGMENT,
@@ -382,3 +385,72 @@ describe("seed workspace subdomains", () => {
   });
 });
 
+
+describe("seedTwentyWithMembershipCheck (a cut-short upstream seed is retried, then reported)", () => {
+  const EMAIL = "tim@apple.dev";
+  function io(script: Array<{ exec?: "ok" | "throw"; member: boolean }>) {
+    const calls = { seed: 0, member: 0, logs: [] as string[] };
+    return {
+      calls,
+      io: {
+        runSeed: async () => {
+          const step = script[Math.min(calls.seed, script.length - 1)]!;
+          calls.seed++;
+          if (step.exec === "throw") throw new Error("Query read timeout");
+        },
+        membershipOk: async () => {
+          const step = script[Math.min(calls.member, script.length - 1)]!;
+          calls.member++;
+          return step.member;
+        },
+        log: (line: string) => calls.logs.push(line),
+      },
+    };
+  }
+
+  it("allows the seed once and two retries", () => {
+    assert.equal(TWENTY_SEED_MAX_ATTEMPTS, 3);
+  });
+
+  it("returns 1 and does not retry when the first seed leaves a usable membership", async () => {
+    const t = io([{ member: true }]);
+    assert.equal(await seedTwentyWithMembershipCheck(t.io, EMAIL), 1);
+    assert.equal(t.calls.seed, 1);
+    assert.deepEqual(t.calls.logs, []);
+  });
+
+  it("retries when the seed exits 0 but the membership is missing (the CI failure), then succeeds", async () => {
+    const t = io([{ member: false }, { member: true }]);
+    assert.equal(await seedTwentyWithMembershipCheck(t.io, EMAIL), 2);
+    assert.equal(t.calls.seed, 2);
+    assert.match(t.calls.logs[0] ?? "", /attempt 1 of 3 did not leave a usable workspace/);
+  });
+
+  it("retries when the seed command itself throws, and skips the membership check for that attempt", async () => {
+    const t = io([{ exec: "throw", member: true }, { exec: "ok", member: true }]);
+    assert.equal(await seedTwentyWithMembershipCheck(t.io, EMAIL), 2);
+    assert.equal(t.calls.member, 1, "a thrown seed is not trusted even if the membership looks fine");
+  });
+
+  it("stops after three attempts with a clear error that names the reset command and the last cause", async () => {
+    const t = io([{ member: false }]);
+    await assert.rejects(seedTwentyWithMembershipCheck(t.io, EMAIL), (err: Error) => {
+      assert.match(err.message, /after 3 attempt\(s\)/);
+      assert.match(err.message, /membership check failed/);
+      assert.match(err.message, /TWENTY_DOWN_VOLUMES=1 npm run down -- twenty/);
+      assert.ok(err.message.includes(EMAIL));
+      return true;
+    });
+    assert.equal(t.calls.seed, 3, "never a fourth run");
+  });
+
+  it("reports a thrown seed command's message in the final error", async () => {
+    const t = io([{ exec: "throw", member: false }]);
+    await assert.rejects(seedTwentyWithMembershipCheck(t.io, EMAIL), /seed command failed: Query read timeout/);
+  });
+
+  it("builds the failure message without a password or token", () => {
+    const m = seedMembershipFailedMessage(EMAIL, 3, "x");
+    assert.doesNotMatch(m, /password|token=|Bearer/i);
+  });
+});

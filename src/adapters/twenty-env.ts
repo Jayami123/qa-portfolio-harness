@@ -297,6 +297,57 @@ export function seedExecFailedMessage(email: string, cause: string): string {
   );
 }
 
+/** The seed is run once and retried at most twice, so three attempts in all. */
+export const TWENTY_SEED_MAX_ATTEMPTS = 3;
+
+export function seedMembershipFailedMessage(email: string, attempts: number, lastCause: string): string {
+  return (
+    `Twenty seed did not produce a usable workspace for ${email} after ${attempts} attempt(s): ` +
+    "the workspace loginToken exchange still fails (for example \"User is not a member of the workspace\"), " +
+    "which means the seed was cut short (an upstream seeder query timed out in CI). " +
+    `Last problem: ${lastCause}. ` +
+    "To get a clean state, reset volumes with TWENTY_DOWN_VOLUMES=1 npm run down -- twenty and rerun."
+  );
+}
+
+export interface TwentySeedAttemptIo {
+  /** Runs `workspace:seed:dev`. Throws when the command fails. */
+  runSeed: () => Promise<void>;
+  /** True when the seed user can sign in, get a workspace loginToken and exchange it. Never throws. */
+  membershipOk: () => Promise<boolean>;
+  /** Progress lines. Never gets a secret. */
+  log: (line: string) => void;
+}
+
+/**
+ * Seeds, then checks workspace membership, and retries the seed up to `maxAttempts` in all. A seed command that exits 0
+ * but leaves no usable membership counts as a failed attempt, which is what a timed-out upstream seeder looks like.
+ * Returns the number of attempts used. Throws seedMembershipFailedMessage after the last failed attempt.
+ */
+export async function seedTwentyWithMembershipCheck(
+  io: TwentySeedAttemptIo,
+  email: string,
+  maxAttempts: number = TWENTY_SEED_MAX_ATTEMPTS,
+): Promise<number> {
+  let lastCause = "the membership check failed";
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let execError: string | undefined;
+    try {
+      await io.runSeed();
+    } catch (error) {
+      execError = error instanceof Error ? error.message : String(error);
+    }
+    if (execError === undefined && (await io.membershipOk())) {
+      return attempt;
+    }
+    lastCause = execError !== undefined ? `seed command failed: ${execError}` : "the seed command exited 0 but the workspace membership check failed";
+    if (attempt < maxAttempts) {
+      io.log(`Twenty seed attempt ${attempt} of ${maxAttempts} did not leave a usable workspace (${lastCause}); retrying.`);
+    }
+  }
+  throw new Error(seedMembershipFailedMessage(email, maxAttempts, lastCause));
+}
+
 export function parseDockerVolumeList(stdout: string): string[] {
   return stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
