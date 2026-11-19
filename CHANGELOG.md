@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.6.6] - 2026-11-19
+
+Mail for Nextcloud (H1). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 6.
+
+- H1 (P4): `P4_MAIL=1` (exact value, off by default) starts GreenMail 2.1.15 (`greenmail/standalone`, pinned by digest) on the `qa-harness-p4` network as `greenmail`, installs the Nextcloud Mail app 5.13.3, and configures a Mail account for `qa-owner` against it. With `P4_SECOND_IDENTITY=1` it also configures `qa-user-b`. The Mail app tarball is downloaded on the host and checked against its SHA-256 pin before it is copied into the app container, because the container cannot reach the app store. Each run makes new GreenMail passwords, which are passed to GreenMail in a request body and to occ as arguments. They are never printed or written to a file. A kept volume's stale accounts are removed before the new ones are made.
+- H1: `scripts/live/mail.mjs` checks the `nc_mail_*` MCP tools. The owner's MCP lists the accounts and the inbox and sends a marked message. GreenMail must store it for the recipient, and after a Mail sync the recipient's MCP inbox must list it. With the second identity, the owner's message to `qa-user-b` is checked the same way.
+- H1: `down -- nextcloud` always stops GreenMail, so a run started with `P4_MAIL=1` leaves no `qa-harness-greenmail` container behind even when the flag is unset in that shell.
+- Unset, nothing changes: no GreenMail container is started, the Nextcloud app is not added to the network, and `nextcloudComposeFiles(withMcp)` returns the same list as before.
+- Entries below were on `main` under Unreleased (H2, H6, H7 and Twenty) and ship with this tag.
+
 - H6 (P4): `P4_PENPOT_PLUGIN=1` (exact value, off by default; needs `P4_SECOND_IDENTITY=1`) runs the Penpot MCP in multi-user mode (`docker/penpot.multiuser.compose.yml`, enables the MCP toolbar in the frontend and backend) and keeps one Playwright browser tab per H2 profile open with the MCP plugin connected (`scripts/penpot-plugin-tabs.mjs`). Each tab's user token is kept in a 0600 state file. `scripts/live/penpot-plugin.mjs` checks the MCP answers through each token with that profile's own file name. Playwright is pinned at 1.63.0 (Chromium 153).
 - H7 (P4): `P4_SECOND_POSTS=1` (exact value, off by default; needs `P4_SECOND_IDENTITY=1`) makes the second Mattermost member (qa-agent-b) post three fixed messages prefixed `p4-h7:` in town-square. A kept volume posts only the missing ones. `scripts/live/mattermost-posts.mjs` checks each message exists once and is authored by the second user.
 - H2 (P4): `P4_SECOND_IDENTITY=1` now gives a second identity on all five MCP servers (Nextcloud, Outline, Twenty, Penpot, Mattermost), off by default. Each second identity has its own run-state file (`<product>-b-run.json`) and a live probe (`scripts/live/second-identity.mjs`). Outline: a second team member with its own API key. Mattermost: a second team member with its own PAT. Twenty: a second workspace member; its MCP key is minted by the admin (Twenty denies API-key management to members) and recorded against that member. Penpot: a second profile; the MCP is single-user and takes no credential, so its handshake is shared.

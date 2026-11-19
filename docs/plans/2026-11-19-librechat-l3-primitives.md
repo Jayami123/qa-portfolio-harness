@@ -32,6 +32,7 @@ The `mcpServers` object is parsed by `MCPOptionsSchema`. The image does not stat
 ## H1: mail catcher for Nextcloud
 
 - **Status: not attempted in this pass.** The L3 plan says H1 is needed only if S2 finds a Nextcloud mail tool. S2 is not recorded in the suite repo. Not built. Needs the S2 answer first.
+- **Session 6 (2026-11-19) built H1 with GreenMail, which has IMAP. See "Session 6" at the end of this file.** The Mailpit blocker below no longer applies.
 
 ## H2: second identity on each of the five MCP servers
 
@@ -281,3 +282,56 @@ H6 is built on `feat/2026-11-19-l3-h6-penpot-plugin` from `main` after the H7 me
 
 - H1 (IMAP and SMTP catcher), H4, H9. H6 is now in its own PR (`feat/2026-11-19-l3-h6-penpot-plugin`).
 
+## Session 6: H1, mail for Nextcloud (GreenMail)
+
+Branch `feat/2026-11-19-l3-h1-greenmail`, from `origin/main` at `f747f1a`. Release `v0.6.6`. Draft PR only. No merge, no tag.
+
+### Why GreenMail
+
+S2 (session 2) found that the Nextcloud MCP's `nc_mail_*` tools read through the Mail app over IMAP, and that the pinned Mailpit has SMTP and POP3 only. So the list and get tools could not be served. GreenMail 2.1.15 (`greenmail/standalone`, Docker Hub, pinned by digest 2026-11-19) serves IMAP and SMTP, so H1 can be built with it. The newest tag on Docker Hub when the session started was 2.1.15 (2026-10-25).
+
+### What was checked before the code was written (2026-11-19, this container)
+
+- **The app container cannot reach the Nextcloud app store.** `wget https://apps.nextcloud.com/...` from a container on the bridge fails with "Connection reset by peer". The host can reach it. So the Mail app is downloaded on the host, checked against a pinned SHA-256, copied into the container with `docker cp`, and enabled with occ.
+- **Mail 5.13.3 is the newest stable release that declares Nextcloud 35.** `info.xml` says `nextcloud min 32 max 35` and `php min 8.1 max 8.5`. Its SHA-256 is `c9660a13b6734b26e84b2a9f87058a96cd89905e3834beae5b6da8d1d4007d7c`. The licence in the source is AGPL-3.0-only. The app-store signature was not verified.
+- **The image's PHP has no `imap` extension** (`php -m`). Mail 5.x uses Horde's pure-PHP IMAP client, and its `info.xml` declares no `imap` dependency, so this is not needed.
+- **GreenMail echoes `GREENMAIL_OPTS` on startup.** `docker logs` showed `-Dgreenmail.users=qa-owner:<password>@p4.test` in the first line. So the users are created over GreenMail's REST API (`POST /api/user`, password in the body) and never in the environment. After that, `docker logs` contains 0 occurrences of the password.
+- **GreenMail logins use the login name, not the address.** IMAP `LOGIN qa-owner` works and `LOGIN qa-owner@p4.test` fails. SMTP AUTH PLAIN works. A `LOGIN` mechanism with an initial response is rejected with `500 Unsupported auth mechanism`. The Mail app's account therefore uses `qa-owner` for IMAP and SMTP.
+- **The Mail app will not send until it knows a Sent mailbox.** Without one, `SentMailboxHandler` sets `STATUS_NO_SENT_MAILBOX`, and the API returns a generic `500 Could not send message`. Nothing reaches `nextcloud.log` in that case, which made it hard to find. A `Sent` folder created after the account exists is not picked up either: the mailbox list stayed at INBOX until the account was recreated. So the adapter creates `Sent` over IMAP (`CREATE`) before it creates the account.
+- **The MCP reads cached envelopes, and the container has no cron.** A message that arrives after the last sync stays invisible to `nc_mail_list_messages`. The live check runs `occ mail:account:sync <id>` before it lists the inbox, and retries up to five times.
+- **`nc_mail_list_mailboxes` returns `databaseId`** (camelCase), which the live check uses as the mailbox id.
+
+### What was built
+
+- `docker/greenmail.compose.yml`: GreenMail on `qa-harness-p4` with alias `greenmail`. IMAP 3143 and the REST API 8029 are bound to `127.0.0.1` only. SMTP stays on the network.
+- `docker/nextcloud.mail.compose.yml`: adds the app container to `qa-harness-p4`. It is used only with `P4_MAIL=1`.
+- `src/adapters/greenmail-env.ts`, `greenmail-imap.ts`, `nextcloud-mail.ts`, `nextcloud-mail-seed.ts`, `mcp-call.ts`: pins, the flag, REST and IMAP helpers, the occ arguments, the Mail app install, and the MCP tool client. Each pure function has a unit test. The IMAP socket code is tested against a fake IMAP server.
+- `src/adapters/nextcloud.adapter.ts`: with `P4_MAIL=1`, `up` starts GreenMail (empty), then Nextcloud, then the Mail app and the accounts, then the MCP. `down` always stops GreenMail. `probeMail()` is the live check.
+- `scripts/live/mail.mjs`: the live check. It prints one line per identity and exits 1 on any failed step.
+- Config: `P4_MAIL` is validated like `P4_SECOND_IDENTITY` (exactly `1`, or unset). An invalid value throws `P4_MAIL_INVALID` without echoing the value.
+
+### Per-run passwords
+
+Each `up` makes a new password for each identity (`generateNextcloudSecret`). It is kept in memory only: it goes to GreenMail in a REST body, to occ as an argument (`runCapture` with `redact`), and to the IMAP `CREATE` call. It is never printed, logged, or written to `secrets.json`, `.harness/*` or the env file. GreenMail is recreated on each `up`, so no old user or password survives. The Mail app stores the account's password in the Nextcloud database, as any Mail account does.
+
+### Live result (local, 2026-11-19, `P4_MAIL=1 P4_SECOND_IDENTITY=1`)
+
+```
+ok owner: qa-owner@p4.test account=4 inbox listed (0 before) sent=yes greenmail stored=yes listed after sync=yes
+ok second: qa-user-b@p4.test account=5 inbox listed (0 before) sent=yes greenmail stored=yes listed after sync=yes
+H1 live check passed for: nextcloud mail (2 identities)
+```
+
+The same run also showed the kept-volume path: `up` deleted the previous run's account (`Deleted account 3`) and created account 4 for `qa-owner`. The first `up` on the kept volume from the prototype deleted account 2 and created account 3.
+
+### Limits and what is not claimed
+
+- The GreenMail licence is UNVERIFIED. The jar in the image carries no licence file, and the upstream licence was not read in this session. Recorded as such in `docs/pins/p4.md`.
+- The Mail app tarball comes from GitHub at `up` time. A run needs `github.com` to be reachable from the runner. The SHA-256 is checked, but the app-store signature is not.
+- The live check syncs with `occ`, because the container has no cron. The check does not test the Mail app's background sync.
+- The message body is not checked, only the marker subject.
+- RAM for GreenMail and the Mail app was not measured in this session. The CI full-set probe (`ram-probe-full.json`) measures it on the dispatch with `second_identity` on.
+
+### Still open
+
+- H3, H4, H9: unchanged. H2, H6 and H7 are on `main` and ship in 0.6.6 (see CHANGELOG).
