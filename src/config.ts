@@ -7,7 +7,15 @@ import { assertMedusaSecondBaseUrl } from "./adapters/medusa-env.js";
 import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
 import { HARNESS_ROOT } from "./paths.js";
 import { parseP4LlmMode, parseStubApiBase } from "./adapters/litellm-env.js";
-import { parseOpenClawResponsesFlag } from "./adapters/openclaw-env.js";
+import {
+  parseOpenClawChannelMockFlag,
+  parseOpenClawLoopDetectionFlag,
+  parseOpenClawNightlyModelFlag,
+  parseOpenClawResponsesFlag,
+  parseOpenClawWebFetchHosts,
+  parseOpenClawWebFetchPrivateNetworkFlag,
+  resolveOpenClawNightlyModel,
+} from "./adapters/openclaw-env.js";
 import { resolveLibreChatModels } from "./adapters/librechat-env.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
@@ -141,6 +149,12 @@ const envSchema = z.object({
   OPENCLAW_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:18789"),
   // Opt-in, exact value "1": enables the gateway's POST /v1/responses endpoint so runTask() works. Unset changes nothing.
   OPENCLAW_RESPONSES_API: z.string().trim().default(""),
+  // Opt-in L4 primitives (v0.6.4), all off by default. Flags are exactly "1"; the host list is comma-separated exact hostnames.
+  OPENCLAW_CHANNEL_MOCK: z.string().trim().default(""),
+  OPENCLAW_LOOP_DETECTION: z.string().trim().default(""),
+  OPENCLAW_WEB_FETCH_ALLOWED_HOSTS: z.string().trim().default(""),
+  OPENCLAW_WEB_FETCH_PRIVATE_NETWORK: z.string().trim().default(""),
+  OPENCLAW_NIGHTLY_MODEL: z.string().trim().default(""),
 });
 
 export interface ProductConfig {
@@ -227,6 +241,16 @@ export interface OpenClawConfig extends ProductConfig {
   id: "openclaw";
   /** OPENCLAW_RESPONSES_API=1: the gateway serves POST /v1/responses (headless agent run). */
   responsesApi: boolean;
+  /** OPENCLAW_CHANNEL_MOCK=1 (H1): the config enables the mock Telegram channel. */
+  channelMock: boolean;
+  /** OPENCLAW_LOOP_DETECTION=1 (H4). */
+  loopDetection: boolean;
+  /** OPENCLAW_WEB_FETCH_ALLOWED_HOSTS (H4): exact hostnames web_fetch may reach on a private network. Empty is off. */
+  webFetchAllowedHosts: string[];
+  /** OPENCLAW_WEB_FETCH_PRIVATE_NETWORK=1 (H4): the broad opt-in. */
+  webFetchPrivateNetwork: boolean;
+  /** OPENCLAW_NIGHTLY_MODEL=1 (H5): primary model p4-nightly. Only valid with P4_LLM_MODE=nightly. */
+  nightlyModel: boolean;
 }
 
 export type P4Config =
@@ -408,6 +432,14 @@ function buildOpenClawConfig(parsed: ParsedEnv): OpenClawConfig {
     baseUrl: parsed.OPENCLAW_BASE_URL.replace(/\/$/, ""),
     dbUrl: "none://openclaw", // sentinel: OpenClaw has no database in B1
     responsesApi: parseOpenClawResponsesFlag(parsed.OPENCLAW_RESPONSES_API),
+    channelMock: parseOpenClawChannelMockFlag(parsed.OPENCLAW_CHANNEL_MOCK),
+    loopDetection: parseOpenClawLoopDetectionFlag(parsed.OPENCLAW_LOOP_DETECTION),
+    webFetchAllowedHosts: parseOpenClawWebFetchHosts(parsed.OPENCLAW_WEB_FETCH_ALLOWED_HOSTS),
+    webFetchPrivateNetwork: parseOpenClawWebFetchPrivateNetworkFlag(parsed.OPENCLAW_WEB_FETCH_PRIVATE_NETWORK),
+    nightlyModel: resolveOpenClawNightlyModel(
+      parseOpenClawNightlyModelFlag(parsed.OPENCLAW_NIGHTLY_MODEL),
+      parseP4LlmMode(parsed.P4_LLM_MODE),
+    ),
   };
 }
 

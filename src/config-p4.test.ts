@@ -101,7 +101,7 @@ describe("P4 config and the fork split (ADR 0006, D1 and D2)", () => {
 });
 
 describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () => {
-  const AGENT_KEYS = ["P4_LLM_MODE", "LITELLM_BASE_URL", "LIBRECHAT_BASE_URL", "LIBRECHAT_MCP_PRODUCTS", "OPENCLAW_BASE_URL", "P4_STUB_API_BASE", "LIBRECHAT_MODELS", "OPENCLAW_RESPONSES_API", "PRODUCTS_ROOT"];
+  const AGENT_KEYS = ["P4_LLM_MODE", "LITELLM_BASE_URL", "LIBRECHAT_BASE_URL", "LIBRECHAT_MCP_PRODUCTS", "OPENCLAW_BASE_URL", "P4_STUB_API_BASE", "LIBRECHAT_MODELS", "OPENCLAW_RESPONSES_API", "OPENCLAW_CHANNEL_MOCK", "OPENCLAW_LOOP_DETECTION", "OPENCLAW_WEB_FETCH_ALLOWED_HOSTS", "OPENCLAW_WEB_FETCH_PRIVATE_NETWORK", "OPENCLAW_NIGHTLY_MODEL", "PRODUCTS_ROOT"];
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -188,6 +188,32 @@ describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () =>
     assert.equal(loadProductConfig("openclaw").responsesApi, true);
     process.env.OPENCLAW_RESPONSES_API = "true";
     assert.throws(() => loadProductConfig("openclaw"), /OPENCLAW_RESPONSES_API_INVALID/);
+  });
+
+  it("reads the v0.6.4 OpenClaw options: all off by default, set through the environment", () => {
+    const off = loadProductConfig("openclaw");
+    assert.deepEqual(
+      [off.channelMock, off.loopDetection, off.webFetchAllowedHosts, off.webFetchPrivateNetwork, off.nightlyModel],
+      [false, false, [], false, false],
+    );
+    process.env.OPENCLAW_CHANNEL_MOCK = "1";
+    process.env.OPENCLAW_LOOP_DETECTION = "1";
+    process.env.OPENCLAW_WEB_FETCH_ALLOWED_HOSTS = "p4-fixtures, pages.internal";
+    process.env.OPENCLAW_WEB_FETCH_PRIVATE_NETWORK = "1";
+    const on = loadProductConfig("openclaw");
+    assert.deepEqual(
+      [on.channelMock, on.loopDetection, on.webFetchAllowedHosts, on.webFetchPrivateNetwork, on.nightlyModel],
+      [true, true, ["p4-fixtures", "pages.internal"], true, false],
+    );
+    process.env.OPENCLAW_CHANNEL_MOCK = "yes";
+    assert.throws(() => loadProductConfig("openclaw"), /OPENCLAW_CHANNEL_MOCK_INVALID/);
+  });
+
+  it("OPENCLAW_NIGHTLY_MODEL needs P4_LLM_MODE=nightly", () => {
+    process.env.OPENCLAW_NIGHTLY_MODEL = "1";
+    assert.throws(() => loadProductConfig("openclaw"), /OPENCLAW_NIGHTLY_MODEL_NEEDS_NIGHTLY/);
+    process.env.P4_LLM_MODE = "nightly";
+    assert.equal(loadProductConfig("openclaw").nightlyModel, true);
   });
 
   it("keeps the agent hosts out of the fork-product cache", () => {
