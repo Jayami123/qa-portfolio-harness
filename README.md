@@ -505,6 +505,14 @@ OpenClaw L4 primitives (v0.6.4, plan `docs/plans/2026-11-18-openclaw-l4-primitiv
 
 Not built: a `tools.exec.security` knob (it would change the lock) and `askFallback` (not a config key; it defaults to `deny`). See the plan's findings.
 
+LibreChat L3 primitives (v0.6.5, plan `docs/plans/2026-11-19-librechat-l3-primitives.md`). Partial: H5 is built, H3 is blocked and the rest are not attempted in this pass.
+
+| | Option or method | Effect |
+|---|---|---|
+| H5 | `LIBRECHAT_MCP_PRODUCTS` including `lab` | Attaches the attack-lab MCP at `http://p4-attack-lab:9010/mcp`, no credential. The default product list is unchanged. The lab container is not in this repo yet. |
+
+H3 (tool-approval knob) cannot be built: LibreChat v0.8.7 has no such key in `librechat.yaml`.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.
