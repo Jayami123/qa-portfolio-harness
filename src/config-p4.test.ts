@@ -273,3 +273,32 @@ describe("H3 config: LIBRECHAT_TOOL_APPROVAL is off by default and validated", (
     );
   });
 });
+
+describe("H2 config: P4_SECOND_IDENTITY reaches Outline, Penpot, Mattermost and Twenty (off by default)", () => {
+  it("is false when unset and true with exactly 1, for each product", () => {
+    const saved = process.env.P4_SECOND_IDENTITY;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "p4-h2-twenty-"));
+    const savedTwenty = process.env.TWENTY_PRODUCT_DIR;
+    try {
+      process.env.TWENTY_PRODUCT_DIR = tmp;
+      for (const product of ["outline", "penpot", "mattermost", "twenty"] as const) {
+        delete process.env.P4_SECOND_IDENTITY;
+        resetConfigCache();
+        assert.equal((loadProductConfig(product) as unknown as { secondIdentity: boolean }).secondIdentity, false, `${product} unset`);
+        process.env.P4_SECOND_IDENTITY = "1";
+        resetConfigCache();
+        assert.equal((loadProductConfig(product) as unknown as { secondIdentity: boolean }).secondIdentity, true, `${product} on`);
+      }
+      process.env.P4_SECOND_IDENTITY = "true";
+      resetConfigCache();
+      assert.throws(() => loadProductConfig("outline"), /P4_SECOND_IDENTITY_INVALID/);
+    } finally {
+      if (saved === undefined) delete process.env.P4_SECOND_IDENTITY;
+      else process.env.P4_SECOND_IDENTITY = saved;
+      if (savedTwenty === undefined) delete process.env.TWENTY_PRODUCT_DIR;
+      else process.env.TWENTY_PRODUCT_DIR = savedTwenty;
+      fs.rmSync(tmp, { recursive: true, force: true });
+      resetConfigCache();
+    }
+  });
+});
