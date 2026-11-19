@@ -252,3 +252,32 @@ This addendum records what #71 built and proved, and the limits that were found.
 - H1 (IMAP and SMTP catcher for Nextcloud mail).
 - H4 and H9, as before.
 
+## Session 5: H6, a per-user Penpot MCP through open browser tabs
+
+H6 is built on `feat/2026-11-19-l3-h6-penpot-plugin` from `main` after the H7 merge. The option is `P4_PENPOT_PLUGIN=1` (exact value, off by default). It needs `P4_SECOND_IDENTITY=1`, so there are two profiles to tell apart. Unset, the written compose files are the base files.
+
+### How the per-user path works (read from the pinned images, 2.19.2)
+
+- **Multi-user MCP.** The MCP image takes `--multi-user`. A request to `/mcp` names its user with `?userToken=`, and the plugin connects to `/mcp/ws?userToken=` with the same token. The override `docker/penpot.multiuser.compose.yml` adds the flag. Redis is not needed for one instance.
+- **The toolbar is gated by a flag and by the profile.** The workspace shows the MCP toolbar only when the frontend flag `enable-mcp` is set (`contains? flags :mcp`) and the profile has the `mcp-enabled` prop. The UI sets the prop and creates an access token of type `mcp` when a user generates their token. The override sets `enable-mcp` on the frontend and backend, and the base `PENPOT_FLAGS` are unchanged.
+- **The image serves the MCP routes when the flag is on.** With `enable-mcp` the frontend's nginx serves `/mcp/ws` and `/mcp/stream` itself from `PENPOT_MCP_URI_WS` and `PENPOT_MCP_URI`. The harness overlay `penpot-mcp-ws.conf` then duplicated `/mcp/ws` and nginx refused to start (live, 2026-11-19). The override mounts an empty overlay in its place.
+- **The plugin's identity is the token.** The host starts the MCP plugin with `mcp.getToken()`, which is the workspace's MCP token. A tab that connected with a token is one user's plugin.
+
+### Live result (local, 2026-11-19)
+
+- Both tabs open with the plugin connected: `tab owner: plugin connected with a user token (file h6-owner-file)` and `tab second: ... (file h6-second-file)`.
+- `node scripts/live/penpot-plugin.mjs`: `ok penpot per-user plugin: owner tab sees file=h6-owner-file (matches=true), second tab sees file=h6-second-file (matches=true), distinct=true, mcp tools owner=4 second=4`.
+- The H2 probe still passes in multi-user mode: `ok penpot: ... distinct=yes mcp tools owner=4 second=4`. The single-user MCP listed 5 tools in the H2 probe before this change. I have not found why the count differs.
+- `down` stops the tab process, removes its state files, and leaves no `qa-harness-*` container.
+
+### Limits
+
+- **The plugin cannot read the user.** The plugin manifest asks for no `user:read`, so `penpot.currentUser` is not available to it. The probe tells the profiles apart by the file each one opened (`penpot.currentFile.name`), not by a user field.
+- **The tabs are a detached process.** `up -- penpot` starts them, and they stay open until `down -- penpot`. A run that stops without `down` leaves them running. The state folder `.harness/penpot/` is removed by `down`, and so is the tab process.
+- **Browser version.** Playwright 1.63.0 pins the Chromium build (`chromium-1243`). The dispatch installs it with `npx playwright install --with-deps chromium`. This is a version pin, not a digest pin, and the owner should decide whether a digest pin is needed.
+- **Test tokens.** Exploration created MCP access tokens named `h6-probe` and `h6-shape` for both profiles. They live only in the local Penpot volume and are not in CI. They can be deleted through `delete-access-token` when the local volume is removed.
+
+### Still open
+
+- H1 (IMAP and SMTP catcher), H4, H9. H6 is now in its own PR (`feat/2026-11-19-l3-h6-penpot-plugin`).
+

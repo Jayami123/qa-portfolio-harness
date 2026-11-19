@@ -34,6 +34,7 @@ on:
       - "docker/mattermost*"
       - "docker/twenty*.yml"
       - "scripts/p4-*"
+      - "scripts/penpot-plugin-tabs.mjs"
       - "scripts/lib.mjs"
       - "docs/pins/p4.md"
       - ".github/workflows/p4-agent-hosts.yml"
@@ -64,6 +65,8 @@ jobs:
       P4_SECOND_IDENTITY: ${{ inputs.second_identity && '1' || '' }}
       # H7 needs H2 (the posts are written by the second identity), so it follows the same dispatch input.
       P4_SECOND_POSTS: ${{ inputs.second_identity && '1' || '' }}
+      # H6 needs H2 (one tab per H2 profile). The browser tabs run Playwright's Chromium, installed below.
+      P4_PENPOT_PLUGIN: ${{ inputs.second_identity && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL: ${{ inputs.tool_approval && '1' || '' }}
       LIBRECHAT_TOOL_APPROVAL_ASK: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_list_addressbooks' || '' }}
       LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_delete_addressbook' || '' }}
@@ -93,6 +96,13 @@ jobs:
           npm ci
           HARNESS_PRODUCTS=twenty bash scripts/cloud-install.sh
           npm run build
+
+      # H6 only: the Chromium that scripts/penpot-plugin-tabs.mjs drives. The version is the playwright package's (pinned).
+      - name: Install the pinned Playwright Chromium (second_identity only)
+        if: inputs.second_identity
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
 
       - name: Check the probe script syntax
         run: |
@@ -166,6 +176,13 @@ jobs:
           mkdir -p evidence
           node scripts/live/second-identity.mjs nextcloud outline twenty penpot mattermost | tee evidence/h2-live-check.txt
           node scripts/live/mattermost-posts.mjs | tee evidence/h7-live-check.txt
+
+      # H6: the two tabs were opened by `up -- penpot` (P4_PENPOT_PLUGIN=1). This step prints the result to the step log.
+      - name: "Live H6 check (second_identity only): the MCP answers through each open tab with its own profile's file"
+        if: inputs.second_identity
+        run: |
+          set -euo pipefail
+          node scripts/live/penpot-plugin.mjs
 
       - name: "H2 stack down (second_identity only)"
         if: always() && inputs.second_identity
