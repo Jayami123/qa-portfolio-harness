@@ -46,6 +46,9 @@ export function librechatMcpServerFor(product: string): LibreChatMcpServer {
       return { name: "penpot", url: "http://penpot-mcp:4401/mcp", authEnv: null };
     case "mattermost":
       return { name: "mattermost", url: "http://mattermost-mcp:8066/mcp", authEnv: "P4_MATTERMOST_MCP_AUTHORIZATION" };
+    case "lab":
+      // The attack lab (L2 plan). Its alias on qa-harness-p4 and container port 9010. It takes no credential.
+      return { name: "lab", url: "http://p4-attack-lab:9010/mcp", authEnv: null };
     default:
       throw new Error(`LIBRECHAT_MCP_UNKNOWN: no MCP server is defined for "${product}"`);
   }
