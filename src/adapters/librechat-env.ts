@@ -2,16 +2,16 @@ import crypto from "node:crypto";
 import { harnessComposeFile } from "../internal/compose.js";
 import { LITELLM_ALIASES, LITELLM_NIGHTLY_ALIAS, LITELLM_STUB_ALIAS, type P4LlmMode } from "./litellm-env.js";
 
-/** Pinned in docs/pins/p4.md. v0.8.7 is the newest stable tag at 2026-11-18 (same digest as the danny-avila namespace). */
+/** Pinned in docs/pins/p4.md. v0.8.9 is the newest stable tag (tag date 2026-11-17; checked by git tag and by pulling the tag, 2026-11-19). */
 export const LIBRECHAT_IMAGE =
-  "ghcr.io/librechat-ai/librechat:v0.8.7@sha256:c5db3331b845e1f289f8d04c0c77936c4bbe372f76730a804abc1c37e44d23a9";
+  "ghcr.io/librechat-ai/librechat:v0.8.9@sha256:4a3967a47031c1fdba8302a6a341be7671101e40b617f7934ba25aac69fcea2b";
 /** Pinned MongoDB, the database LibreChat needs. Not published to the host (review answer 0.1). */
 export const LIBRECHAT_MONGO_IMAGE = "mongo:8@sha256:05b334b0a7a78fe913caac0cd2e1ecccf4da515d9a3a44be911b6ea3734c17cd";
 export const LIBRECHAT_COMPOSE_PROJECT = "qa-harness-librechat";
 /** Alias on qa-harness-p4 (review answer 0.1). */
 export const LIBRECHAT_NETWORK_ALIAS = "librechat";
-/** The newest config version the image reports (VERIFIED: "Latest version: 1.3.13"). */
-export const LIBRECHAT_CONFIG_VERSION = "1.3.13";
+/** The config version of v0.8.9 (VERIFIED in the v0.8.9 source: packages/data-provider/src/config.ts, CONFIG_VERSION = '1.3.19'). */
+export const LIBRECHAT_CONFIG_VERSION = "1.3.19";
 /** The Mongo service name on the project's default network. */
 export const LIBRECHAT_MONGO_HOST = "mongodb";
 export const LIBRECHAT_MONGO_USER = "librechat";
