@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.6.8] - 2026-11-20
+
+- Nextcloud Mail seed: `configureMailIdentity` waits for `GET /index.php/apps/mail/api/accounts` to answer 200 before it lists accounts. Right after `occ app:enable mail` the route can answer 404 for a moment, which failed the P4 mail run with `Mail accounts list for qa-owner returned HTTP 404`. Only 404 is polled, on the same budget as the other P4 waits (`p4WaitBudgetMs()`). Any other answer (401, 500) and any connection failure throws at once, and a timeout names the route, the identity and the last status. No fixed sleep.
+- `waitForStatus` (Nextcloud Mail seed) takes an optional `retryOn` list. Without it, GreenMail startup behaves as before.
+- Version 0.6.8. Plan and evidence: `docs/plans/2026-11-20-nextcloud-mail-route-wait.md`.
+
 ## [0.6.7] - 2026-11-20
 
 LibreChat Always allow (`allowAlways`) and a second attack-lab server (`lab2`). Plan: `docs/plans/2026-11-20-librechat-allowalways-lab2.md`. Both options are off by default; an unset option leaves the written `librechat.yaml` byte-identical to 0.6.6 (unit tested).
