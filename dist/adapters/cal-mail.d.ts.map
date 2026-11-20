@@ -1,0 +1,1 @@
+{"version":3,"file":"cal-mail.d.ts","sourceRoot":"","sources":["../../src/adapters/cal-mail.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AACH,oIAAoI;AACpI,eAAO,MAAM,gBAAgB,YAAY,CAAC;AAC1C,eAAO,MAAM,kBAAkB,cAAc,CAAC;AAC9C,eAAO,MAAM,kBAAkB,OAAO,CAAC;AACvC,eAAO,MAAM,gBAAgB,OAAO,CAAC;AAErC;;;GAGG;AACH,eAAO,MAAM,qBAAqB,cAAc,CAAC;AACjD,eAAO,MAAM,qBAAqB,SAAS,CAAC"}

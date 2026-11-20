@@ -1,0 +1,152 @@
+/**
+ * Diagnostics for LibreChat's MCP connections. Pure helpers here, so each one is unit tested. The adapter does the I/O.
+ * Nothing printed contains a secret or a header value: every captured line is redacted with the env-file values and the
+ * per-run secrets first, and the probe prints only whether an auth variable is set and non-empty.
+ */
+import { spawn } from "node:child_process";
+import { redactSecrets } from "../internal/run.js";
+import { librechatMcpServerFor } from "./librechat-env.js";
+/** The LibreChat app container (compose project qa-harness-librechat, service app). */
+export const LIBRECHAT_APP_CONTAINER = "qa-harness-librechat-app-1";
+/** The MCP container behind each Part A server name (compose project and service, as the Part A files define them). */
+export const MCP_CONTAINERS = {
+    nextcloud: "qa-harness-nextcloud-mcp-1",
+    outline: "qa-harness-outline-outline-1",
+    twenty: "qa-harness-twenty-server-1",
+    penpot: "qa-harness-penpot-mcp-1",
+    mattermost: "qa-harness-mattermost-mcp-1",
+};
+const MIN_SECRET_LENGTH = 6;
+/** Hard stop for the streamed probe on the host. The in-container probe finishes well before this. */
+export const PROBE_HOST_TIMEOUT_MS = 45_000;
+/** Every value in the env file and every string in the secrets, so a redaction pass covers them all. */
+export function redactionValues(envText, secrets) {
+    const values = new Set();
+    for (const line of envText.split("\n")) {
+        const at = line.indexOf("=");
+        if (at > 0) {
+            const value = line.slice(at + 1);
+            if (value.length >= MIN_SECRET_LENGTH)
+                values.add(value);
+        }
+    }
+    for (const value of Object.values(secrets)) {
+        if (typeof value === "string" && value.length >= MIN_SECRET_LENGTH)
+            values.add(value);
+    }
+    return [...values];
+}
+export function redactText(text, values) {
+    return redactSecrets(text, values);
+}
+/** A LibreChat line about one MCP server, such as "[MCP][outline] OAuth Required: true". */
+const MCP_SERVER_LINE = /\[MCP\]\[[^\]]+\]/;
+/**
+ * Lines about MCP connections, allow lists and errors, in log order. Every [MCP][<name>] line is kept, so a per-server
+ * decision such as "OAuth Required" is never cut. Of the other matching lines, only the last `max` are kept.
+ */
+export function interestingLogLines(text, max = 60) {
+    const matching = text.split("\n").filter((line) => /mcp|allow|domain|oauth|ssrf|blocked|refus|error|warn|connect/i.test(line));
+    const firstKeptOther = Math.max(0, matching.filter((line) => !MCP_SERVER_LINE.test(line)).length - max);
+    let otherIndex = -1;
+    return matching.filter((line) => {
+        if (MCP_SERVER_LINE.test(line))
+            return true;
+        otherIndex += 1;
+        return otherIndex >= firstKeptOther;
+    });
+}
+/** Each server's connectionState from /api/mcp/connection/status. A missing server reads "missing". */
+export function connectionStates(statusBody, names) {
+    const map = statusBody?.connectionStatus;
+    const out = {};
+    for (const name of names) {
+        const state = map?.[name]?.connectionState;
+        out[name] = typeof state === "string" ? state : "missing";
+    }
+    return out;
+}
+/**
+ * The probe that runs inside the LibreChat container. Every server is checked in parallel. Each request has a 4 s limit
+ * and each DNS lookup a 3 s limit, so the whole probe ends in about 8 s. A server's line is printed as soon as its check
+ * ends. A line holds the name, the host, the resolved address, the HTTP status or error code, and whether the auth
+ * variable is set and non-empty. The value is never printed, and the header is sent only when the value is non-empty.
+ */
+export const PROBE_SCRIPT = [
+    'const dns = require("dns").promises;',
+    "const servers = JSON.parse(process.argv[1]);",
+    "const limit = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + \" timeout\")), ms))]);",
+    "const authState = (authEnv) => authEnv === null ? \"no auth var\" : ((process.env[authEnv] || \"\").trim() !== \"\" ? \"auth var set\" : \"auth var EMPTY\");",
+    "async function probe([name, url, authEnv]) {",
+    "  const host = new URL(url).hostname;",
+    "  let address;",
+    '  try { address = (await limit(dns.lookup(host), 3000, "dns")).address; } catch (e) { address = "dns " + (e.code || e.message); }',
+    "  let status;",
+    "  try {",
+    '    const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };',
+    "    if (authEnv && (process.env[authEnv] || \"\").trim() !== \"\") headers.authorization = process.env[authEnv];",
+    '    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "diag", version: "0" } } });',
+    '    const r = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(4000) });',
+    '    status = "http " + r.status;',
+    "  } catch (e) {",
+    "    const inner = e.cause && (e.cause.code || (e.cause.errors && e.cause.errors[0] && e.cause.errors[0].code));",
+    '    const detail = e.cause && e.cause.message ? " / " + String(e.cause.message).slice(0, 120) : "";',
+    '    status = "fetch " + (inner || e.name || "error") + detail;',
+    "  }",
+    '  console.log([name, host, address, status, authState(authEnv)].join(" | "));',
+    "}",
+    'Promise.all(servers.map(probe)).then(() => console.log("probe done"));',
+].join("\n");
+/** The docker exec argv for the probe. The server list holds names, URLs and env variable NAMES only. */
+export function probeArgs(servers) {
+    const list = servers.map((s) => [s.name, s.url, s.authEnv]);
+    return ["exec", LIBRECHAT_APP_CONTAINER, "node", "-e", PROBE_SCRIPT, JSON.stringify(list)];
+}
+export function serversFor(names) {
+    return names.map((name) => librechatMcpServerFor(name));
+}
+export function mcpContainerFor(name) {
+    return MCP_CONTAINERS[name];
+}
+/**
+ * Runs the probe on the host and prints each line as it arrives, redacted. It resolves when the probe ends, and it never
+ * rejects: a probe that cannot start is printed and the wait keeps its own error.
+ */
+export function streamMcpProbe(names, values, log = console.log) {
+    return new Promise((resolve) => {
+        let carry = "";
+        const emit = (text) => {
+            carry += text;
+            const lines = carry.split("\n");
+            carry = lines.pop() ?? "";
+            for (const line of lines) {
+                if (line.trim() !== "")
+                    log(`  ${redactText(line, values)}`);
+            }
+        };
+        let child;
+        try {
+            child = spawn("docker", probeArgs(serversFor(names)), { stdio: ["ignore", "pipe", "pipe"] });
+        }
+        catch (err) {
+            log(`  the probe could not start: ${err instanceof Error ? err.message.slice(0, 120) : "unknown error"}`);
+            resolve();
+            return;
+        }
+        const timer = setTimeout(() => child.kill("SIGKILL"), PROBE_HOST_TIMEOUT_MS);
+        child.stdout.on("data", (chunk) => emit(chunk.toString()));
+        child.stderr.on("data", (chunk) => emit(chunk.toString()));
+        child.on("error", (err) => {
+            clearTimeout(timer);
+            log(`  the probe failed to run: ${err.message.slice(0, 120)}`);
+            resolve();
+        });
+        child.on("close", () => {
+            clearTimeout(timer);
+            if (carry.trim() !== "")
+                log(`  ${redactText(carry, values)}`);
+            resolve();
+        });
+    });
+}
+//# sourceMappingURL=librechat-diag.js.map

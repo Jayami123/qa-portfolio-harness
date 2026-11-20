@@ -1,0 +1,1 @@
+{"version":3,"file":"twenty-rate-limits.d.ts","sourceRoot":"","sources":["../../src/adapters/twenty-rate-limits.ts"],"names":[],"mappings":"AAAA;;;;;GAKG;AACH,eAAO,MAAM,qBAAqB,uOAOxB,CAAC;AAEX,MAAM,MAAM,sBAAsB,GAAG,CAAC,OAAO,qBAAqB,CAAC,CAAC,MAAM,CAAC,CAAC;AAY5E;;6GAE6G;AAC7G,wBAAgB,sBAAsB,CACpC,GAAG,EAAE,MAAM,CAAC,UAAU,GACrB,OAAO,CAAC,MAAM,CAAC,sBAAsB,EAAE,MAAM,CAAC,CAAC,CAWjD"}
