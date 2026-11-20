@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
@@ -6,10 +7,13 @@ import { clipForRecord, createRecorder, RECORD_CLIP_RESERVE } from "./proxy.js";
 import { REDACTED } from "./redact.js";
 import { parseRecorderRoutes } from "./routes.js";
 
-const SECRET_BEARER = "fakebearer-abc123XYZ";
-const SECRET_PASS = "fakepass-hunter2-zz";
-const SECRET_SESSION = "fakesession-idvalue-42";
-const SECRET_COOKIE = "sessfake-cookie-9876";
+// Fixture values are generated per run, so no credential-looking literal is stored in the repository. Each is a random,
+// non-secret token used only to check that the recorder never writes it.
+const fixture = (label: string): string => `${label}-${crypto.randomBytes(12).toString("hex")}`;
+const FIXTURE_BEARER = fixture("fakebearer");
+const FIXTURE_PASS = fixture("fakepass");
+const FIXTURE_SESSION = fixture("fakesession");
+const FIXTURE_COOKIE = fixture("sessfake");
 
 /** A fake MCP upstream: records what it received, answers JSON, SSE, a large body or an error on request. */
 function fakeUpstream(seen: Array<{ method?: string; url?: string; headers: http.IncomingHttpHeaders; body: string }>) {
@@ -20,7 +24,7 @@ function fakeUpstream(seen: Array<{ method?: string; url?: string; headers: http
       const body = Buffer.concat(chunks).toString("utf8");
       seen.push({ method: req.method, url: req.url, headers: req.headers, body });
       if (req.url?.startsWith("/sse")) {
-        res.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": SECRET_SESSION });
+        res.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": FIXTURE_SESSION });
         res.write(`event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n\n`);
         setTimeout(() => {
           res.write(`event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"ok":2}}\n\n`);
@@ -33,7 +37,7 @@ function fakeUpstream(seen: Array<{ method?: string; url?: string; headers: http
         res.end(JSON.stringify({ tools: "x".repeat(200_000) }));
         return;
       }
-      res.writeHead(200, { "content-type": "application/json", "set-cookie": `session=${SECRET_COOKIE}; Path=/` });
+      res.writeHead(200, { "content-type": "application/json", "set-cookie": `session=${FIXTURE_COOKIE}; Path=/` });
       res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { echo: body.length } }));
     });
   });
@@ -74,30 +78,30 @@ describe("createRecorder (H9): forwarding and redacted recording", () => {
   });
 
   it("forwards the request unchanged: path, Authorization and body reach the upstream", async () => {
-    const body = JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { arguments: { password: SECRET_PASS } } });
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { arguments: { password: FIXTURE_PASS } } });
     const res = await request(recPort, {
       method: "POST",
       path: "/fake/mcp?x=1",
-      headers: { "content-type": "application/json", authorization: `Bearer ${SECRET_BEARER}`, cookie: `session=${SECRET_COOKIE}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${FIXTURE_BEARER}`, cookie: `session=${FIXTURE_COOKIE}` },
     }, body);
     assert.equal(res.status, 200);
     const got = seen.at(-1);
     assert.equal(got?.url, "/mcp?x=1");
-    assert.equal(got?.headers.authorization, `Bearer ${SECRET_BEARER}`);
+    assert.equal(got?.headers.authorization, `Bearer ${FIXTURE_BEARER}`);
     assert.equal(got?.body, body);
     assert.equal(got?.headers["accept-encoding"], "identity", "upstream is asked for an uncompressed body");
   });
 
   it("returns the upstream's response to the client, including the set-cookie header", async () => {
     const res = await request(recPort, { method: "POST", path: "/fake/mcp", headers: { "content-type": "application/json" } }, "{}");
-    assert.equal(res.headers["set-cookie"]?.[0]?.includes(SECRET_COOKIE), true);
+    assert.equal(res.headers["set-cookie"]?.[0]?.includes(FIXTURE_COOKIE), true);
   });
 
   it("writes request and response records with credentials replaced", () => {
     const joined = lines.join("\n");
-    assert.equal(joined.includes(SECRET_BEARER), false, "bearer value written");
-    assert.equal(joined.includes(SECRET_PASS), false, "body password written");
-    assert.equal(joined.includes(SECRET_COOKIE), false, "cookie value written");
+    assert.equal(joined.includes(FIXTURE_BEARER), false, "bearer value written");
+    assert.equal(joined.includes(FIXTURE_PASS), false, "body password written");
+    assert.equal(joined.includes(FIXTURE_COOKIE), false, "cookie value written");
     const records = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
     const request = records.find((r) => r.kind === "request" && String(r.body).includes("tools/call"));
     assert.ok(request, "a request record for tools/call exists");
@@ -120,7 +124,7 @@ describe("createRecorder (H9): forwarding and redacted recording", () => {
     const bodyIndex = fresh.findIndex((r) => r.kind === "response_body");
     assert.ok(headIndex >= 0 && bodyIndex > headIndex, "response head is logged before the body");
     assert.match(String((fresh[headIndex]?.headers as Record<string, string>)["mcp-session-id"]), /^sha256:[0-9a-f]{8}$/);
-    assert.equal(lines.join("\n").includes(SECRET_SESSION), false, "session id written");
+    assert.equal(lines.join("\n").includes(FIXTURE_SESSION), false, "session id written");
   });
 
   it("clips a large response in the log but forwards every byte", async () => {
@@ -161,13 +165,13 @@ describe("createRecorder (H9): upstream down", () => {
     await new Promise<void>((r) => recorder.listen(0, "127.0.0.1", () => r()));
     const port = (recorder.address() as AddressInfo).port;
     try {
-      const res = await request(port, { method: "POST", path: "/down/mcp", headers: { authorization: `Bearer ${SECRET_BEARER}` } }, "{}");
+      const res = await request(port, { method: "POST", path: "/down/mcp", headers: { authorization: `Bearer ${FIXTURE_BEARER}` } }, "{}");
       assert.equal(res.status, 502);
       assert.equal(res.body, "upstream unavailable");
       const error = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((r) => r.kind === "error");
       assert.equal(error?.stage, "request");
       assert.equal(typeof error?.code, "string");
-      assert.equal(lines.join("\n").includes(SECRET_BEARER), false);
+      assert.equal(lines.join("\n").includes(FIXTURE_BEARER), false);
     } finally {
       await new Promise<void>((r) => recorder.close(() => r()));
     }
