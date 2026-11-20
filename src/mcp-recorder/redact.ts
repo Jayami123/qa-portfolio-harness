@@ -47,12 +47,19 @@ const TEXT_PATTERNS: Array<[RegExp, string]> = [
   [/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g, REDACTED],
   // Header-line form: "Cookie: a=b; c=d", "Authorization: ...".
   [/((?:set-)?cookie|authorization)(\s*[:=]\s*)[^\r\n]+/gi, `$1$2${REDACTED}`],
-  // Credential-like key followed by a value: JSON "password": "x", query token=abc, or password: x.
-  [
-    /(["']?[\w-]*(?:token|secret|passw(?:or)?d|api[-_]?key|credential|authorization|cookie)[\w-]*["']?\s*[:=]\s*)(?!\[REDACTED\])("(?:[^"\\]|\\.)*(?:"|$)|[^\s,&}\]"']+)/gi,
-    `$1"${REDACTED}"`,
-  ],
 ];
+
+/**
+ * A key followed by a value: JSON "password": "x", query token=abc, or password: x. The key is one word, and the test for a
+ * credential name is done in code (SENSITIVE_NAME). No regex here has two unbounded runs around a keyword, so matching
+ * stays linear in the input length (no polynomial backtracking).
+ */
+const KEY_VALUE = /(?<![\w-])(["']?)([\w-]+)(["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*(?:"|$)|[^\s,&}\]"']+)/g;
+
+function redactKeyValue(match: string, open: string, key: string, sep: string, value: string): string {
+  if (!SENSITIVE_NAME.test(key) || value.startsWith("[REDACTED")) return match;
+  return `${open}${key}${sep}"${REDACTED}"`;
+}
 
 /** Replaces credential-shaped text in any string (a path, a query, a log line, a body). */
 export function redactText(text: string): string {
@@ -60,7 +67,7 @@ export function redactText(text: string): string {
   for (const [pattern, replacement] of TEXT_PATTERNS) {
     out = out.replace(pattern, replacement);
   }
-  return out;
+  return out.replace(KEY_VALUE, redactKeyValue);
 }
 
 /** Replaces the value of every credential-like key in a parsed JSON value. Keys stay, so the shape stays readable. */

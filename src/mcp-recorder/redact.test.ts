@@ -75,6 +75,11 @@ describe("redactText", () => {
     const out = redactText(`{"password":"${FAKE.password.slice(0, 6)}`);
     assert.equal(out.includes(FAKE.password.slice(0, 6)), false);
   });
+  it("stays fast on long word runs (no quadratic backtracking)", () => {
+    const started = performance.now();
+    redactText("a".repeat(50_000) + "token" + " ".repeat(50_000) + "x");
+    assert.ok(performance.now() - started < 1000, "redaction took too long on a 100k input");
+  });
   it("leaves text without credentials unchanged", () => {
     const text = "tools/list returned 42 tools for the nc_webdav group";
     assert.equal(redactText(text), text);
