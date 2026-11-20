@@ -42,8 +42,8 @@ describe("waitForMailAccountsRoute", () => {
   it("times out with an error that names the route, the identity and the last status", async () => {
     const state = scriptFetch([404]);
     await assert.rejects(waitForMailAccountsRoute(BASE_URL, IDENTITY, 30, 1), (error: Error) => {
-      assert.match(error.message, new RegExp(MAIL_ACCOUNTS_ROUTE.replace(/[/]/g, "\\/")));
-      assert.match(error.message, /for qa-owner/);
+      assert.ok(error.message.includes(MAIL_ACCOUNTS_ROUTE));
+      assert.ok(error.message.includes("for qa-owner"));
       assert.match(error.message, /did not answer HTTP 200 within the budget \(last: HTTP 404\)/);
       return true;
     });
@@ -54,7 +54,7 @@ describe("waitForMailAccountsRoute", () => {
     const state = scriptFetch([401, 200]);
     await assert.rejects(waitForMailAccountsRoute(BASE_URL, IDENTITY, 5_000, 1), (error: Error) => {
       assert.match(error.message, /returned HTTP 401 \(not retried\)/);
-      assert.match(error.message, new RegExp(MAIL_ACCOUNTS_ROUTE.replace(/[/]/g, "\\/")));
+      assert.ok(error.message.includes(MAIL_ACCOUNTS_ROUTE));
       return true;
     });
     assert.equal(state.calls, 1);
