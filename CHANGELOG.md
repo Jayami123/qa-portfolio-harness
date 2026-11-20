@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## [0.6.9] - 2026-11-20
+## [0.6.10] - 2026-11-20
 
 LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7. Opt-in and off by default: `LIBRECHAT_MCP_OAUTH=1` (exact value). Unset, the written `librechat.yaml` and env file are byte-identical to 0.6.8 (unit tested).
 
@@ -11,7 +11,7 @@ LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-libre
 - Keycloak is not used. Twenty runs its own OAuth 2.1 authorization server, so no identity provider is needed. Nextcloud (OIDC mode), Mattermost (no dynamic registration), Outline and Penpot are not OAuth-capable here; recorded as limits in the plan.
 - `scripts/live/librechat-oauth.mjs` (the live H4 check) signs in through a headless browser: sign in to Twenty, give consent, let LibreChat's callback finish, then check that Twenty is connected and lists its tools. It prints names, states and counts only, scans its output for secret-shaped text, and writes `evidence/h4-live-check.txt` only when nothing matches.
 - Dispatch input `mcp_oauth` (off by default) in `p4-agent-hosts.yml` runs its own stack (twenty, litellm, librechat) and the live check. The job-level environment does not set the flag, so the other checks keep static auth.
-- Version 0.6.9.
+- Version 0.6.10.
 
 ## [0.6.8] - 2026-11-20
 

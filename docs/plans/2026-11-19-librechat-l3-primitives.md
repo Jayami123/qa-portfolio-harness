@@ -338,7 +338,7 @@ The same run also showed the kept-volume path: `up` deleted the previous run's a
 
 ## Session 7: H4, OAuth sign-in for LibreChat MCP connections
 
-Branch `feat/2026-11-20-l3-h4-oauth-mode`, from `origin/main` at `e796439` (v0.6.8). Release `v0.6.9`. Draft PR only. No merge, no tag.
+Branch `feat/2026-11-20-l3-h4-oauth-mode`, from `origin/main` at `e796439` (v0.6.8). Release `v0.6.10` (H9 took 0.6.9 in PR #77). Draft PR only. No merge, no tag.
 
 **Base note.** The request said "after the H9 release is tagged". No H9 release exists: H9 is not built (see H9 above) and `main`'s latest tag is `v0.6.8`. The branch is based on that latest `main`.
 

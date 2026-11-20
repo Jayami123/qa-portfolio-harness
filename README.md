@@ -529,7 +529,7 @@ Nextcloud mail (H1, v0.6.6, plan `docs/plans/2026-11-19-librechat-l3-primitives.
 
 `down nextcloud` always stops GreenMail. With the flag unset, nothing here runs.
 
-LibreChat OAuth sign-in for MCP servers (H4, v0.6.9, plan `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7). Off by default.
+LibreChat OAuth sign-in for MCP servers (H4, v0.6.10, plan `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7). Off by default.
 
 | | Option | Effect |
 |---|---|---|
