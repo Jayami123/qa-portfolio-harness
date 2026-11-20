@@ -38,6 +38,8 @@ import {
 } from "./librechat-seed.js";
 import { p4WaitBudgetMs } from "./p4-wait.js";
 import { waitForMcpServers } from "./librechat-mcp-wait.js";
+import { mcpWaitNames, withRegisteredClients } from "./librechat-oauth.js";
+import { registerOauthClients } from "./librechat-oauth-register.js";
 
 const POLL_MS = 2000;
 
@@ -123,7 +125,9 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     await ensureP4Network();
     const liteLlm = readLlmRunState("litellm", llmRunStateFile("litellm")); // throws P4_RUN_STATE_MISSING if LiteLLM is down
     const secrets = this.secrets(true);
-    const mcp = librechatMcpEnv(this.cfg.mcpProducts);
+    // H4: register the public OAuth clients first (the product must be up), then write their ids into the config.
+    const oauth = this.cfg.mcpOauth === null ? null : withRegisteredClients(this.cfg.mcpOauth, await registerOauthClients(this.cfg.mcpOauth));
+    const mcp = librechatMcpEnv(this.cfg.mcpProducts, undefined, undefined, oauth);
 
     const recording = this.cfg.mcpRecording;
     fs.writeFileSync(this.configFile(), librechatYaml({ models: this.cfg.models, servers: recording ? recordedServers(mcp.servers) : mcp.servers, toolApproval: this.cfg.toolApproval }), {
@@ -215,7 +219,9 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
    * prints every server's state and redacted diagnostics, then throws. The error names each state, never a value.
    */
   async waitMcpProofs(timeoutMs?: number): Promise<Record<string, number>> {
-    const names = [...this.cfg.mcpProducts];
+    // H4: OAuth products are not waited for (see mcpWaitNames). With none left, there is nothing to wait for.
+    const names = mcpWaitNames(this.cfg.mcpProducts, this.cfg.mcpOauth);
+    if (names.length === 0) return {};
     const token = await this.token();
     const get = async (path: string): Promise<unknown> => {
       const r = await fetch(`${this.cfg.baseUrl}${path}`, {

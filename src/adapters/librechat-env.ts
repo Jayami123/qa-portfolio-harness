@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { harnessComposeFile } from "../internal/compose.js";
 import { LITELLM_ALIASES, LITELLM_NIGHTLY_ALIAS, LITELLM_STUB_ALIAS, type P4LlmMode } from "./litellm-env.js";
 import { toolApprovalYamlLines, type LibreChatToolApproval } from "./librechat-approval.js";
+import { mcpOauthYamlLines, oauthAllowedHosts } from "./librechat-oauth.js";
 
 /** Pinned in docs/pins/p4.md. v0.8.9 is the newest stable tag (tag date 2026-11-17; checked by git tag and by pulling the tag, 2026-11-19). */
 export const LIBRECHAT_IMAGE =
@@ -29,6 +30,8 @@ export interface LibreChatMcpServer {
   url: string;
   /** Env var that holds the Authorization header value. null means no header (Penpot single-user). */
   authEnv: string | null;
+  /** H4: set only with LIBRECHAT_MCP_OAUTH=1 for an OAuth product. Absent means static auth (the default). */
+  oauth?: { authorizationUrl: string; tokenUrl: string; clientId: string; redirectUri: string; scope: string };
 }
 
 /**
@@ -64,6 +67,8 @@ export function librechatMcpServerFor(product: string): LibreChatMcpServer {
 export function allowedDomainsFor(servers: LibreChatMcpServer[]): string[] {
   const hosts = servers.map((s) => new URL(s.url).hostname);
   hosts.push(new URL(LIBRECHAT_LITELLM_BASE_URL).hostname);
+  // H4: the browser authorize host of an OAuth server (LibreChat validates every pinned OAuth URL against this list).
+  hosts.push(...oauthAllowedHosts(servers));
   return [...new Set(hosts)];
 }
 
@@ -103,17 +108,19 @@ export function librechatYaml(opts: { models: string[]; servers: LibreChatMcpSer
     // requiresOAuth: false skips LibreChat's OAuth auto-detection, which probes without the configured headers and marks a
     // server that publishes RFC 9728 metadata (or answers 401 with a Bearer challenge) as OAuth-only, so it never connects
     // with the Authorization header. Schema: packages/data-provider/src/mcp.ts:190; skip: MCPServerInspector.ts:122.
+    // H4 (LIBRECHAT_MCP_OAUTH=1) writes requiresOAuth: true for an OAuth product only; every other server is unchanged.
     lines.push(
       `  ${s.name}:`,
       "    type: streamable-http",
       `    url: ${s.url}`,
-      "    requiresOAuth: false",
+      `    requiresOAuth: ${s.oauth !== undefined ? "true" : "false"}`,
       "    initTimeout: 30000",
       "    timeout: 60000",
     );
     if (s.authEnv !== null) {
       lines.push("    headers:", `      Authorization: "\${${s.authEnv}}"`);
     }
+    lines.push(...mcpOauthYamlLines(s));
   }
   lines.push(
     "endpoints:",

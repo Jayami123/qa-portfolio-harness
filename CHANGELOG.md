@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [0.6.10] - 2026-11-20
+
+LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 8. Opt-in and off by default: `LIBRECHAT_MCP_OAUTH=1` (exact value). Unset, the written `librechat.yaml` and env file are byte-identical to 0.6.8 (unit tested).
+
+- H4 (P4): with `LIBRECHAT_MCP_OAUTH=1`, Twenty (the only OAuth-capable product) is written with `requiresOAuth: true`, no static Authorization header, and a pre-configured `oauth` block: the browser authorize URL, the token URL inside the network, the client id, the callback and the scope. The harness registers a public client with Twenty before LibreChat starts (RFC 7591, token auth `none`, PKCE S256). No client secret is requested, generated, written or printed. LibreChat stores the tokens it receives, encrypted, in MongoDB; the harness never reads them. The readiness wait leaves OAuth servers out, since they read disconnected until someone signs in.
+- Why pre-configured: LibreChat's discovered authorize URL is the in-network address (`http://twenty-server:3000/authorize`), which a browser cannot open. The pinned block fixes that, and LibreChat takes the pre-configured path only when the authorize URL, the token URL and the client id are all set.
+- Keycloak is not used. Twenty runs its own OAuth 2.1 authorization server, so no identity provider is needed. Nextcloud (OIDC mode), Mattermost (no dynamic registration), Outline and Penpot are not OAuth-capable here; recorded as limits in the plan.
+- `scripts/live/librechat-oauth.mjs` (the live H4 check) signs in through a headless browser: sign in to Twenty, give consent, let LibreChat's callback finish, then check that Twenty is connected and lists its tools. It prints names, states and counts only, scans its output for secret-shaped text, and writes `evidence/h4-live-check.txt` only when nothing matches.
+- Dispatch input `mcp_oauth` (off by default) in `p4-agent-hosts.yml` runs its own stack (twenty, litellm, librechat) and the live check. The job-level environment does not set the flag, so the other checks keep static auth.
+- Version 0.6.10.
 ## [0.6.9] - 2026-11-20
 
 MCP recording proxy (H9). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7. Off by default: with `LIBRECHAT_MCP_RECORDING` unset, the written `librechat.yaml`, the compose file list and the env file are as in 0.6.8 (unit tested).
