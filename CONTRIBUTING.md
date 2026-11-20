@@ -23,6 +23,13 @@ npm run check
 
 `npm run check` is typecheck, the unit tests (`npm test`, node:test over `src/**/*.test.ts`), and build.
 
+**`dist/` is committed.** It must match a fresh build of `src/`. After any change under `src/`, run `npm run build` and commit the updated `dist/` in the same PR. CI rebuilds from `src/` and fails if `dist/` differs (the `dist-freshness` job). Fix it with:
+
+```bash
+npm run build
+git add dist
+```
+
 When you change adapters or config loading, also run live smoke against a local product fork:
 
 ```bash
@@ -43,3 +50,5 @@ Paste the summary lines in your PR.
 ## CI
 
 Pull requests run workflow linting, `npm ci` (including `prepare` → `tsc`), typecheck, build, package contents checks, optional import smoke, `npm audit --audit-level=high`, PR title validation, and CodeQL.
+
+The `dist-freshness` job runs `npm ci`, then `npm run build`, then `git diff --exit-code -- dist/`, and also fails on untracked files under `dist/`. On failure it lists the files that differ and prints `run npm run build and commit dist/`. The build is deterministic (no timestamps or absolute paths in its output), so a clean checkout reproduces `dist/` byte for byte.
