@@ -17,6 +17,7 @@ import {
 } from "./greenmail-env.js";
 import { imapCreateMailbox } from "./greenmail-imap.js";
 import { openMcpSession } from "./mcp-call.js";
+import { p4WaitBudgetMs } from "./p4-wait.js";
 import {
   MAIL_APP_DIR,
   MAIL_APP_SHA256,
@@ -39,21 +40,58 @@ export function greenmailComposeOptions(): ComposeOptions {
   return { projectName: GREENMAIL_COMPOSE_PROJECT, files: greenmailComposeFiles(), cwd: HARNESS_DOCKER_DIR };
 }
 
-/** Polls an HTTP endpoint until it answers the expected status or the budget is spent. Never logs the URL's body. */
-async function waitForStatus(req: HttpRequest, status: number, budgetMs: number, label: string): Promise<void> {
+/**
+ * Polls an HTTP endpoint until it answers the expected status or the budget is spent. Never logs the URL's body.
+ * Without `retryOn`, every answer and every connection failure is polled (GreenMail startup). With `retryOn`, only those
+ * HTTP statuses are polled: any other answer, and any connection failure, throws at once.
+ */
+export async function waitForStatus(
+  req: HttpRequest,
+  status: number,
+  budgetMs: number,
+  label: string,
+  opts: { retryOn?: readonly number[]; pollMs?: number } = {},
+): Promise<void> {
   const deadline = Date.now() + budgetMs;
+  const pollMs = opts.pollMs ?? POLL_MS;
   let last = "no response";
   while (Date.now() < deadline) {
+    let code: number | undefined;
     try {
       const response = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(REQUEST_MS) });
-      if (response.status === status) return;
-      last = `HTTP ${response.status}`;
+      code = response.status;
     } catch {
+      if (opts.retryOn) throw new Error(`${label} request failed (not retried)`);
       last = "connection failed";
     }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    if (code !== undefined) {
+      if (code === status) return;
+      last = `HTTP ${code}`;
+      if (opts.retryOn && !opts.retryOn.includes(code)) throw new Error(`${label} returned HTTP ${code} (not retried)`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
   throw new Error(`${label} did not answer HTTP ${status} within the budget (last: ${last})`);
+}
+
+/** The Mail accounts route, as the path the error messages name. */
+export const MAIL_ACCOUNTS_ROUTE = "/index.php/apps/mail/api/accounts";
+
+/**
+ * Waits until the Mail accounts route answers 200 for this identity. Right after `occ app:enable mail` the route can answer
+ * 404 for a moment, so a 404 is polled and nothing else is. A 401 or 500 throws at once. Budget: `p4WaitBudgetMs()`.
+ */
+export async function waitForMailAccountsRoute(
+  baseUrl: string,
+  identity: Pick<MailIdentity, "uid" | "authorization">,
+  budgetMs: number = p4WaitBudgetMs(),
+  pollMs?: number,
+): Promise<void> {
+  const req = mailAccountsRequest(baseUrl, identity.authorization);
+  await waitForStatus(req, 200, budgetMs, `Mail accounts route ${MAIL_ACCOUNTS_ROUTE} for ${identity.uid}`, {
+    retryOn: [404],
+    pollMs,
+  });
 }
 
 /**
@@ -148,6 +186,7 @@ export async function configureMailIdentity(opts: {
   makePassword: () => string;
 }): Promise<void> {
   const { container, baseUrl, identity } = opts;
+  await waitForMailAccountsRoute(baseUrl, identity);
   const accountsReq = mailAccountsRequest(baseUrl, identity.authorization);
   const listed = await fetch(accountsReq.url, accountsReq.init);
   if (listed.status !== 200) throw new Error(`Mail accounts list for ${identity.uid} returned HTTP ${listed.status}`);
