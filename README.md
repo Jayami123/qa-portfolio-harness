@@ -529,6 +529,15 @@ Nextcloud mail (H1, v0.6.6, plan `docs/plans/2026-11-19-librechat-l3-primitives.
 
 `down nextcloud` always stops GreenMail. With the flag unset, nothing here runs.
 
+MCP recording proxy (H9, v0.6.9, plan `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7). Off by default.
+
+| | Option | Effect |
+|---|---|---|
+| H9 | `LIBRECHAT_MCP_RECORDING=1` (exactly 1) | Puts a recording proxy (`mcp-recorder`, port 9100, alias on `qa-harness-p4`) between LibreChat and each MCP server. Bytes pass through unchanged. The log is a redacted copy on the container's stdout: `docker logs qa-harness-librechat-mcp-recorder-1`. Credentials (Authorization, Cookie, tokens, secret-like keys) are written as `[REDACTED]`, and the MCP session id as a short digest. Unset: `librechat.yaml`, the compose file list and the env file are as in 0.6.8. |
+| H9 | `node scripts/live/mcp-recording.mjs` (with the flag) | Checks the recorder is healthy, each configured server's `initialize` was recorded with HTTP 200, no forwarding error, and no secret value in the log. A pass copies the redacted log to `evidence/mcp-recording.jsonl`. |
+
+The dispatch input `mcp_recording` of `p4-agent-hosts.yml` turns the flag on and runs the H9 check.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.

@@ -382,3 +382,40 @@ describe("H7 config: P4_SECOND_POSTS is off by default and needs P4_SECOND_IDENT
     }
   });
 });
+
+describe("H9 config: LIBRECHAT_MCP_RECORDING is off by default and validated", () => {
+  const KEYS_H9 = ["LIBRECHAT_MCP_RECORDING"];
+  const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {
+    const saved = new Map<string, string | undefined>();
+    for (const k of KEYS_H9) saved.set(k, process.env[k]);
+    try {
+      for (const k of KEYS_H9) delete process.env[k];
+      for (const [k, v] of Object.entries(env)) if (v !== undefined) process.env[k] = v;
+      resetConfigCache();
+      fn();
+    } finally {
+      for (const k of KEYS_H9) {
+        const prev = saved.get(k);
+        if (prev === undefined) delete process.env[k];
+        else process.env[k] = prev;
+      }
+      resetConfigCache();
+    }
+  };
+  it("is off when unset, and on only for exactly 1", () => {
+    withEnv({}, () => assert.equal(loadProductConfig("librechat").mcpRecording, false));
+    withEnv({ LIBRECHAT_MCP_RECORDING: "1" }, () => assert.equal(loadProductConfig("librechat").mcpRecording, true));
+  });
+  it("rejects another value without echoing it", () => {
+    withEnv({ LIBRECHAT_MCP_RECORDING: "zz-recording" }, () =>
+      assert.throws(
+        () => loadProductConfig("librechat"),
+        (error: Error) => {
+          assert.match(error.message, /LIBRECHAT_MCP_RECORDING_INVALID/);
+          assert.equal(error.message.includes("zz-recording"), false);
+          return true;
+        },
+      ),
+    );
+  });
+});

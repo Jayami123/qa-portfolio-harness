@@ -29,6 +29,7 @@ import {
   parseToolApprovalMode,
   parseToolApprovalRules,
 } from "./adapters/librechat-approval.js";
+import { parseMcpRecordingFlag } from "./adapters/librechat-recording.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
@@ -174,6 +175,8 @@ const envSchema = z.object({
   LIBRECHAT_TOOL_APPROVAL_ASK: z.string().trim().default(""),
   /** Offer "Always allow" (toolApproval.allowAlways). Exactly 1 turns it on; needs LIBRECHAT_TOOL_APPROVAL=1. */
   LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: z.string().trim().default(""),
+  /** H9: MCP recording proxy between LibreChat and each MCP server. Off unless LIBRECHAT_MCP_RECORDING=1. */
+  LIBRECHAT_MCP_RECORDING: z.string().trim().default(""),
   OPENCLAW_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:18789"),
   // Opt-in, exact value "1": enables the gateway's POST /v1/responses endpoint so runTask() works. Unset changes nothing.
   OPENCLAW_RESPONSES_API: z.string().trim().default(""),
@@ -281,6 +284,8 @@ export interface LibreChatConfig extends ProductConfig {
   models: string[];
   /** H3: the endpoints.agents.toolApproval policy, or null (off, the default). */
   toolApproval: LibreChatToolApproval | null;
+  /** H9: true routes each MCP server through the recording proxy (LIBRECHAT_MCP_RECORDING=1). Off by default. */
+  mcpRecording: boolean;
 }
 
 export interface OpenClawConfig extends ProductConfig {
@@ -477,6 +482,7 @@ function buildLibreChatConfig(parsed: ParsedEnv): LibreChatConfig {
       .filter((s) => s !== ""),
     models: resolveLibreChatModels(parsed.LIBRECHAT_MODELS, parseP4LlmMode(parsed.P4_LLM_MODE)),
     toolApproval: buildLibreChatToolApproval(parsed),
+    mcpRecording: parseMcpRecordingFlag(parsed.LIBRECHAT_MCP_RECORDING),
   };
 }
 

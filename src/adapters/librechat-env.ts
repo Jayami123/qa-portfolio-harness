@@ -141,8 +141,14 @@ export function librechatEnvText(values: Record<string, string>): string {
     .join("\n")}\n`;
 }
 
-export function librechatComposeFiles(): string[] {
-  return [harnessComposeFile("librechat.compose.yml")];
+/**
+ * The compose files for LibreChat. With recording on (H9), the override file adds the mcp-recorder service and makes the
+ * app wait for it. With recording off the list is exactly the one file it was before H9.
+ */
+export function librechatComposeFiles(recording = false): string[] {
+  const files = [harnessComposeFile("librechat.compose.yml")];
+  if (recording) files.push(harnessComposeFile("librechat.recording.compose.yml"));
+  return files;
 }
 
 /** Per-run secrets. Hex lengths match LibreChat's CREDS_KEY (32 bytes) and CREDS_IV (16 bytes). */

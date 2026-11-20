@@ -22,6 +22,7 @@ const COMPOSE_FILES = [
   "docker/mattermost.compose.yml",
   "docker/litellm.compose.yml",
   "docker/librechat.compose.yml",
+  "docker/librechat.recording.compose.yml",
   "docker/openclaw.compose.yml",
 ];
 const DOCKERFILE = "docker/mattermost-mcp.Dockerfile";

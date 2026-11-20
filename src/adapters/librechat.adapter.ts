@@ -5,11 +5,13 @@ import type { LibreChatConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
 import { ensureP4Network } from "../internal/p4-network.js";
 import { runCapture } from "../internal/run.js";
-import { HARNESS_DOCKER_DIR } from "../paths.js";
+import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
 import { llmRunStateFile, readLlmRunState } from "./llm-run-state.js";
+import type { LibreChatMcpServer } from "./librechat-env.js";
+import { MCP_RECORDER_ALIAS, recordedServers, recorderRoutes } from "./librechat-recording.js";
 import {
   LIBRECHAT_COMPOSE_PROJECT,
   LIBRECHAT_OWNER_EMAIL,
@@ -85,17 +87,34 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     return made;
   }
 
-  private composeOpts(mongoPassword: string): ComposeOptions {
+  /**
+   * The compose options. With recording on (H9), `recordedFrom` is the unrecorded server list: it sets the route list and
+   * the mounts for the recorder, and adds its compose file. Without it, the call is the same as before H9.
+   */
+  private composeOpts(mongoPassword: string, recordedFrom: LibreChatMcpServer[] | null = null): ComposeOptions {
     return {
       projectName: LIBRECHAT_COMPOSE_PROJECT,
-      files: librechatComposeFiles(),
+      files: librechatComposeFiles(recordedFrom !== null),
       cwd: HARNESS_DOCKER_DIR,
       env: {
         ...process.env,
         LIBRECHAT_ENV_FILE: this.envFile(),
         LIBRECHAT_CONFIG_FILE: this.configFile(),
         LIBRECHAT_MONGO_PASSWORD: mongoPassword,
+        ...(recordedFrom === null ? {} : this.recorderEnv(recordedFrom)),
       },
+    };
+  }
+
+  /** The recorder mounts the compiled dist folder, so a build must exist. Names the step to run if it does not. */
+  private recorderEnv(servers: LibreChatMcpServer[]): Record<string, string> {
+    if (!fs.existsSync(path.join(HARNESS_ROOT, "dist", "mcp-recorder", "main.js"))) {
+      throw new Error("MCP_RECORDER_NOT_BUILT: dist/mcp-recorder/main.js is missing. Run npm run build, then up again.");
+    }
+    return {
+      MCP_RECORDER_ROUTES: recorderRoutes(servers),
+      MCP_RECORDER_DIST: path.join(HARNESS_ROOT, "dist").replaceAll("\\", "/"),
+      MCP_RECORDER_PACKAGE_JSON: path.join(HARNESS_ROOT, "package.json").replaceAll("\\", "/"),
     };
   }
 
@@ -106,7 +125,8 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     const secrets = this.secrets(true);
     const mcp = librechatMcpEnv(this.cfg.mcpProducts);
 
-    fs.writeFileSync(this.configFile(), librechatYaml({ models: this.cfg.models, servers: mcp.servers, toolApproval: this.cfg.toolApproval }), {
+    const recording = this.cfg.mcpRecording;
+    fs.writeFileSync(this.configFile(), librechatYaml({ models: this.cfg.models, servers: recording ? recordedServers(mcp.servers) : mcp.servers, toolApproval: this.cfg.toolApproval }), {
       encoding: "utf8",
       mode: 0o644,
     });
@@ -126,13 +146,16 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     fs.writeFileSync(this.envFile(), librechatEnvText(values), { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(this.envFile(), 0o600);
 
-    await composeUp(this.composeOpts(secrets.mongoPassword), { wait: true });
+    await composeUp(this.composeOpts(secrets.mongoPassword, recording ? mcp.servers : null), { wait: true });
     await this.waitHealthy();
     await this.seed();
     await this.waitMcpProofs();
     console.log(
       `LibreChat is up: ${this.cfg.baseUrl}. MCP servers: ${mcp.servers.map((s) => s.name).join(", ")}. The owner password and the MCP values are in ${this.secretsFile()} and ${this.envFile()} (mode 0600) and are not printed.`,
     );
+    if (recording) {
+      console.log(`MCP recording is on (LIBRECHAT_MCP_RECORDING=1). Each MCP call is logged, redacted, to the container log: docker logs qa-harness-librechat-mcp-recorder-1 (service ${MCP_RECORDER_ALIAS}).`);
+    }
   }
 
   /** Removes containers only. It never creates secrets. */
