@@ -68,7 +68,7 @@ The `mcpServers` object is parsed by `MCPOptionsSchema`. The image does not stat
 
 ## H9: recording proxy
 
-- **Status: not built in this pass.** Optional in the L3 plan ("optional until D5 PR"). Not attempted.
+- **Status: built in session 7 (v0.6.9), opt-in with `LIBRECHAT_MCP_RECORDING=1`.** See "Session 7" at the end of this file.
 
 ## Findings
 
@@ -335,3 +335,136 @@ The same run also showed the kept-volume path: `up` deleted the previous run's a
 ### Still open
 
 - H3, H4, H9: unchanged. H2, H6 and H7 are on `main` and ship in 0.6.6 (see CHANGELOG).
+
+---
+
+## Session 7: H9, the MCP recording proxy (v0.6.9)
+
+This section is a guide. A new engineer should be able to repeat every step from it. Commands run from the repository root.
+
+Branch: `feat/2026-11-20-l3-h9-recording-proxy`, from `origin/main` at `e796439` (v0.6.8). One release, `v0.6.9`. Draft PR only. No merge, no tag.
+
+### 1. What H9 is, in one paragraph
+
+H9 is an optional recording proxy. It sits between LibreChat and each MCP server, forwards every byte unchanged, and writes a copy of each request and response to a log. The copy is redacted: credentials never reach the log. It is off by default. With the switch off, every file the harness writes is the same as in 0.6.8.
+
+### 2. What the L3 cases need (the probe, part A)
+
+Question: which L3 cases need H9, and what must they observe?
+
+- **What the repo says.** The L3 plan marks H9 as optional ("optional until D5 PR"). It names no case IDs.
+- **What this session could read.** The suite's own L3 plan (`docs/plans/2026-11-18-l3.md` in `Jayami123/ai-agent-mcp-eval-suite`) is in another repository. This session may not read other repositories, so the case list is **not confirmed here**. Treat it as an open question for the owner (see section 9).
+- **What H9 must observe, from the harness side.** For each MCP server LibreChat uses: every JSON-RPC request (method, tool name, arguments, with credentials removed), the response status, the response body (for a long stream, its head at once and its body when it closes), and the session handshake (`initialize`, `notifications/initialized`, `ping`, the event stream, `tools/list`, `DELETE`).
+
+### 3. The live probe (part B): what the wire looks like
+
+Run against the stack on this container (Nextcloud 35, its MCP 0.213.2, LiteLLM stub mode, LibreChat v0.8.9). The probe script is not committed. Its results are below, with every credential read from the run-state file and never printed.
+
+**B1. The Nextcloud MCP, called directly (no recorder).**
+
+| Step | Result |
+|---|---|
+| `initialize` | HTTP 200, `content-type: text/event-stream`, a `mcp-session-id` header, body `event: message` then `data: {...}` |
+| `notifications/initialized` | HTTP 202, empty body |
+| `tools/list` | HTTP 200, `text/event-stream`, **272,783 bytes** |
+
+So MCP answers are server-sent events, not plain JSON. The recorder must read SSE bodies line by line, and must clip large bodies.
+
+**B2. LibreChat's own traffic, through the recorder (flag on).**
+
+`docker logs qa-harness-librechat-mcp-recorder-1` on the first run, after LibreChat started:
+
+| Order | Method | Headers of note | Notes |
+|---|---|---|---|
+| 1 | `POST /mcp` `initialize` | `user-agent: undici`, `accept: application/json, text/event-stream` | no session id yet |
+| 2 | `POST /mcp` `notifications/initialized` | `mcp-session-id` | |
+| 3 | `POST /mcp` `ping` | `mcp-session-id` | |
+| 4 | `GET /mcp` | `accept: text/event-stream` | **long-lived**: its response only ends when the session closes |
+| 5, 6 | `POST /mcp` `tools/list` | `mcp-session-id` | twice per connection |
+| 7 | `DELETE /mcp` | `accept: */*` | closes the session |
+
+The first run wrote 12 requests and 11 responses. The eleventh response was missing because the `GET` stream had not ended. That is why the recorder now writes the response head on arrival (section 5).
+
+**B3. The config LibreChat received.** Diffing `librechat.yaml` with the flag off and on shows exactly two changed lines: the allowed domain `nextcloud-mcp` becomes `mcp-recorder`, and the URL becomes `http://mcp-recorder:9100/nextcloud/mcp`. Nothing else moves. Its `Authorization` header is still sent by LibreChat, and the recorder redacts it.
+
+**B4. The leak check on real traffic.**
+- Nextcloud direct, through the recorder: 2 secret values checked, 0 found in the log.
+- LibreChat's recording: 11 secret values from the env file and the secrets file checked, 0 found. Every `authorization`, `cookie` and `set-cookie` header in the log reads `[REDACTED]`.
+
+### 4. Choosing the proxy (justification)
+
+The task allowed either a pinned, established proxy image or a small in-repo proxy. I chose **the small in-repo proxy**, for these reasons:
+
+1. **Redaction is the risky part, and it has to be tested.** The redaction code lives in `src/mcp-recorder/redact.ts`, in TypeScript, and runs under the same `npm test` that guards the rest of the harness. A third-party image would need its redaction rules written in another language and tested apart from this repo.
+2. **Streaming must be right.** MCP answers with server-sent events, and the `GET` stream never ends. The proxy pipes bytes as they arrive. A buffering proxy would hold them back.
+3. **No new third-party image to license-check.** The `GreenMail` licence was left UNVERIFIED in an earlier session. Avoiding a new image avoids a new unverified licence.
+
+The industry tool for recording HTTP traffic is **mitmproxy**. It is a fine choice when you need TLS interception, which this harness does not need, since its MCP servers answer plain HTTP on the private network. A mitmproxy addon would also need its own pinned image, a Python test runner, and a second redaction implementation.
+
+The recorder runs as `node:22-alpine`, pinned by digest (`docs/pins/p4.md`). The `.nvmrc` pins Node 22, so the runtime matches. The recorder's code is the compiled `dist/mcp-recorder` folder, mounted read-only. No secret is passed to the recorder container.
+
+### 5. What was built
+
+| File | What it does |
+|---|---|
+| `src/mcp-recorder/redact.ts` | Redaction (no imports). Headers, text, JSON, SSE data lines, and `countLeakedValues` for the leak checks. |
+| `src/mcp-recorder/routes.ts` | Parses `MCP_RECORDER_ROUTES` (`name=origin`). Refuses credentials, paths, queries and non-http schemes, and never prints a URL. Matches `/<name>/...`. |
+| `src/mcp-recorder/proxy.ts` | The reverse proxy. Forwards bytes unchanged. It asks the upstream for `accept-encoding: identity`, so bodies are plain text the redaction can read; logs `request`, then `response` (head on arrival), then `response_body` (on end). Bodies are clipped at 64 KiB, dropping the last 512 bytes of a clipped body. Requests over 4 MiB get 413. |
+| `src/mcp-recorder/main.ts` | Container entry. Stdout gets one JSON line per record; stderr gets the start message. |
+| `docker/librechat.recording.compose.yml` | Override file: the `mcp-recorder` service (read-only, no capabilities, healthcheck) and `app` waits for it. Included only with the flag on. |
+| `src/adapters/librechat-recording.ts` | The flag (`1` or unset), `recordedServers` (URL rewrite), `recorderRoutes`. |
+| `src/adapters/librechat-env.ts` | `librechatComposeFiles(recording = false)`. The default returns the same single file as before. |
+| `src/adapters/librechat.adapter.ts` | Writes the recorded URLs and adds the override file only with the flag on. Fails with `MCP_RECORDER_NOT_BUILT` if `dist/` is missing. |
+| `src/config.ts` | `LIBRECHAT_MCP_RECORDING`, default off, `mcpRecording` on the LibreChat config. |
+| `scripts/live/mcp-recording.mjs` | The live H9 check. Reads `docker logs`, checks health, handshakes, no forwarding errors, redacted headers and the leak check. A pass copies the redacted log to `evidence/`. |
+| `.github/workflows/p4-agent-hosts.yml` | Dispatch input `mcp_recording` (off by default). Sets the flag for the whole job; runs its own H9 stack, the check, and uploads the evidence. |
+| `docs/pins/p4.md`, `src/adapters/p4-pins.test.ts` | The Node image pin and the new compose file in the pins test. |
+
+### 6. How to run it (for a new engineer)
+
+```bash
+export PATH="/usr/local/bin:$PATH"
+npm ci
+npm run build                      # the recorder mounts dist/; the adapter refuses to start without it
+LIBRECHAT_MCP_RECORDING=1 LIBRECHAT_MCP_PRODUCTS=nextcloud npm run up -- nextcloud
+LIBRECHAT_MCP_RECORDING=1 LIBRECHAT_MCP_PRODUCTS=nextcloud npm run up -- litellm
+LIBRECHAT_MCP_RECORDING=1 LIBRECHAT_MCP_PRODUCTS=nextcloud npm run up -- librechat
+LIBRECHAT_MCP_PRODUCTS=nextcloud node scripts/live/mcp-recording.mjs
+npm run down -- librechat
+npm run down -- litellm
+npm run down -- nextcloud
+docker ps --filter name=qa-harness --format '{{.Names}}'   # must print nothing
+```
+
+Read the raw log with `docker logs qa-harness-librechat-mcp-recorder-1`. Every line is JSON. Credentials show as `[REDACTED]`.
+
+### 7. Checks that prove it
+
+- **Unit tests** (`npm test`): redaction of every credential form (headers, Bearer, Basic, JWT, cookies, query tokens, JSON and SSE keys, unterminated quotes); a leak check over a recording built from fake secrets planted everywhere; route parsing and refusals (credentials are never printed); the proxy against a real local upstream (forwarding unchanged, SSE streamed and logged head-first, large bodies clipped, 404, 413, 502 with a code only); the flag, the recorded URLs, and the default-off compose file list; the config default.
+- **Default off** (`librechat-recording.test.ts`, `config-p4.test.ts`): with the flag unset, the compose list is the single file and the config flag is `false`.
+- **Live** (section 3 and section 8): the flag-off YAML was saved before the change and compared after it (section 8).
+
+### 8. Results (local, 2026-11-20, this container, final code)
+
+Commands are those in section 6, with `LIBRECHAT_MCP_PRODUCTS=nextcloud`.
+
+| Check | Result |
+|---|---|
+| `npm run build` | exit 0 |
+| `npm run check` (typecheck, tests, build) | exit 0. `# tests 946, # pass 945, # fail 0, # skipped 1` (the skip was there before this session) |
+| Flag off: `librechat.yaml` against the 0.6.8 baseline saved before the change | **identical** (`diff` empty) |
+| Flag off: recorder container after `up` | none. A recorder left from an earlier flag-on run is removed by `down` (orphan removal) |
+| Flag on: `scripts/live/mcp-recording.mjs` | passed. Recorder healthy; 12 requests and 12 responses; `initialize` answered 200 for `nextcloud`; 0 forwarding errors; every credential header `[REDACTED]`; leak check 11 values, 0 found |
+| `down` for librechat, litellm, nextcloud | exit 0 each. `docker ps -a --filter name=qa-harness` lists nothing |
+
+The live probe that came before the code (section 3) and the Nextcloud direct probe through the recorder (section 3, B1) were run on this container too. Earlier rounds of the check printed one response fewer than requests, because the long `GET` stream had not ended; the response head is now logged on arrival, which fixed that.
+
+CI dispatch result: see section 10.
+
+### 9. Limits, deviations and open points
+
+- **The L3 case list is not confirmed.** This session cannot read `ai-agent-mcp-eval-suite`. The owner needs to name which cases use H9.
+- **Streams are logged head-first.** A long `GET` stream's body is written only when the stream closes. A stream still open at `down` is not fully logged.
+- **Clipping.** A body over 64 KiB is logged as a prefix (its last 512 bytes dropped). The clip is marked `bodyTruncated: true`. A credential is still never written, but a prefix of a large body is all that is recorded.
+- **Redaction is pattern-based.** It covers the forms listed in section 7. A credential with a new shape and no key name, sent in a plain-text body, would not be caught. The live leak check covers the values this run holds.
+- **Not built:** TLS interception, recording to a file, and recording the Penpot, Outline, Twenty and Mattermost servers. The recorder takes any route, but only the Nextcloud server was run live here.

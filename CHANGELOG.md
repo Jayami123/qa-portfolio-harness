@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.6.9] - 2026-11-20
+
+MCP recording proxy (H9). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7. Off by default: with `LIBRECHAT_MCP_RECORDING` unset, the written `librechat.yaml`, the compose file list and the env file are as in 0.6.8 (unit tested).
+
+- H9: `LIBRECHAT_MCP_RECORDING=1` (exactly 1) puts a recording proxy (`mcp-recorder`, port 9100, on `qa-harness-p4`) between LibreChat and each MCP server. The proxy forwards bytes unchanged and writes a redacted JSON line per request and response to its stdout (`docker logs qa-harness-librechat-mcp-recorder-1`). Authorization, Cookie, token and secret-like values are written as `[REDACTED]`; the MCP session id as a short digest. Source: `src/mcp-recorder/`, an in-repo proxy run from the compiled `dist/`. Image: `node:22-alpine`, pinned by digest in `docs/pins/p4.md`.
+- Config: `LIBRECHAT_MCP_RECORDING` is validated (any other value throws without echoing it). The adapter refuses to start with the flag on if `dist/mcp-recorder` is missing (`MCP_RECORDER_NOT_BUILT`).
+- Live check: `scripts/live/mcp-recording.mjs` reads the recorder's log and asserts the recorder is healthy, each configured server's `initialize` was recorded with HTTP 200, no forwarding error, every credential header is `[REDACTED]`, and no secret value from the env file or the secrets file is in the log. A pass copies the redacted log to `evidence/mcp-recording.jsonl`.
+- Dispatch input `mcp_recording` (off by default) on `p4-agent-hosts.yml` sets the flag for the job and runs the H9 check on its own stack.
+- Tests: redaction and leak checks, route parsing and refusals, the proxy against a real local upstream (forwarding unchanged, SSE streamed, large bodies clipped, error codes only), the flag, and the default-off output.
+- Version 0.6.9. Plan and evidence: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7.
+
 ## [0.6.8] - 2026-11-20
 
 - Nextcloud Mail seed: `configureMailIdentity` waits for `GET /index.php/apps/mail/api/accounts` to answer 200 before it lists accounts. Right after `occ app:enable mail` the route can answer 404 for a moment, which failed the P4 mail run with `Mail accounts list for qa-owner returned HTTP 404`. Only 404 is polled, on the same budget as the other P4 waits (`p4WaitBudgetMs()`). Any other answer (401, 500) and any connection failure throws at once, and a timeout names the route, the identity and the last status. No fixed sleep.
