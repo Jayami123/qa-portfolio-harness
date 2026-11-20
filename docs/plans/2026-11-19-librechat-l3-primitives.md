@@ -468,3 +468,15 @@ CI dispatch result: see section 10.
 - **Clipping.** A body over 64 KiB is logged as a prefix (its last 512 bytes dropped). The clip is marked `bodyTruncated: true`. A credential is still never written, but a prefix of a large body is all that is recorded.
 - **Redaction is pattern-based.** It covers the forms listed in section 7. A credential with a new shape and no key name, sent in a plain-text body, would not be caught. The live leak check covers the values this run holds.
 - **Not built:** TLS interception, recording to a file, and recording the Penpot, Outline, Twenty and Mattermost servers. The recorder takes any route, but only the Nextcloud server was run live here.
+
+---
+
+## Session 7 addendum: CI dispatch with the H9 flag on
+
+- Workflow: `P4 agent hosts` (`p4-agent-hosts.yml`), dispatched on `feat/2026-11-20-l3-h9-recording-proxy` with `mcp_recording=true`.
+- Run ID: **44692829305** (run number 60). Commit `788383c`. Result: **success**.
+- Full-set job (`agent hosts and five products, readiness, bind check and RAM`): success. The probe started and stopped every product with the flag on.
+- H9 steps, in order: `H9 stack up (mcp_recording only)` success; `Live H9 check (mcp_recording only)` success; `H9 stack down (mcp_recording only)` success; `Upload H9 evidence (mcp_recording only)` success. The H2, H1, H6 and H3 steps were skipped, as the inputs require.
+- Evidence artifact: `h9-mcp-recording` (id 14610595586, 34 KB, expires 2026-12-20). It holds `evidence/h9-live-check.txt` and the redacted `evidence/mcp-recording.jsonl`. The RAM artifact `ram-probe-full` was also uploaded.
+- The `pull_request` run on the same commit (run 59) also succeeded, with default inputs.
+- Later on the same branch: commit `51c7508` made the key-value redaction linear, after CodeQL reported one high alert on `788383c`. That commit was not dispatched; see the CodeQL result on PR 77 for its status.
