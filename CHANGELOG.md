@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.6.11] - 2026-11-20
+
+CI check that committed `dist/` matches a fresh build of `src/`. No runtime code change.
+
+- `dist/` is now tracked in git. It was ignored before, so nothing committed could be compared with a build. A clean rebuild produces byte-identical output.
+- New CI job `dist-freshness` (`.github/workflows/ci.yml`): `npm ci`, `npm run build`, then `git diff --exit-code -- dist/` and a check for untracked files under `dist/`. On failure it prints the changed files and the fix hint: run `npm run build` and commit `dist/`.
+- CONTRIBUTING.md documents the check.
+- Version 0.6.11 (next after `v0.6.10`).
+
 ## [0.6.10] - 2026-11-20
 
 LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 8. Opt-in and off by default: `LIBRECHAT_MCP_OAUTH=1` (exact value). Unset, the written `librechat.yaml` and env file are byte-identical to 0.6.8 (unit tested).
