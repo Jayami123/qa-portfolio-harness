@@ -529,6 +529,15 @@ Nextcloud mail (H1, v0.6.6, plan `docs/plans/2026-11-19-librechat-l3-primitives.
 
 `down nextcloud` always stops GreenMail. With the flag unset, nothing here runs.
 
+LibreChat OAuth sign-in for MCP servers (H4, v0.6.9, plan `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7). Off by default.
+
+| | Option | Effect |
+|---|---|---|
+| H4 | `LIBRECHAT_MCP_OAUTH=1` (exactly 1; needs `twenty` in `LIBRECHAT_MCP_PRODUCTS`) | Twenty's MCP connection uses its own OAuth authorization server: `requiresOAuth: true`, no static header, a pinned `oauth` block with the browser authorize URL (`TWENTY_BASE_URL` + `/authorize`). The harness registers a public client (no secret) before LibreChat starts. The owner signs in in the browser once per conversation-independent connection. |
+| H4 | `node scripts/live/librechat-oauth.mjs` (with `LIBRECHAT_MCP_OAUTH=1`) | Signs in to Twenty through LibreChat in a headless browser and checks the connection and tool list. Writes `evidence/h4-live-check.txt` on success. |
+
+Unset, the written `librechat.yaml` and env file are unchanged. Nextcloud, Mattermost, Outline and Penpot are not OAuth in this build (recorded as limits in the plan).
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Jayami Hettigoda. Not published to npm; consumers install from Git tags.
