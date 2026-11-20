@@ -9,6 +9,7 @@ import {
   librechatMcpServerFor,
   type LibreChatMcpServer,
 } from "./librechat-env.js";
+import { applyMcpOauth, type LibreChatMcpOauth } from "./librechat-oauth.js";
 
 /** The Mongo URI for the app. The password is percent-encoded and authSource is the root database (see the compose file). */
 export function librechatMongoUri(password: string): string {
@@ -44,11 +45,13 @@ export function librechatMcpEnv(
   products: string[],
   readCreds: (product: string, file: string) => { mcpAuthorization: string | null } = readP4McpCredentials,
   stateFile: (product: string) => string = p4RunStateFile,
+  oauth: LibreChatMcpOauth | null = null,
 ): { servers: LibreChatMcpServer[]; env: Record<string, string> } {
   const servers: LibreChatMcpServer[] = [];
   const env: Record<string, string> = {};
   for (const product of products) {
-    const server = librechatMcpServerFor(product);
+    // H4: an OAuth product takes no static header, so its credential is neither read nor written to the env file.
+    const server = applyMcpOauth(librechatMcpServerFor(product), product, oauth);
     servers.push(server);
     if (server.authEnv !== null) {
       const creds = readCreds(product, stateFile(product));
