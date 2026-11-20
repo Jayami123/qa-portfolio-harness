@@ -19,6 +19,10 @@ on:
         description: "Turn on P4_SECOND_IDENTITY=1 (H2, all five servers), P4_SECOND_POSTS=1 (H7, Mattermost posts from the second user) and P4_MAIL=1 (H1, GreenMail and the Nextcloud Mail app for both users)"
         type: boolean
         default: false
+      mcp_oauth:
+        description: "Turn on LIBRECHAT_MCP_OAUTH=1 (H4): Twenty signs in through its own OAuth authorization server, and the live H4 check drives the browser sign-in. Runs its own stack (twenty, litellm, librechat)"
+        type: boolean
+        default: false
   pull_request:
     paths:
       - "src/adapters/litellm*"
@@ -37,6 +41,7 @@ on:
       - "src/adapters/greenmail*"
       - "src/adapters/nextcloud-mail*"
       - "src/adapters/mcp-call*"
+      - "scripts/live/librechat-oauth.mjs"
       - "docker/outline*"
       - "docker/penpot*"
       - "docker/mattermost*"
@@ -113,8 +118,8 @@ jobs:
           npm run build
 
       # H6 only: the Chromium that scripts/penpot-plugin-tabs.mjs drives. The version is the playwright package's (pinned).
-      - name: Install the pinned Playwright Chromium (second_identity only)
-        if: inputs.second_identity
+      - name: Install the pinned Playwright Chromium (second_identity or mcp_oauth)
+        if: inputs.second_identity || inputs.mcp_oauth
         run: |
           set -euo pipefail
           npx playwright install --with-deps chromium
@@ -171,6 +176,47 @@ jobs:
       - name: Stop the H3 approval fixture
         if: always() && inputs.tool_approval
         run: pkill -f scripts/live/approval-stub.mjs || true
+
+      # H4 (mcp_oauth only). Its own stack: twenty (TWENTY_MCP=1 from the job), litellm, then librechat with twenty as the only
+      # MCP server and LIBRECHAT_MCP_OAUTH=1. The live check signs in through a headless browser. The job-level environment
+      # does not set LIBRECHAT_MCP_OAUTH, so the probe above and the H2 and H3 checks keep static auth.
+      - name: "H4 stack up (mcp_oauth only): twenty, litellm, librechat with OAuth for twenty"
+        if: inputs.mcp_oauth
+        env:
+          LIBRECHAT_MCP_PRODUCTS: twenty
+          LIBRECHAT_MCP_OAUTH: "1"
+        run: |
+          set -euo pipefail
+          npm run up -- twenty
+          npm run up -- litellm
+          npm run up -- librechat
+
+      - name: "Live H4 check (mcp_oauth only): browser sign-in to Twenty through LibreChat"
+        if: inputs.mcp_oauth
+        env:
+          LIBRECHAT_MCP_PRODUCTS: twenty
+          LIBRECHAT_MCP_OAUTH: "1"
+        run: |
+          set -euo pipefail
+          node scripts/live/librechat-oauth.mjs "$PWD"
+
+      - name: "H4 stack down (mcp_oauth only)"
+        if: always() && inputs.mcp_oauth
+        env:
+          LIBRECHAT_MCP_PRODUCTS: twenty
+        run: |
+          npm run down -- librechat || true
+          npm run down -- litellm || true
+          npm run down -- twenty || true
+
+      - name: Upload H4 evidence (mcp_oauth only)
+        if: always() && inputs.mcp_oauth
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: h4-live-check
+          path: evidence/h4-live-check.txt
+          if-no-files-found: warn
+          retention-days: 30
 
       # H2 (second_identity only). The probe above stops every product it started, so the H2 check gets its own stack for
       # the five MCP products. P4_SECOND_IDENTITY=1 is set at job level; each adapter then seeds its second identity.
