@@ -4,7 +4,7 @@
 
 ## [0.6.10] - 2026-11-20
 
-LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7. Opt-in and off by default: `LIBRECHAT_MCP_OAUTH=1` (exact value). Unset, the written `librechat.yaml` and env file are byte-identical to 0.6.8 (unit tested).
+LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 8. Opt-in and off by default: `LIBRECHAT_MCP_OAUTH=1` (exact value). Unset, the written `librechat.yaml` and env file are byte-identical to 0.6.8 (unit tested).
 
 - H4 (P4): with `LIBRECHAT_MCP_OAUTH=1`, Twenty (the only OAuth-capable product) is written with `requiresOAuth: true`, no static Authorization header, and a pre-configured `oauth` block: the browser authorize URL, the token URL inside the network, the client id, the callback and the scope. The harness registers a public client with Twenty before LibreChat starts (RFC 7591, token auth `none`, PKCE S256). No client secret is requested, generated, written or printed. LibreChat stores the tokens it receives, encrypted, in MongoDB; the harness never reads them. The readiness wait leaves OAuth servers out, since they read disconnected until someone signs in.
 - Why pre-configured: LibreChat's discovered authorize URL is the in-network address (`http://twenty-server:3000/authorize`), which a browser cannot open. The pinned block fixes that, and LibreChat takes the pre-configured path only when the authorize URL, the token URL and the client id are all set.
@@ -12,6 +12,16 @@ LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-libre
 - `scripts/live/librechat-oauth.mjs` (the live H4 check) signs in through a headless browser: sign in to Twenty, give consent, let LibreChat's callback finish, then check that Twenty is connected and lists its tools. It prints names, states and counts only, scans its output for secret-shaped text, and writes `evidence/h4-live-check.txt` only when nothing matches.
 - Dispatch input `mcp_oauth` (off by default) in `p4-agent-hosts.yml` runs its own stack (twenty, litellm, librechat) and the live check. The job-level environment does not set the flag, so the other checks keep static auth.
 - Version 0.6.10.
+## [0.6.9] - 2026-11-20
+
+MCP recording proxy (H9). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7. Off by default: with `LIBRECHAT_MCP_RECORDING` unset, the written `librechat.yaml`, the compose file list and the env file are as in 0.6.8 (unit tested).
+
+- H9: `LIBRECHAT_MCP_RECORDING=1` (exactly 1) puts a recording proxy (`mcp-recorder`, port 9100, on `qa-harness-p4`) between LibreChat and each MCP server. The proxy forwards bytes unchanged and writes a redacted JSON line per request and response to its stdout (`docker logs qa-harness-librechat-mcp-recorder-1`). Authorization, Cookie, token and secret-like values are written as `[REDACTED]`; the MCP session id as a short digest. Source: `src/mcp-recorder/`, an in-repo proxy run from the compiled `dist/`. Image: `node:22-alpine`, pinned by digest in `docs/pins/p4.md`.
+- Config: `LIBRECHAT_MCP_RECORDING` is validated (any other value throws without echoing it). The adapter refuses to start with the flag on if `dist/mcp-recorder` is missing (`MCP_RECORDER_NOT_BUILT`).
+- Live check: `scripts/live/mcp-recording.mjs` reads the recorder's log and asserts the recorder is healthy, each configured server's `initialize` was recorded with HTTP 200, no forwarding error, every credential header is `[REDACTED]`, and no secret value from the env file or the secrets file is in the log. A pass copies the redacted log to `evidence/mcp-recording.jsonl`.
+- Dispatch input `mcp_recording` (off by default) on `p4-agent-hosts.yml` sets the flag for the job and runs the H9 check on its own stack.
+- Tests: redaction and leak checks, route parsing and refusals, the proxy against a real local upstream (forwarding unchanged, SSE streamed, large bodies clipped, error codes only), the flag, and the default-off output.
+- Version 0.6.9. Plan and evidence: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 7.
 
 ## [0.6.8] - 2026-11-20
 

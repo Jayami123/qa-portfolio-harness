@@ -15,7 +15,7 @@
  * browser URL is the host-published one. LibreChat takes the pre-configured path only when authorization_url, token_url and
  * client_id are all set (packages/api/src/mcp/oauth/handler.ts, the "pre-configured OAuth settings" branch).
  *
- * The probe that picked the capable servers is recorded in docs/plans/2026-11-19-librechat-l3-primitives.md (session 7).
+ * The probe that picked the capable servers is recorded in docs/plans/2026-11-19-librechat-l3-primitives.md (session 8).
  */
 import type { LibreChatMcpServer } from "./librechat-env.js";
 
@@ -24,7 +24,7 @@ export const LIBRECHAT_MCP_OAUTH_NO_SERVER = "LIBRECHAT_MCP_OAUTH_NO_SERVER";
 export const LIBRECHAT_MCP_OAUTH_NOT_REGISTERED = "LIBRECHAT_MCP_OAUTH_NOT_REGISTERED";
 
 /**
- * Products whose MCP server is protected by an authorization server the product itself runs (probe, session 7). Twenty
+ * Products whose MCP server is protected by an authorization server the product itself runs (probe, session 8). Twenty
  * serves RFC 9728 and RFC 8414 metadata, /oauth/register (dynamic client registration), /oauth/token and /authorize (frontend).
  * Not in the list: Nextcloud (OAuth mode needs an OIDC provider and the user_oidc app, not built), Outline and Penpot (no
  * OAuth metadata), Mattermost (no dynamic registration on the site; not built), and lab (no OAuth).

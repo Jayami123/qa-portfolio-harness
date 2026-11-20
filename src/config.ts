@@ -30,6 +30,7 @@ import {
   parseToolApprovalRules,
 } from "./adapters/librechat-approval.js";
 import { resolveLibreChatMcpOauth, type LibreChatMcpOauth } from "./adapters/librechat-oauth.js";
+import { parseMcpRecordingFlag } from "./adapters/librechat-recording.js";
 import { isForkProductId, type P4ProductId, type ProductId } from "./types.js";
 
 loadDotenv({ path: path.join(HARNESS_ROOT, ".env") });
@@ -177,6 +178,8 @@ const envSchema = z.object({
   LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS: z.string().trim().default(""),
   /** H4: OAuth sign-in for OAuth-capable MCP servers. Exactly 1 turns it on; unset is off (librechat-oauth.ts). */
   LIBRECHAT_MCP_OAUTH: z.string().trim().default(""),
+  /** H9: MCP recording proxy between LibreChat and each MCP server. Off unless LIBRECHAT_MCP_RECORDING=1. */
+  LIBRECHAT_MCP_RECORDING: z.string().trim().default(""),
   OPENCLAW_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:18789"),
   // Opt-in, exact value "1": enables the gateway's POST /v1/responses endpoint so runTask() works. Unset changes nothing.
   OPENCLAW_RESPONSES_API: z.string().trim().default(""),
@@ -286,6 +289,8 @@ export interface LibreChatConfig extends ProductConfig {
   toolApproval: LibreChatToolApproval | null;
   /** H4: OAuth sign-in for the capable products, or null (off, the default). Set only with LIBRECHAT_MCP_OAUTH=1. */
   mcpOauth: LibreChatMcpOauth | null;
+  /** H9: true routes each MCP server through the recording proxy (LIBRECHAT_MCP_RECORDING=1). Off by default. */
+  mcpRecording: boolean;
 }
 
 export interface OpenClawConfig extends ProductConfig {
@@ -487,6 +492,7 @@ function buildLibreChatConfig(parsed: ParsedEnv): LibreChatConfig {
       mcpProducts: parsed.LIBRECHAT_MCP_PRODUCTS.split(",").map((s) => s.trim()).filter((s) => s !== ""),
       twentyBrowserBaseUrl: parsed.TWENTY_BASE_URL,
     }),
+    mcpRecording: parseMcpRecordingFlag(parsed.LIBRECHAT_MCP_RECORDING),
   };
 }
 

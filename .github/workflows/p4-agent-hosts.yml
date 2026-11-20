@@ -15,6 +15,10 @@ on:
         description: "With tool_approval: turn on LIBRECHAT_TOOL_APPROVAL_ALLOW_ALWAYS=1 (Always allow). The H3 check then approves with scope session and checks that a second call in the same conversation runs with no pause"
         type: boolean
         default: false
+      mcp_recording:
+        description: "Turn on LIBRECHAT_MCP_RECORDING=1 (H9): every LibreChat MCP call goes through the redacted recording proxy, and the H9 live check runs (initialize per server, no forwarding error, no secret in the log)"
+        type: boolean
+        default: false
       second_identity:
         description: "Turn on P4_SECOND_IDENTITY=1 (H2, all five servers), P4_SECOND_POSTS=1 (H7, Mattermost posts from the second user) and P4_MAIL=1 (H1, GreenMail and the Nextcloud Mail app for both users)"
         type: boolean
@@ -42,6 +46,8 @@ on:
       - "src/adapters/nextcloud-mail*"
       - "src/adapters/mcp-call*"
       - "scripts/live/librechat-oauth.mjs"
+      - "src/mcp-recorder/**"
+      - "scripts/live/mcp-recording.mjs"
       - "docker/outline*"
       - "docker/penpot*"
       - "docker/mattermost*"
@@ -92,6 +98,8 @@ jobs:
       LIBRECHAT_TOOL_APPROVAL_DENY: ${{ inputs.tool_approval && 'mcp:nextcloud:nc_contacts_delete_addressbook' || '' }}
       # The H3 fixture stub runs on the runner host; LiteLLM reaches it through host.docker.internal.
       P4_STUB_API_BASE: ${{ inputs.tool_approval && 'http://host.docker.internal:9099/v1' || '' }}
+      # H9: the recording proxy in front of LibreChat's MCP servers. Off unless mcp_recording is true (the empty string is the off value).
+      LIBRECHAT_MCP_RECORDING: ${{ inputs.mcp_recording && '1' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -215,6 +223,48 @@ jobs:
         with:
           name: h4-live-check
           path: evidence/h4-live-check.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+      # H9 (mcp_recording only). Its own stack, like H3: LibreChat with the recorder in front of Nextcloud's MCP. The live check
+      # reads the recorder's log: initialize per server, no forwarding error, no secret value. Only a passing run copies the
+      # redacted recording to evidence/.
+      - name: "H9 stack up (mcp_recording only): nextcloud, litellm, librechat behind the recorder"
+        if: inputs.mcp_recording
+        env:
+          LIBRECHAT_MCP_PRODUCTS: nextcloud
+        run: |
+          set -euo pipefail
+          npm run up -- nextcloud
+          npm run up -- litellm
+          npm run up -- librechat
+
+      - name: "Live H9 check (mcp_recording only): every MCP call is recorded, redacted, and no secret is in the log"
+        if: inputs.mcp_recording
+        env:
+          LIBRECHAT_MCP_PRODUCTS: nextcloud
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node scripts/live/mcp-recording.mjs "$PWD" | tee evidence/h9-live-check.txt
+
+      - name: "H9 stack down (mcp_recording only)"
+        if: always() && inputs.mcp_recording
+        env:
+          LIBRECHAT_MCP_PRODUCTS: nextcloud
+        run: |
+          npm run down -- librechat || true
+          npm run down -- litellm || true
+          npm run down -- nextcloud || true
+
+      - name: Upload H9 evidence (mcp_recording only)
+        if: always() && inputs.mcp_recording
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: h9-mcp-recording
+          path: |
+            evidence/h9-live-check.txt
+            evidence/mcp-recording.jsonl
           if-no-files-found: warn
           retention-days: 30
 
