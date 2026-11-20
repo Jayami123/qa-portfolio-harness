@@ -110,3 +110,39 @@ jobs:
         run: |
           set -euo pipefail
           npm audit --audit-level=high
+
+  dist-freshness:
+    name: dist matches a fresh build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install and build from src
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Fail if committed dist differs from the fresh build
+        run: |
+          set -uo pipefail
+          untracked="$(git ls-files --others --exclude-standard -- dist/)"
+          if git diff --exit-code -- dist/ >/dev/null && [ -z "${untracked}" ]; then
+            echo "dist/ matches a fresh build of src/"
+            exit 0
+          fi
+          echo "::error::dist/ does not match a fresh build of src/"
+          echo "Changed or untracked files under dist/:"
+          git status --short --untracked-files=all -- dist/
+          echo "Fix: run npm run build and commit dist/"
+          exit 1
