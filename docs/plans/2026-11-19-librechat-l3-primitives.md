@@ -335,3 +335,105 @@ The same run also showed the kept-volume path: `up` deleted the previous run's a
 ### Still open
 
 - H3, H4, H9: unchanged. H2, H6 and H7 are on `main` and ship in 0.6.6 (see CHANGELOG).
+
+## Session 7: H4, OAuth sign-in for LibreChat MCP connections
+
+Branch `feat/2026-11-20-l3-h4-oauth-mode`, from `origin/main` at `e796439` (v0.6.8). Release `v0.6.9`. Draft PR only. No merge, no tag.
+
+**Base note.** The request said "after the H9 release is tagged". No H9 release exists: H9 is not built (see H9 above) and `main`'s latest tag is `v0.6.8`. The branch is based on that latest `main`.
+
+### How to read this section (for a junior engineer)
+
+1. The probe below was done in two parts: from the pinned source (image `v0.8.9`, digest `4a3967a4…`), and from a live run of the same image against Twenty.
+2. A server "can do OAuth" only if the product itself runs an OAuth authorization server that LibreChat can reach. A metadata page alone is not enough.
+3. LibreChat decides what to do with a server from `requiresOAuth` in `librechat.yaml`. With the flag off, the harness writes `requiresOAuth: false` (as before), so nothing changes.
+4. The harness never reads or writes tokens. LibreChat stores them encrypted with `CREDS_KEY` in MongoDB. The harness writes no client id or secret either: LibreChat registers its client dynamically.
+
+### Probe 1: LibreChat's OAuth configuration (source, v0.8.9)
+
+Files copied out of the pinned image by digest. None are printed or committed.
+
+| Item | Where (image path) | What it says |
+|---|---|---|
+| `requiresOAuth` | `packages/data-provider/src/mcp.ts` (`requiresOAuth: z.boolean().optional()`) | "If not specified, will be auto-detected during construction". |
+| `oauthPrompt` | same file | `on_start` (default) asks the owner to sign in when the turn starts. |
+| `oauth` block | same file, `OAuthOptionsBaseSchema` | `authorization_url` and `token_url` are optional and auto-discovered. `client_id` and `client_secret` are optional. `redirect_uri` defaults to `/api/mcp/<server>/oauth/callback`. |
+| Redirect URI | `packages/api/src/mcp/oauth/handler.ts` (`getDefaultRedirectUri`) | `${DOMAIN_SERVER}/api/mcp/<server>/oauth/callback`. |
+| Routes | `api/server/routes/mcp.js` | `GET /:server/oauth/initiate` (needs a logged-in user and a pending flow, sets a CSRF cookie, then redirects to the authorization URL), `GET /:server/oauth/callback`, `GET /oauth/status/:flowId`, `POST /:server/oauth/bind`. |
+| Token storage | `packages/api/src/mcp/oauth/tokens.ts` (`encryptV2` / `decryptV2`) | Tokens are encrypted before they are stored. |
+| Known upstream issue | LibreChat issue #13401 (Auth0 `audience` parameter; OAuth hangs at initiation) | Found by web search, not read on GitHub (the repo scope does not allow it). `audience` is not allowed for user-sourced OAuth (`UserOAuthOptionsSchema` sets it to `z.never()`). Not relevant to Twenty, which needs no audience. Status in v0.8.9: not checked against the issue thread. |
+
+### Probe 2: which of the five servers can sign in (source)
+
+| Server | Authorization server the product runs | Evidence | Result |
+|---|---|---|---|
+| Twenty v2.44.0 (fork `7cbdfec6`) | Yes: its own OAuth 2.1 server | `oauth-discovery.controller.ts`: `/.well-known/oauth-authorization-server`, `/oauth/register` (DCR, `oauth-registration.controller.ts`), `/oauth/token` (`oauth-token.controller.ts`), `/authorize` (frontend, `twenty-front/src/pages/auth/Authorize.tsx`, a consent screen). | **Capable.** Used for H4. |
+| Mattermost (MCP `96ecd17`) | Partly: the MCP publishes metadata that names the site | The site would need a registered OAuth app and no dynamic registration. Not verified against the pinned Mattermost 12.1.0. | **Not built.** Recorded as a limit: needs a pre-registered client, which this change does not do. |
+| Nextcloud MCP 0.213.2 | Only in its OAuth mode, against an OIDC provider | The MCP's OAuth mode needs the Nextcloud `user_oidc` app and a provider that Nextcloud trusts. Keycloak 26.5.0 (v0.5.1, Documenso) could be that provider, but Nextcloud would also need to accept the Keycloak tokens. | **Not built.** Recorded as a limit. |
+| Outline 1.13.0 | No | No OAuth metadata in the image. | No. |
+| Penpot MCP 2.19.2 | No | Uses a user token (`?userToken=`). | No. |
+| lab, lab2 | No | Attack-lab servers take no credential. | No. |
+
+**Keycloak decision.** The task said to reuse the Keycloak OIDC support from v0.5.1 if it fits, and to add an identity provider only if the probe showed it was needed. Twenty is already an authorization server, so no identity provider is needed. Keycloak does not fit: Twenty's MCP would have to accept Keycloak tokens, which Twenty does not do. Nothing new was added.
+
+### Probe 3: the browser address problem (source and config)
+
+Twenty's discovery uses the request's Host header as the issuer. The harness reaches Twenty at `http://twenty-server:3000` inside the network, so the advertised `authorization_endpoint` would be `http://twenty-server:3000/authorize`. The owner's browser cannot open that address.
+
+Fix, as built: LibreChat takes the "pre-configured OAuth settings" branch only when `authorization_url`, `token_url` and `client_id` are all set (`packages/api/src/mcp/oauth/handler.ts`). Setting `authorization_url` alone was tried first, on the live stack, and LibreChat ignored it: the authorize URL still came from discovery and still said `http://twenty-server:3000/authorize`. So the block pins all of it:
+
+| Key | Value | Why |
+|---|---|---|
+| `authorization_url` | `TWENTY_BASE_URL` + `/authorize` (default `http://127.0.0.1:3002/authorize`) | the owner's browser opens it |
+| `token_url` | `http://twenty-server:3000/oauth/token` | LibreChat's server calls it inside the network |
+| `client_id` | from a registration the harness makes at `up` | a public client, no secret |
+| `redirect_uri` | `http://localhost:3080/api/mcp/twenty/oauth/callback` | LibreChat's own default (`DOMAIN_SERVER` unset) |
+| `scope` | `api profile` | what LibreChat requested before the change |
+
+### Probe 4: the live run (2026-11-20, this container, pinned images)
+
+Steps that were run, in order. The stack was brought up with `npm run up -- twenty`, `npm run up -- litellm`, and `npm run up -- librechat` with `LIBRECHAT_MCP_PRODUCTS=twenty` and `LIBRECHAT_MCP_OAUTH=1`.
+
+1. **Before the change**, with LibreChat's own discovery and no pinned block: `up -- librechat` never became ready. Its readiness wait required every listed server to be connected, and Twenty reads "disconnected" until someone signs in. Fix: `mcpWaitNames` leaves OAuth products out of that wait.
+2. **Status shape**, after the fix: `GET /api/mcp/connection/status/twenty` returns `requiresOAuth: true`, `connectionStatus: disconnected`, `authorizationState: needs_authorization`. `GET /api/mcp/tools` lists no tools and shows `reauth_required`.
+3. **Start of sign-in**: `POST /api/mcp/twenty/reinitialize` returns `oauthRequired: true`, a `flowId` and an `oauthUrl`. The first run returned `http://twenty-server:3000/authorize` (discovery). The run with the pinned block returned `http://127.0.0.1:3002/authorize`. Only the origin and path were printed.
+4. **Initiate needs a Bearer token.** `GET /api/mcp/twenty/oauth/initiate` with cookies alone returned 401. The browser therefore adds the owner's Bearer header to LibreChat's origin only (a Playwright route), never to Twenty.
+5. **The browser flow** (headless Chromium, Playwright 1.63.0): Twenty's sign-in is two steps (email, then password with a "Sign in" button). The first initiate redirected to Twenty's `/welcome` and lost the authorize request. So the browser signs in to Twenty first, then starts from LibreChat again. That lands on Twenty's consent page with "Authorize" and "Cancel". Clicking Authorize completes the flow.
+6. **Result**: `GET /api/mcp/connection/status/twenty` returns `connectionStatus: connected`, `authorizationState: authorized`. `GET /api/mcp/tools` lists 7 Twenty tools through that connection. The Twenty service has no static header for this server (the env file has no `P4_TWENTY_MCP_AUTHORIZATION`).
+
+### Live H4 check (`scripts/live/librechat-oauth.mjs`, local, 2026-11-20)
+
+```
+ok: LibreChat login as the owner
+ok: the owner's LibreChat user id is known
+ok: twenty is an OAuth server in LibreChat (requiresOAuth true)
+ok: twenty is not connected before sign-in (state needs_authorization)
+ok: twenty lists no tools before sign-in
+ok: twenty sign-in starts (oauthRequired, flow created)
+ok: the authorize URL is the browser-reachable Twenty address (http://127.0.0.1:3002)
+ok: the authorize request uses PKCE S256
+ok: the redirect URI is LibreChat's callback on the initiate origin
+ok: signed in to Twenty in the browser (landed on http://127.0.0.1:3002)
+ok: Twenty consent screen shown for the LibreChat client
+ok: twenty is connected after the browser sign-in (state authorized)
+ok: twenty lists 7 tools through the OAuth connection
+H4 live check passed for: twenty (OAuth sign-in completed in the browser)
+```
+
+The stack was then torn down with `down` for librechat, litellm and twenty. No `qa-harness-*` container was left.
+
+### Decisions (junior-engineer summary)
+
+- **Pre-registered client, not dynamic registration by LibreChat.** Discovery gives the in-network address, and pinning is the only route that keeps the product unchanged. The client is registered per run by the harness, through the browser address, and only its id is kept (in `librechat.yaml`, mode 0644, which is safe because a public client id is not a secret). Registrations accumulate in Twenty's database each run; Twenty's stale-registration cleanup job applies.
+- **No new identity provider.** Keycloak does not fit: Twenty's MCP would have to accept Keycloak tokens, which it does not do.
+- **No secret exists for H4.** The client has auth method `none`, with PKCE. Tokens are LibreChat's, encrypted in MongoDB. The harness prints none of them and writes none to a file. The Playwright context is in memory and is never saved.
+- **Leak check.** `findSecretLeaks` (unit tested) scans every line the live check prints and refuses to write the evidence file on a match. It checks listed values, JWT shapes, Bearer tokens, Set-Cookie, cookies, OAuth codes and client secrets.
+- **The known upstream issue.** LibreChat issue #13401 (Auth0 `audience`, OAuth hangs at initiation) was found by web search and not read on GitHub (the repo's access scope does not allow it). Its shape is not what happened here: Twenty needs no audience, and the failure was the discovered URL. Whether the issue is still open in v0.8.9 was not checked.
+
+### Limits (recorded, not worked around)
+
+- **Mattermost:** not built. Its site would need a pre-registered OAuth app, and this change does not create one. Not verified against the pinned Mattermost 12.1.0.
+- **Nextcloud:** not built. OAuth mode needs an OIDC provider and the Nextcloud `user_oidc` app. Keycloak could be the provider; that is a separate change.
+- **Outline, Penpot, lab, lab2:** no OAuth.
+- **Playwright and the browser:** the live check needs Chromium in CI (installed with `npx playwright install --with-deps chromium`, as H6 does).
+- **Final browser URL:** after consent, the page's final URL read as an opaque origin in Playwright. The server-side state (connected, authorized, 7 tools) is the proof the check asserts, not the page URL.
