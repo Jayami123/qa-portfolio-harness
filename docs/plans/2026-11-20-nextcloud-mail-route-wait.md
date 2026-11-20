@@ -67,7 +67,15 @@ Not changed: the Mail app, the product forks, the product `.env` files, and the 
 
 ## 6. Dispatch runs
 
-Filled in after the runs finish.
+Workflow `P4 agent hosts` (`p4-agent-hosts.yml`), `second_identity=true` (sets `P4_SECOND_IDENTITY=1` and `P4_MAIL=1`), on this branch:
+
+| Run | Result | Notes |
+|---|---|---|
+| 44680758818 | cancelled | Not a result. A second dispatch on the same ref started while it ran, and the workflow's `cancel-in-progress` cancelled it. |
+| 44680798245 | success | Both identities logged `Nextcloud Mail: qa-owner@p4.test, qa-user-b@p4.test configured`. The H1 live check step ran. |
+| 44683383354 | success | Same log lines. The H1 live check step ran. |
+
+Both successful runs configured the Mail accounts for both identities through the fixed path. Neither run logged a 404 from the route wait.
 
 ## 7. Rules kept
 
