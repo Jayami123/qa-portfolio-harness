@@ -5,7 +5,17 @@
  */
 import { spawn } from "node:child_process";
 import { redactSecrets } from "../internal/run.js";
-import { librechatMcpServerFor, type LibreChatMcpServer } from "./librechat-env.js";
+import { librechatMcpServerForRun, type LibreChatMcpServer } from "./librechat-env.js";
+
+/** Redaction placeholder, the same text the MCP recorder writes (src/mcp-recorder/redact.ts). */
+const REDACTED = "[REDACTED]";
+/** A ?userToken= or &userToken= query value (H6). It is redacted even when the value is not in the env file. */
+const USER_TOKEN_QUERY = /([?&]userToken=)[^\s&"'<>\\]+/gi;
+
+/** Hides any userToken query value in a line. The token is never printed, so a line that has one is cut to a placeholder. */
+export function redactUserTokenQuery(text: string): string {
+  return text.replace(USER_TOKEN_QUERY, `$1${REDACTED}`);
+}
 
 /** The LibreChat app container (compose project qa-harness-librechat, service app). */
 export const LIBRECHAT_APP_CONTAINER = "qa-harness-librechat-app-1";
@@ -40,7 +50,7 @@ export function redactionValues(envText: string, secrets: Record<string, unknown
 }
 
 export function redactText(text: string, values: string[]): string {
-  return redactSecrets(text, values);
+  return redactSecrets(redactUserTokenQuery(text), values);
 }
 
 /** A LibreChat line about one MCP server, such as "[MCP][outline] OAuth Required: true". */
@@ -78,12 +88,26 @@ export function connectionStates(statusBody: unknown, names: string[]): Record<s
  * ends. A line holds the name, the host, the resolved address, the HTTP status or error code, and whether the auth
  * variable is set and non-empty. The value is never printed, and the header is sent only when the value is non-empty.
  */
+/**
+ * H6: expands ${NAME} in a server URL from the container's own environment, inside the container. The host sends only the
+ * template, so a token is never in the docker exec argv. An unset name stays as written. Source text, so the probe and the
+ * unit tests run the same code.
+ */
+export const EXPAND_ENV_FN = [
+  "function expandEnv(text) {",
+  "  return text.replace(/\\$\\{([A-Za-z0-9_]+)\\}/g, (m, n) => (process.env[n] || \"\") !== \"\" ? process.env[n] : m);",
+  "}",
+].join("\n");
+
 export const PROBE_SCRIPT = [
   'const dns = require("dns").promises;',
   "const servers = JSON.parse(process.argv[1]);",
+  EXPAND_ENV_FN,
   "const limit = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label + \" timeout\")), ms))]);",
   "const authState = (authEnv) => authEnv === null ? \"no auth var\" : ((process.env[authEnv] || \"\").trim() !== \"\" ? \"auth var set\" : \"auth var EMPTY\");",
-  "async function probe([name, url, authEnv]) {",
+  "const urlState = (urlEnv) => (process.env[urlEnv] || \"\").trim() !== \"\" ? \"url token set\" : \"url token EMPTY\";",
+  "async function probe([name, template, authEnv, urlEnv]) {",
+  "  const url = expandEnv(template);",
   "  const host = new URL(url).hostname;",
   "  let address;",
   '  try { address = (await limit(dns.lookup(host), 3000, "dns")).address; } catch (e) { address = "dns " + (e.code || e.message); }',
@@ -99,19 +123,23 @@ export const PROBE_SCRIPT = [
   '    const detail = e.cause && e.cause.message ? " / " + String(e.cause.message).slice(0, 120) : "";',
   '    status = "fetch " + (inner || e.name || "error") + detail;',
   "  }",
-  '  console.log([name, host, address, status, authState(authEnv)].join(" | "));',
+  '  const cells = [name, host, address, status, authState(authEnv)];',
+  "  if (urlEnv) cells.push(urlState(urlEnv));",
+  '  console.log(cells.join(" | "));',
   "}",
   'Promise.all(servers.map(probe)).then(() => console.log("probe done"));',
 ].join("\n");
 
-/** The docker exec argv for the probe. The server list holds names, URLs and env variable NAMES only. */
+/** The docker exec argv for the probe. The server list holds names, URL templates and env variable NAMES only. */
 export function probeArgs(servers: LibreChatMcpServer[]): string[] {
-  const list = servers.map((s) => [s.name, s.url, s.authEnv]);
+  // The fourth column (H6) is only sent for a server with a URL token, so every other server's argv is unchanged.
+  const list = servers.map((s) => (s.urlTokenEnv === undefined ? [s.name, s.url, s.authEnv] : [s.name, s.url, s.authEnv, s.urlTokenEnv]));
   return ["exec", LIBRECHAT_APP_CONTAINER, "node", "-e", PROBE_SCRIPT, JSON.stringify(list)];
 }
 
-export function serversFor(names: string[]): LibreChatMcpServer[] {
-  return names.map((name) => librechatMcpServerFor(name));
+/** H6: `penpotPlugin` gives Penpot its token-URL template, as the adapter writes it. */
+export function serversFor(names: string[], opts: { penpotPlugin: boolean } = { penpotPlugin: false }): LibreChatMcpServer[] {
+  return names.map((name) => librechatMcpServerForRun(name, opts));
 }
 
 export function mcpContainerFor(name: string): string | undefined {
@@ -122,7 +150,12 @@ export function mcpContainerFor(name: string): string | undefined {
  * Runs the probe on the host and prints each line as it arrives, redacted. It resolves when the probe ends, and it never
  * rejects: a probe that cannot start is printed and the wait keeps its own error.
  */
-export function streamMcpProbe(names: string[], values: string[], log: (line: string) => void = console.log): Promise<void> {
+export function streamMcpProbe(
+  names: string[],
+  values: string[],
+  log: (line: string) => void = console.log,
+  opts: { penpotPlugin: boolean } = { penpotPlugin: false },
+): Promise<void> {
   return new Promise((resolve) => {
     let carry = "";
     const emit = (text: string): void => {
@@ -135,7 +168,7 @@ export function streamMcpProbe(names: string[], values: string[], log: (line: st
     };
     let child;
     try {
-      child = spawn("docker", probeArgs(serversFor(names)), { stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn("docker", probeArgs(serversFor(names, opts)), { stdio: ["ignore", "pipe", "pipe"] });
     } catch (err) {
       log(`  the probe could not start: ${err instanceof Error ? err.message.slice(0, 120) : "unknown error"}`);
       resolve();

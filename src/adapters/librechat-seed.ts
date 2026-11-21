@@ -6,7 +6,9 @@ import {
   LIBRECHAT_OWNER_EMAIL,
   LIBRECHAT_OWNER_NAME,
   LIBRECHAT_OWNER_USERNAME,
+  PENPOT_MCP_USER_TOKEN_ENV,
   librechatMcpServerFor,
+  librechatMcpServerForRun,
   type LibreChatMcpServer,
 } from "./librechat-env.js";
 import { applyMcpOauth, type LibreChatMcpOauth } from "./librechat-oauth.js";
@@ -37,22 +39,41 @@ export function assertMcpAuthorizationShape(product: string, value: string): voi
 }
 
 /**
+ * H6: the owner's Penpot token must be URL-safe: it goes into a query string and a compose env line unescaped. A value
+ * outside that set is refused. The reason never includes the value.
+ */
+export function assertPenpotUserTokenShape(value: string): void {
+  if (!/^[A-Za-z0-9._~-]+$/.test(value)) {
+    throw new Error(`harness: LIBRECHAT_PENPOT_TOKEN_SHAPE: the Penpot owner token has characters outside the URL-safe set (value not printed)`);
+  }
+}
+
+/**
  * For each Part A product in the list: the alias server entry, and the Authorization env value from its run state
  * (credential only, review answer 0.1). Throws the named P4_RUN_STATE_MISSING when a run state is absent, and
  * LIBRECHAT_MCP_AUTH_MISSING when a product that needs a header has none.
+ * H6: `penpotPlugin` carries the owner's Penpot token. Penpot then takes the token URL and the token goes to the env file
+ * as PENPOT_MCP_USER_TOKEN_ENV. Null (the default) leaves Penpot as before H6.
  */
 export function librechatMcpEnv(
   products: string[],
   readCreds: (product: string, file: string) => { mcpAuthorization: string | null } = readP4McpCredentials,
   stateFile: (product: string) => string = p4RunStateFile,
   oauth: LibreChatMcpOauth | null = null,
+  penpotPlugin: { ownerToken: string } | null = null,
 ): { servers: LibreChatMcpServer[]; env: Record<string, string> } {
   const servers: LibreChatMcpServer[] = [];
   const env: Record<string, string> = {};
   for (const product of products) {
+    const tokenUrl = penpotPlugin !== null && product === "penpot";
     // H4: an OAuth product takes no static header, so its credential is neither read nor written to the env file.
-    const server = applyMcpOauth(librechatMcpServerFor(product), product, oauth);
+    const server = applyMcpOauth(librechatMcpServerForRun(product, { penpotPlugin: tokenUrl }), product, oauth);
     servers.push(server);
+    if (tokenUrl) {
+      assertPenpotUserTokenShape(penpotPlugin.ownerToken);
+      env[PENPOT_MCP_USER_TOKEN_ENV] = penpotPlugin.ownerToken;
+      continue;
+    }
     if (server.authEnv !== null) {
       const creds = readCreds(product, stateFile(product));
       if (creds.mcpAuthorization === null) {

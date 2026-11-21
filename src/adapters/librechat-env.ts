@@ -32,13 +32,42 @@ export interface LibreChatMcpServer {
   authEnv: string | null;
   /** H4: set only with LIBRECHAT_MCP_OAUTH=1 for an OAuth product. Absent means static auth (the default). */
   oauth?: { authorizationUrl: string; tokenUrl: string; clientId: string; redirectUri: string; scope: string };
+  /**
+   * H6 (P4_PENPOT_PLUGIN=1 only): the env var that holds a token inside the URL. The URL then carries ${NAME}, which LibreChat
+   * expands from its env file at start. Absent means no token in the URL (the default).
+   */
+  urlTokenEnv?: string;
+}
+
+/** H6: the env var that holds the Penpot owner's MCP token. It lives in the LibreChat env file (mode 0600), never in the yaml. */
+export const PENPOT_MCP_USER_TOKEN_ENV = "P4_PENPOT_MCP_USER_TOKEN";
+
+/**
+ * H6: Penpot in multi-user mode. The Penpot plugin names the user in ?userToken= on each /mcp request, so LibreChat's URL
+ * carries that query with the placeholder ${P4_PENPOT_MCP_USER_TOKEN}. LibreChat expands it from its env (embedded ${VAR}
+ * expansion: packages/data-provider/src/utils.ts:55; applied to the url field: packages/api/src/utils/env.ts:593-604).
+ * Scope, by design: LibreChat has one user here (the owner, ALLOW_REGISTRATION=false), so every LibreChat chat reaches
+ * Penpot as the owner. The second Penpot profile is not reachable through LibreChat (a documented limit, not a bug).
+ */
+function penpotPluginServer(): LibreChatMcpServer {
+  return {
+    name: "penpot",
+    url: `http://penpot-mcp:4401/mcp?userToken=\${${PENPOT_MCP_USER_TOKEN_ENV}}`,
+    authEnv: null,
+    urlTokenEnv: PENPOT_MCP_USER_TOKEN_ENV,
+  };
 }
 
 /**
  * The Part A MCP endpoints, reached by alias on qa-harness-p4. The table is the only source of URLs for LibreChat.
- * Ports are the container ports (review answer 0.1).
+ * Ports are the container ports (review answer 0.1). It takes one argument on purpose: it is passed to Array.map.
  */
 export function librechatMcpServerFor(product: string): LibreChatMcpServer {
+  return librechatMcpServerForRun(product, { penpotPlugin: false });
+}
+
+/** As librechatMcpServerFor. `penpotPlugin` (H6) switches Penpot to the owner's token URL; false is the entry before H6. */
+export function librechatMcpServerForRun(product: string, opts: { penpotPlugin: boolean }): LibreChatMcpServer {
   switch (product) {
     case "nextcloud":
       return { name: "nextcloud", url: "http://nextcloud-mcp:8000/mcp", authEnv: "P4_NEXTCLOUD_MCP_AUTHORIZATION" };
@@ -47,6 +76,7 @@ export function librechatMcpServerFor(product: string): LibreChatMcpServer {
     case "twenty":
       return { name: "twenty", url: "http://twenty-server:3000/mcp", authEnv: "P4_TWENTY_MCP_AUTHORIZATION" };
     case "penpot":
+      if (opts.penpotPlugin === true) return penpotPluginServer();
       return { name: "penpot", url: "http://penpot-mcp:4401/mcp", authEnv: null };
     case "mattermost":
       return { name: "mattermost", url: "http://mattermost-mcp:8066/mcp", authEnv: "P4_MATTERMOST_MCP_AUTHORIZATION" };
@@ -105,6 +135,12 @@ export function librechatYaml(opts: { models: string[]; servers: LibreChatMcpSer
   }
   lines.push("mcpServers:");
   for (const s of opts.servers) {
+    // H6: a URL with a token placeholder is quoted, so the ${...} and the ? are read as plain text by the yaml parser.
+    // The placeholder is the only form written here; the token value never is.
+    if (s.urlTokenEnv !== undefined && !s.url.includes(`\${${s.urlTokenEnv}}`)) {
+      throw new Error(`LIBRECHAT_URL_TOKEN_MISSING: ${s.name} is declared with a URL token but its URL has no \${${s.urlTokenEnv}} placeholder`);
+    }
+    const urlLine = s.urlTokenEnv !== undefined ? `    url: "${s.url}"` : `    url: ${s.url}`;
     // requiresOAuth: false skips LibreChat's OAuth auto-detection, which probes without the configured headers and marks a
     // server that publishes RFC 9728 metadata (or answers 401 with a Bearer challenge) as OAuth-only, so it never connects
     // with the Authorization header. Schema: packages/data-provider/src/mcp.ts:190; skip: MCPServerInspector.ts:122.
@@ -112,7 +148,7 @@ export function librechatYaml(opts: { models: string[]; servers: LibreChatMcpSer
     lines.push(
       `  ${s.name}:`,
       "    type: streamable-http",
-      `    url: ${s.url}`,
+      urlLine,
       `    requiresOAuth: ${s.oauth !== undefined ? "true" : "false"}`,
       "    initTimeout: 30000",
       "    timeout: 60000",
