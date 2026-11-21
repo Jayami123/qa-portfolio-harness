@@ -22,10 +22,12 @@ export function parseMcpRecordingFlag(raw: string): boolean {
 
 /** The same servers, with each URL pointed at the recorder: http://mcp-recorder:9100/<name><original path>. */
 export function recordedServers(servers: LibreChatMcpServer[]): LibreChatMcpServer[] {
-  return servers.map((s) => ({
-    ...s,
-    url: `http://${MCP_RECORDER_ALIAS}:${MCP_RECORDER_PORT}/${s.name}${new URL(s.url).pathname}`,
-  }));
+  return servers.map((s) => {
+    const upstream = new URL(s.url);
+    // H6: the query is kept. The Penpot owner's token rides in ?userToken=, and the recorder must forward it upstream. The
+    // recorder's own log redacts that query (src/mcp-recorder/redact.ts). The URL holds the ${...} placeholder, not a value.
+    return { ...s, url: `http://${MCP_RECORDER_ALIAS}:${MCP_RECORDER_PORT}/${s.name}${upstream.pathname}${upstream.search}` };
+  });
 }
 
 /** MCP_RECORDER_ROUTES: name=origin for each server, for example nextcloud=http://nextcloud-mcp:8000. */
