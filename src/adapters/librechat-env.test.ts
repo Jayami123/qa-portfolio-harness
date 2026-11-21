@@ -169,6 +169,7 @@ describe("librechat-env (ADR 0007, review answers 0.1, 0.6, 0.7)", () => {
       assert.match(y, /apiKey: "\$\{P4_LITELLM_API_KEY\}"/);
       assert.throws(() => librechatEnvText({ GEMINI_API_KEY: "x" }), /LIBRECHAT_ENV_GEMINI_REFUSED/);
       assert.throws(() => librechatEnvText({ gemini_api_key: "x" }), /LIBRECHAT_ENV_GEMINI_REFUSED/);
+      assert.throws(() => librechatEnvText({ DEEPSEEK_API_KEY: "x" }), /LIBRECHAT_ENV_DEEPSEEK_REFUSED/);
       assert.doesNotThrow(() => librechatEnvText({ P4_LITELLM_API_KEY: "sk-x" }));
     });
   });

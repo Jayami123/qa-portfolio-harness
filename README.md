@@ -488,7 +488,7 @@ bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty   # writ
 
 **Memory.** The probe's budget is 14 GiB of a 16 GB runner (`RAM_BUDGET_MIB`, committed). The CI job `P4 adapters` is advisory, and it uploads `ram-probe.json` as the `ram-probe` artifact.
 
-**Agent hosts (ADR 0007, P4 part B1).** `litellm`, `librechat` and `openclaw` are image-only adapters, pinned by digest. They join the external network `qa-harness-p4` by alias and publish on `127.0.0.1` only. They run in **stub mode** (`P4_LLM_MODE=stub`, the default): the `p4-stub` alias answers from `mock_response` and nothing calls Gemma. Start them after the MCP products: `npm run up -- litellm`, then `npm run up -- librechat` and `npm run up -- openclaw`. Stop them in reverse order. `GEMINI_API_KEY` is read only in `nightly` mode and is not needed here. Linux only: the stack needs Docker, not Docker Desktop host networking.
+**Agent hosts (ADR 0007, P4 part B1).** `litellm`, `librechat` and `openclaw` are image-only adapters, pinned by digest. They join the external network `qa-harness-p4` by alias and publish on `127.0.0.1` only. They run in **stub mode** (`P4_LLM_MODE=stub`, the default): the `p4-stub` alias answers from `mock_response` and nothing calls Gemma. Start them after the MCP products: `npm run up -- litellm`, then `npm run up -- librechat` and `npm run up -- openclaw`. Stop them in reverse order. `GEMINI_API_KEY` (and `DEEPSEEK_API_KEY`, see v0.6.11 below) is read only in `nightly` mode and is not needed here. Linux only: the stack needs Docker, not Docker Desktop host networking.
 
 Optional agent-host primitives (v0.6.2, all off by default): `P4_STUB_API_BASE` routes `p4-stub` to an OpenAI-compatible stub and forwards `X-P4-Fixture`; `LIBRECHAT_MODELS` sets LibreChat's model list (`p4-nightly` only with `P4_LLM_MODE=nightly`; LibreChat never gets the Gemini key); `OPENCLAW_RESPONSES_API=1` enables `POST /v1/responses` so `getAdapter("openclaw").runTask(task, { tools })` returns the tool-call trace.
 
@@ -545,6 +545,14 @@ MCP recording proxy (H9, v0.6.9, plan `docs/plans/2026-11-19-librechat-l3-primit
 | H9 | `node scripts/live/mcp-recording.mjs` (with the flag) | Checks the recorder is healthy, each configured server's `initialize` was recorded with HTTP 200, no forwarding error, and no secret value in the log. A pass copies the redacted log to `evidence/mcp-recording.jsonl`. |
 
 The dispatch input `mcp_recording` of `p4-agent-hosts.yml` turns the flag on and runs the H9 check.
+
+DeepSeek as the `p4-nightly` provider (v0.6.11, plan: none; see `docs/pins/p4.md`). Off by default.
+
+| | Option | Effect |
+|---|---|---|
+| D14 | `P4_NIGHTLY_PROVIDER=deepseek` (exact value; blank or `gemma` is the default) | `p4-nightly` uses `deepseek/deepseek-flash` with `DEEPSEEK_API_KEY` from the environment, and `num_retries: 3`. No `rpm` or `tpm`, because DeepSeek publishes no RPM or TPM figure. Only in `P4_LLM_MODE=nightly` is the key passed to the container; in stub mode it is blank. Anything else throws without echoing the value. |
+
+The aliases stay `p4-stub` and `p4-nightly`, with no fallback between providers.
 
 ## License
 

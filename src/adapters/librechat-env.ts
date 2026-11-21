@@ -143,6 +143,9 @@ export function librechatEnvText(values: Record<string, string>): string {
   if (Object.keys(values).some((k) => /^GEMINI_/i.test(k))) {
     throw new Error("LIBRECHAT_ENV_GEMINI_REFUSED: LibreChat talks to LiteLLM only and never receives the Gemini key");
   }
+  if (Object.keys(values).some((k) => /^DEEPSEEK_/i.test(k))) {
+    throw new Error("LIBRECHAT_ENV_DEEPSEEK_REFUSED: LibreChat talks to LiteLLM only and never receives the DeepSeek key");
+  }
   return `${Object.entries(values)
     .map(([k, v]) => `${k}=${v}`)
     .join("\n")}\n`;

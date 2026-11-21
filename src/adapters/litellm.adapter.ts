@@ -60,7 +60,11 @@ export class LiteLlmAdapter extends BaseAdapter<LiteLlmConfig> {
     fs.writeFileSync(this.secretsFile(), JSON.stringify(secrets), { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(this.secretsFile(), 0o600);
     // The config holds no secret, so it may be world-readable. The container reads it.
-    fs.writeFileSync(this.configFile(), liteLlmConfigYaml({ stubApiBase: this.cfg.stubApiBase }), { encoding: "utf8", mode: 0o644 });
+    fs.writeFileSync(
+      this.configFile(),
+      liteLlmConfigYaml({ stubApiBase: this.cfg.stubApiBase, nightlyProvider: this.cfg.nightlyProvider }),
+      { encoding: "utf8", mode: 0o644 },
+    );
     writeLlmRunState(llmRunStateFile("litellm"), {
       version: 1,
       product: "litellm",

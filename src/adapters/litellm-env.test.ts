@@ -10,6 +10,7 @@ import {
   liteLlmComposeEnv,
   liteLlmConfigYaml,
   parseP4LlmMode,
+  parseP4NightlyProvider,
   parseStubApiBase,
 } from "./litellm-env.js";
 
@@ -115,6 +116,85 @@ describe("litellm-env (ADR 0007, D13 to D15)", () => {
       "should-not-leak",
     );
     assert.equal("LITELLM_MASTER_KEY" in base, false, "the base env is not mutated");
+  });
+
+  it("passes DEEPSEEK_API_KEY only in nightly mode, and blanks it in stub mode", () => {
+    const base = { PATH: "/usr/bin", DEEPSEEK_API_KEY: "should-not-leak" };
+    assert.equal(liteLlmComposeEnv(base, { mode: "stub", masterKey: "sk-x", configFile: "/c" }).DEEPSEEK_API_KEY, "");
+    assert.equal(
+      liteLlmComposeEnv(base, { mode: "nightly", masterKey: "sk-x", configFile: "/c" }).DEEPSEEK_API_KEY,
+      "should-not-leak",
+    );
+    assert.equal(liteLlmComposeEnv({ PATH: "/usr/bin" }, { mode: "nightly", masterKey: "sk-x", configFile: "/c" }).DEEPSEEK_API_KEY, "");
+  });
+
+  it("the compose file lists DEEPSEEK_API_KEY with the same blank default as GEMINI_API_KEY", () => {
+    const text = fs.readFileSync(litellmComposeFiles()[0] ?? "", "utf8");
+    assert.match(text, /^ {6}DEEPSEEK_API_KEY: \$\{DEEPSEEK_API_KEY:-\}$/m);
+    assert.match(text, /^ {6}GEMINI_API_KEY: \$\{GEMINI_API_KEY:-\}$/m);
+  });
+
+  describe("P4_NIGHTLY_PROVIDER (v0.6.11)", () => {
+    it("parses: blank is gemma, gemma and deepseek are themselves, anything else throws without echoing", () => {
+      assert.equal(parseP4NightlyProvider(undefined), "gemma");
+      assert.equal(parseP4NightlyProvider(" "), "gemma");
+      assert.equal(parseP4NightlyProvider("gemma"), "gemma");
+      assert.equal(parseP4NightlyProvider(" deepseek "), "deepseek");
+      for (const bad of ["openai", "DeepSeek", "gemini", "SECRETVAL-xyz"]) {
+        assert.throws(() => parseP4NightlyProvider(bad), (err: Error) => {
+          assert.match(err.message, /P4_NIGHTLY_PROVIDER/);
+          assert.doesNotMatch(err.message, /SECRETVAL|openai|gemini/);
+          return true;
+        });
+      }
+    });
+
+    it("the default YAML is the gemma entry, byte-identical to passing gemma", () => {
+      assert.equal(liteLlmConfigYaml({ nightlyProvider: "gemma" }), liteLlmConfigYaml());
+      const nightly = parseLiteLlmModelList(liteLlmConfigYaml()).find((m) => m.model_name === "p4-nightly")?.litellm_params;
+      assert.deepEqual(nightly, {
+        model: "gemini/gemma-4-31b-it",
+        api_key: "os.environ/GEMINI_API_KEY",
+        rpm: 30,
+        tpm: 16000,
+        num_retries: 3,
+      });
+    });
+
+    it("deepseek: p4-nightly is deepseek/deepseek-flash with DEEPSEEK_API_KEY from the environment and num_retries 3", () => {
+      const y = liteLlmConfigYaml({ nightlyProvider: "deepseek" });
+      const models = parseLiteLlmModelList(y);
+      assert.deepEqual(models.map((m) => m.model_name), ["p4-stub", "p4-nightly"]);
+      const nightly = models.find((m) => m.model_name === "p4-nightly")?.litellm_params;
+      assert.deepEqual(nightly, {
+        model: "deepseek/deepseek-flash",
+        api_key: "os.environ/DEEPSEEK_API_KEY",
+        num_retries: 3,
+      });
+      assert.equal(Object.hasOwn(nightly ?? {}, "rpm"), false, "no rpm: DeepSeek publishes no RPM figure");
+      assert.equal(Object.hasOwn(nightly ?? {}, "tpm"), false, "no tpm: DeepSeek publishes no TPM figure");
+      assert.doesNotMatch(y, /GEMINI|gemma/);
+      assert.doesNotMatch(y, /sk-|AIza/);
+    });
+
+    it("deepseek: only the chosen provider is written, with no fallback and no Gemini key", () => {
+      const y = liteLlmConfigYaml({ nightlyProvider: "deepseek" });
+      const uncommented = y
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("#"))
+        .join("\n");
+      assert.doesNotMatch(uncommented, /fallback/i);
+      assert.doesNotMatch(uncommented, /GEMINI_API_KEY/);
+      assert.equal((y.match(/- model_name: /g) ?? []).length, 2);
+    });
+
+    it("deepseek keeps the stub alias and the stub upstream option unchanged", () => {
+      const a = parseLiteLlmModelList(liteLlmConfigYaml({ nightlyProvider: "deepseek" })).find((m) => m.model_name === "p4-stub");
+      const b = parseLiteLlmModelList(liteLlmConfigYaml()).find((m) => m.model_name === "p4-stub");
+      assert.deepEqual(a, b);
+      const withBase = parseLiteLlmModelList(liteLlmConfigYaml({ stubApiBase: "http://host.docker.internal:8787/v1", nightlyProvider: "deepseek" })).find((m) => m.model_name === "p4-stub")?.litellm_params;
+      assert.equal(withBase?.api_base, "http://host.docker.internal:8787/v1");
+    });
   });
 
   it("generates an sk- master key that differs per call, from an injected source", () => {
