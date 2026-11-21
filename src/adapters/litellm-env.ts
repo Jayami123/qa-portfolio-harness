@@ -26,6 +26,24 @@ export function parseP4LlmMode(raw: string | undefined): P4LlmMode {
   throw new Error('P4_LLM_MODE must be "stub" or "nightly" (the value is not printed).');
 }
 
+/** The provider behind p4-nightly. Gemma is the default; DeepSeek is opt-in (v0.6.11). */
+export type P4NightlyProvider = "gemma" | "deepseek";
+
+/**
+ * Blank or unset means gemma. Anything other than gemma or deepseek throws, and the value is never printed. Same shape as
+ * parseP4LlmMode. It only picks which upstream p4-nightly uses; there is no fallback between providers (D14).
+ */
+export function parseP4NightlyProvider(raw: string | undefined): P4NightlyProvider {
+  const value = (raw ?? "").trim();
+  if (value === "" || value === "gemma") {
+    return "gemma";
+  }
+  if (value === "deepseek") {
+    return "deepseek";
+  }
+  throw new Error('P4_NIGHTLY_PROVIDER must be "gemma" or "deepseek" (the value is not printed).');
+}
+
 /** Per-run master key, "sk-" prefixed (accepted by the B1 spike). Never logged. */
 export function generateLiteLlmMasterKey(randomBytes: (n: number) => Buffer = crypto.randomBytes): string {
   return `sk-p4-${randomBytes(24).toString("base64url")}`;
@@ -66,7 +84,42 @@ export function parseStubApiBase(raw: string | undefined): string | undefined {
  * server) and the proxy forwards the client's `x-` headers, so X-P4-Fixture reaches the stub. The upstream key is a fixed
  * placeholder, not a secret. With it unset, nothing changes: p4-stub answers from mock_response.
  */
-export function liteLlmConfigYaml(opts: { stubApiBase?: string } = {}): string {
+/**
+ * The p4-nightly entry for each provider. Only the chosen provider is written; there is no fallback (D14).
+ *
+ * deepseek (checked 2026-11-21):
+ * - Model id `deepseek-flash`, from https://api-docs.deepseek.com/ ("Use `deepseek-flash` as the model name"; the
+ *   Models & Pricing table lists DeepSeek-V4.1-Flash-1017 for it). The LiteLLM model is `deepseek/deepseek-flash`.
+ * - LiteLLM v1.110.0 supports the `deepseek/` prefix: https://docs.litellm.ai/docs/providers/deepseek ("set `deepseek/`
+ *   as a prefix"). The pinned image's bundled cost map lists `deepseek/deepseek-flash` with provider `deepseek`, and
+ *   its chat transformation reads DEEPSEEK_API_KEY.
+ * - Rate limits: https://api-docs.deepseek.com/quick_start/rate_limit publishes only a concurrency limit (2500 for
+ *   deepseek-flash, HTTP 429 when exceeded). It publishes no RPM or TPM figure, so rpm and tpm are NOT set here.
+ * - num_retries 3 is kept as for gemma. The LiteLLM reliability page shows num_retries under litellm_settings and
+ *   router_settings, not as a litellm_params key; this placement is UNVERIFIED on v1.110.0, as it is for gemma.
+ */
+function nightlyParams(provider: P4NightlyProvider): string[] {
+  if (provider === "deepseek") {
+    return ["      model: deepseek/deepseek-flash", "      api_key: os.environ/DEEPSEEK_API_KEY", "      num_retries: 3"];
+  }
+  // Free-tier limits for the Gemma model, checked 2026-11-18 against the Google AI Studio rate-limits page
+  // (https://aistudio.google.com/docs/rate-limits). That page lists no Gemma free-tier figures; its only free-tier
+  // figures are for Gemini (RPM 200, TPM 50,000, RPD 10,000), which do not apply to this model.
+  // rpm 30 is the owner's setting and is not verified on the page.
+  // tpm 16000 is UNVERIFIED: taken from the suite plan.
+  // num_retries: LiteLLM retries retriable errors, rate-limit (HTTP 429) errors included.
+  return [
+    "      model: gemini/gemma-4-31b-it",
+    "      api_key: os.environ/GEMINI_API_KEY",
+    "      rpm: 30",
+    "      tpm: 16000",
+    "      num_retries: 3",
+  ];
+}
+
+export function liteLlmConfigYaml(
+  opts: { stubApiBase?: string; nightlyProvider?: P4NightlyProvider } = {},
+): string {
   const stubParams =
     opts.stubApiBase === undefined
       ? ['      mock_response: "stub-ok"']
@@ -77,19 +130,9 @@ export function liteLlmConfigYaml(opts: { stubApiBase?: string } = {}): string {
     "    litellm_params:",
     "      model: openai/stub-upstream-model",
     ...stubParams,
-    // Free-tier limits for the Gemma model, checked 2026-11-18 against the Google AI Studio rate-limits page
-    // (https://aistudio.google.com/docs/rate-limits). That page lists no Gemma free-tier figures; its only free-tier
-    // figures are for Gemini (RPM 200, TPM 50,000, RPD 10,000), which do not apply to this model.
-    // rpm 30 is the owner's setting and is not verified on the page.
-    // tpm 16000 is UNVERIFIED: taken from the suite plan.
-    // num_retries: LiteLLM retries retriable errors, rate-limit (HTTP 429) errors included.
     `  - model_name: ${LITELLM_NIGHTLY_ALIAS}`,
     "    litellm_params:",
-    "      model: gemini/gemma-4-31b-it",
-    "      api_key: os.environ/GEMINI_API_KEY",
-    "      rpm: 30",
-    "      tpm: 16000",
-    "      num_retries: 3",
+    ...nightlyParams(opts.nightlyProvider ?? "gemma"),
     "general_settings:",
     "  master_key: os.environ/LITELLM_MASTER_KEY",
     ...(opts.stubApiBase === undefined ? [] : ["  forward_client_headers_to_llm_api: true"]),
@@ -98,8 +141,8 @@ export function liteLlmConfigYaml(opts: { stubApiBase?: string } = {}): string {
 }
 
 /**
- * The environment for `docker compose`. GEMINI_API_KEY is passed only in nightly mode. In stub mode it is an empty
- * string, which overrides any key in the caller's shell (D14).
+ * The environment for `docker compose`. GEMINI_API_KEY and DEEPSEEK_API_KEY are passed only in nightly mode. In stub mode
+ * they are empty strings, which override any key in the caller's shell (D14). The keys are never printed or logged.
  */
 export function liteLlmComposeEnv(
   base: NodeJS.ProcessEnv,
@@ -110,6 +153,7 @@ export function liteLlmComposeEnv(
     LITELLM_MASTER_KEY: opts.masterKey,
     LITELLM_CONFIG_FILE: opts.configFile,
     GEMINI_API_KEY: opts.mode === "nightly" ? (base.GEMINI_API_KEY ?? "") : "",
+    DEEPSEEK_API_KEY: opts.mode === "nightly" ? (base.DEEPSEEK_API_KEY ?? "") : "",
   };
 }
 

@@ -6,7 +6,7 @@ import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-e
 import { assertMedusaSecondBaseUrl } from "./adapters/medusa-env.js";
 import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
 import { HARNESS_ROOT } from "./paths.js";
-import { parseP4LlmMode, parseStubApiBase } from "./adapters/litellm-env.js";
+import { parseP4LlmMode, parseP4NightlyProvider, parseStubApiBase, type P4NightlyProvider } from "./adapters/litellm-env.js";
 import {
   parseOpenClawChannelMockFlag,
   parseOpenClawLoopDetectionFlag,
@@ -163,6 +163,8 @@ const envSchema = z.object({
   P4_LLM_MODE: z.string().trim().default("stub"),
   // Optional. When set, p4-stub routes to this OpenAI-compatible stub instead of mock_response. Blank means unset.
   P4_STUB_API_BASE: z.string().trim().default(""),
+  // Optional. Which provider p4-nightly uses: gemma (default, blank) or deepseek. Read only in nightly mode.
+  P4_NIGHTLY_PROVIDER: z.string().trim().default(""),
   // Optional. Comma-separated LiteLLM aliases LibreChat lists. Blank means the default (p4-stub, plus p4-nightly in nightly mode).
   LIBRECHAT_MODELS: z.string().trim().default(""),
   LIBRECHAT_BASE_URL: z.string().trim().pipe(z.url()).default("http://127.0.0.1:3080"),
@@ -277,6 +279,8 @@ export interface LiteLlmConfig extends ProductConfig {
   mode: "stub" | "nightly";
   /** Validated P4_STUB_API_BASE. undefined keeps the p4-stub mock_response. */
   stubApiBase: string | undefined;
+  /** Validated P4_NIGHTLY_PROVIDER. Blank is gemma. Only p4-nightly uses it; there is no fallback (D14). */
+  nightlyProvider: P4NightlyProvider;
 }
 
 /** LibreChat chat host. mcpProducts are Part A product ids whose MCP credentials go into its env (review answer 0.1). */
@@ -473,6 +477,7 @@ function buildLiteLlmConfig(parsed: ParsedEnv): LiteLlmConfig {
     dbUrl: "none://litellm", // sentinel: LiteLLM has no database in B1 (VERIFIED: it served requests with no DATABASE_URL)
     mode: parseP4LlmMode(parsed.P4_LLM_MODE),
     stubApiBase: parseStubApiBase(parsed.P4_STUB_API_BASE),
+    nightlyProvider: parseP4NightlyProvider(parsed.P4_NIGHTLY_PROVIDER),
   };
 }
 
