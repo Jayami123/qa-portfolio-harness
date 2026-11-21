@@ -54,6 +54,9 @@ on:
       - "docker/twenty*.yml"
       - "scripts/p4-*"
       - "scripts/penpot-plugin-tabs.mjs"
+      - "src/adapters/penpot-plugin*"
+      - "scripts/live/penpot-plugin.mjs"
+      - "scripts/live/approval-stub.mjs"
       - "scripts/live/mail.mjs"
       - "scripts/lib.mjs"
       - "docs/pins/p4.md"
@@ -297,9 +300,26 @@ jobs:
           mkdir -p evidence
           node scripts/live/mail.mjs | tee evidence/h1-live-check.txt
 
-      # H6: the two tabs were opened by `up -- penpot` (P4_PENPOT_PLUGIN=1). This step prints the result to the step log.
-      - name: "Live H6 check (second_identity only): the MCP answers through each open tab with its own profile's file"
+      # H6 through LibreChat (second_identity only). LibreChat gets penpot alone. The owner's token is read from the tab host
+      # before LibreChat starts, so a missing token stops this step. The stub answers the proof turn for LiteLLM (no real model).
+      - name: "H6 through LibreChat stack up (second_identity only): approval stub, litellm, librechat for penpot"
         if: inputs.second_identity
+        env:
+          LIBRECHAT_MCP_PRODUCTS: penpot
+          P4_STUB_API_BASE: http://host.docker.internal:9099/v1
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          APPROVAL_STUB_PORT=9099 nohup node scripts/live/approval-stub.mjs > evidence/approval-stub-h6.log 2>&1 &
+          npm run up -- litellm
+          npm run up -- librechat
+
+      # H6: the two tabs were opened by `up -- penpot` (P4_PENPOT_PLUGIN=1). The check then calls the MCP directly per tab, and
+      # through LibreChat (tools/list and one read-only execute_code). It prints the result to the step log.
+      - name: "Live H6 check (second_identity only): each open tab answers with its own file, and LibreChat reaches the owner's plugin"
+        if: inputs.second_identity
+        env:
+          LIBRECHAT_MCP_PRODUCTS: penpot
         run: |
           set -euo pipefail
           node scripts/live/penpot-plugin.mjs
@@ -307,6 +327,9 @@ jobs:
       - name: "H2 stack down (second_identity only)"
         if: always() && inputs.second_identity
         run: |
+          npm run down -- librechat || true
+          npm run down -- litellm || true
+          pkill -f scripts/live/approval-stub.mjs || true
           for product in mattermost penpot twenty outline nextcloud; do
             npm run down -- "$product" || true
           done
