@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [0.6.11] - 2026-11-21
+
+DeepSeek as a provider for the `p4-nightly` alias. Opt-in: `P4_NIGHTLY_PROVIDER=deepseek` (exact value). Blank or `gemma` keeps the Gemma provider, and the written `litellm-config.yaml` is unchanged from 0.6.10 (unit tested). Anything else in `P4_NIGHTLY_PROVIDER` throws without echoing the value.
+
+- `p4-nightly` uses `deepseek/deepseek-flash` with `DEEPSEEK_API_KEY` read from the environment, and `num_retries: 3`. It has no `rpm` or `tpm`: DeepSeek's rate-limit page publishes only a concurrency limit, not RPM or TPM. Sources and the check date are in the comment in `src/adapters/litellm-env.ts`.
+- Still two aliases (`p4-stub`, `p4-nightly`) and no fallback between providers (D14). Only the chosen provider is written.
+- `DEEPSEEK_API_KEY` is passed to the LiteLLM container only in nightly mode, the same as `GEMINI_API_KEY`; in stub mode it is an empty string. The key is never printed or logged. LibreChat's env file refuses any `DEEPSEEK_` name, as it does `GEMINI_`.
+- Tests: provider parsing, the YAML for both providers, the key blank in stub mode for both, the compose file, the config loader, and the LibreChat refusal.
+- Pin: `docs/pins/p4.md` records the DeepSeek model id and the LiteLLM v1.110.0 check (the image's bundled cost map lists `deepseek/deepseek-flash`).
+- Version 0.6.11.
+
 ## [0.6.10] - 2026-11-20
 
 LibreChat OAuth sign-in for MCP servers (H4). Plan: `docs/plans/2026-11-19-librechat-l3-primitives.md`, session 8. Opt-in and off by default: `LIBRECHAT_MCP_OAUTH=1` (exact value). Unset, the written `librechat.yaml` and env file are byte-identical to 0.6.8 (unit tested).

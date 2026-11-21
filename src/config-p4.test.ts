@@ -101,7 +101,7 @@ describe("P4 config and the fork split (ADR 0006, D1 and D2)", () => {
 });
 
 describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () => {
-  const AGENT_KEYS = ["P4_LLM_MODE", "LITELLM_BASE_URL", "LIBRECHAT_BASE_URL", "LIBRECHAT_MCP_PRODUCTS", "OPENCLAW_BASE_URL", "P4_STUB_API_BASE", "LIBRECHAT_MODELS", "OPENCLAW_RESPONSES_API", "OPENCLAW_CHANNEL_MOCK", "OPENCLAW_LOOP_DETECTION", "OPENCLAW_WEB_FETCH_ALLOWED_HOSTS", "OPENCLAW_WEB_FETCH_PRIVATE_NETWORK", "OPENCLAW_NIGHTLY_MODEL", "PRODUCTS_ROOT"];
+  const AGENT_KEYS = ["P4_LLM_MODE", "P4_NIGHTLY_PROVIDER", "LITELLM_BASE_URL", "LIBRECHAT_BASE_URL", "LIBRECHAT_MCP_PRODUCTS", "OPENCLAW_BASE_URL", "P4_STUB_API_BASE", "LIBRECHAT_MODELS", "OPENCLAW_RESPONSES_API", "OPENCLAW_CHANNEL_MOCK", "OPENCLAW_LOOP_DETECTION", "OPENCLAW_WEB_FETCH_ALLOWED_HOSTS", "OPENCLAW_WEB_FETCH_PRIVATE_NETWORK", "OPENCLAW_NIGHTLY_MODEL", "PRODUCTS_ROOT"];
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -214,6 +214,18 @@ describe("agent hosts config (ADR 0007, D11; review answers 0.1 and 0.9)", () =>
     assert.throws(() => loadProductConfig("openclaw"), /OPENCLAW_NIGHTLY_MODEL_NEEDS_NIGHTLY/);
     process.env.P4_LLM_MODE = "nightly";
     assert.equal(loadProductConfig("openclaw").nightlyModel, true);
+  });
+
+  it("P4_NIGHTLY_PROVIDER: blank is gemma, deepseek is passed through, anything else throws without echoing", () => {
+    assert.equal(loadProductConfig("litellm").nightlyProvider, "gemma");
+    process.env.P4_NIGHTLY_PROVIDER = "deepseek";
+    assert.equal(loadProductConfig("litellm").nightlyProvider, "deepseek");
+    process.env.P4_NIGHTLY_PROVIDER = "ECHO-ME-NOT";
+    assert.throws(() => loadProductConfig("litellm"), (err: Error) => {
+      assert.match(err.message, /P4_NIGHTLY_PROVIDER/);
+      assert.doesNotMatch(err.message, /ECHO-ME-NOT/);
+      return true;
+    });
   });
 
   it("keeps the agent hosts out of the fork-product cache", () => {
