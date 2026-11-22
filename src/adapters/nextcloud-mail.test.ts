@@ -29,6 +29,7 @@ describe("mailAccountCreateArgs", () => {
     const args = mailAccountCreateArgs({ uid: "qa-owner", name: "QA owner", email: "qa-owner@p4.test", login: "qa-owner", password: "pw-1" });
     assert.deepEqual(args, [
       "mail:account:create-imap",
+      "--",
       "qa-owner",
       "QA owner",
       "qa-owner@p4.test",
@@ -48,8 +49,8 @@ describe("mailAccountCreateArgs", () => {
 
   it("uses the login name, not the address, for IMAP and SMTP", () => {
     const args = mailAccountCreateArgs({ uid: "qa-user-b", name: "QA user B", email: "qa-user-b@p4.test", login: "qa-user-b", password: "pw" });
-    assert.equal(args[7], "qa-user-b");
-    assert.equal(args[12], "qa-user-b");
+    assert.equal(args[8], "qa-user-b");
+    assert.equal(args[13], "qa-user-b");
   });
 });
 
