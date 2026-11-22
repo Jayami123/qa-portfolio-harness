@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### v0.6.12
+## [0.6.12] - 2026-11-22
 
 LibreChat calls Penpot with the owner's MCP token (H6 for LibreChat). Opt-in: `P4_PENPOT_PLUGIN=1` (exact value, with `P4_SECOND_IDENTITY=1`, as before). Unset, the written `librechat.yaml`, the env file and the compose file list are byte-identical to 0.6.11 (unit tested).
 
