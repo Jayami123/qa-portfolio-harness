@@ -26,7 +26,10 @@ describe("penpot-seed", () => {
     assert.equal(argv[0], "python3");
     assert.ok(argv.includes("--skip-tutorial"));
     assert.ok(argv.includes("--skip-walkthrough"));
-    assert.equal(argv[argv.indexOf("-p") + 1], "pw");
+    assert.ok(argv.includes("--password=pw"));
+    assert.ok(argv.includes("--email=qa-owner@p4.test"));
+    assert.ok(argv.includes("--fullname=QA Owner"));
+    assert.ok(!argv.includes("-p") && !argv.includes("-e") && !argv.includes("-n"));
   });
 
   it("reads the profile email and returns null when absent", () => {

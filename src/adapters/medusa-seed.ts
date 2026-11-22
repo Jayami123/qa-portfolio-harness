@@ -69,6 +69,15 @@ function listItems<T extends JsonRecord>(
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
+/**
+ * Argv for `medusa user`. The CLI parses with yargs (@medusajs/cli 2.21.2, dist/create-cli.js, the `user` command, options
+ * e/email and p/password typed string). yargs reads a separate "-p" value that starts with "-" as a flag, so the password
+ * came out as "" with no error. The attached "--password=" form keeps the value whole.
+ */
+export function medusaUserCreateArgs(email: string, password: string): string[] {
+  return ["medusa", "user", `--email=${email}`, `--password=${password}`];
+}
+
 export async function ensureMedusaAdminUser(
   backendDir: string,
   email: string,
@@ -76,7 +85,7 @@ export async function ensureMedusaAdminUser(
   env: Record<string, string>,
 ): Promise<void> {
   const command = resolvePnpm();
-  const args = ["medusa", "user", "-e", email, "-p", password];
+  const args = medusaUserCreateArgs(email, password);
   try {
     const result = await runCapture(command, args, {
       cwd: backendDir,

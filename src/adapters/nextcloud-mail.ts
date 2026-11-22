@@ -26,8 +26,11 @@ export function mailAccountCreateArgs(opts: {
   login: string;
   password: string;
 }): string[] {
+  // "--" ends the options. Symfony Console (occ's parser, 3rdparty/symfony/console/Input/ArgvInput.php lines 85-86) then
+  // reads every later token as a positional. Without it, a password that starts with "-" is parsed as options.
   return [
     "mail:account:create-imap",
+    "--",
     opts.uid,
     opts.name,
     opts.email,
