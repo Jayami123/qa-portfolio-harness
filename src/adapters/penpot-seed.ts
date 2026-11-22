@@ -21,18 +21,20 @@ export function authTokenFromSetCookie(setCookies: string[]): string {
   throw new Error("PENPOT_AUTH_COOKIE_MISSING: login returned no auth-token cookie (headers not printed)");
 }
 
-/** Argv for the owner-creation CLI inside the backend container. The password is redacted by the caller. */
+/**
+ * Argv for the profile-creation CLI inside the backend container. The password is redacted by the caller.
+ * Each value is attached to its long option with "=". argparse reads a separate value that starts with "-" as an option,
+ * so a generated password such as "-abc" failed with "argument -p/--password: expected one argument". The attached form
+ * is always one argv item. The long names are in the pinned Penpot 2.19.2 manage.py (parser.add_argument at lines 177-179).
+ */
 export function createProfileArgs(email: string, fullname: string, password: string): string[] {
   return [
     "python3",
     "manage.py",
     "create-profile",
-    "-e",
-    email,
-    "-n",
-    fullname,
-    "-p",
-    password,
+    `--email=${email}`,
+    `--fullname=${fullname}`,
+    `--password=${password}`,
     "--skip-tutorial",
     "--skip-walkthrough",
   ];
