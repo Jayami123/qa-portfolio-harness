@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## [0.6.13] - 2026-11-22
+
+Generated values that start with "-" no longer break CLI calls. The `l3 penpot flow` job on main run 44985116035 failed in the second-profile seed: `manage.py: error: argument -p/--password: expected one argument`. A derived password starts with "-" about 1 time in 64, so the failure depended on the random secret.
+
+- Penpot `create-profile`: email, fullname and password are attached as `--email=`, `--fullname=` and `--password=`. The long names are at `manage.py` lines 177-179 of `penpotapp/backend:2.19.2`. argparse read a separate `-p` value that starts with `-` as an option.
+- Nextcloud mail: `occ mail:account:create-imap` takes `--` before its positional values, so an IMAP or SMTP password that starts with `-` is read as a value. Symfony `ArgvInput.php` lines 85-86 end option parsing at `--`.
+- Medusa admin user: `medusa user` is now `--email=` and `--password=`. The CLI parses with yargs, and a separate `-p` value that starts with `-` was read as a flag, so the password came out empty with no error.
+- Checked and unchanged: Mattermost `mmctl` (the separate `--password` value parsed in the pinned image), LibreChat `create-user` (its own loop; a base64url password cannot contain `=`), Outline (the key is generated inside the container), Twenty (GraphQL and `docker` queries only), Nextcloud app passwords (HTTP), Keycloak and Documenso OIDC (no secret in argv).
+- `derivedSecondPassword` is unchanged. A kept volume gets the same password back (a golden value in the tests).
+- Passwords stay redacted. Each builder's call passes its password to `redact`, and the logged command line is redacted by value.
+- Tests: `src/adapters/cli-generated-values.test.ts`, plus updated expectations in the Penpot and Nextcloud mail tests.
+
 ## [0.6.12] - 2026-11-22
 
 LibreChat calls Penpot with the owner's MCP token (H6 for LibreChat). Opt-in: `P4_PENPOT_PLUGIN=1` (exact value, with `P4_SECOND_IDENTITY=1`, as before). Unset, the written `librechat.yaml`, the env file and the compose file list are byte-identical to 0.6.11 (unit tested).
