@@ -54,6 +54,29 @@ export function parsePluginState(text: string, role: "owner" | "second"): Penpot
   return { role, fileName: parsed.fileName, mcpToken: parsed.mcpToken };
 }
 
+export const PENPOT_OWNER_TOKEN_MISSING = "LIBRECHAT_PENPOT_TOKEN_MISSING";
+
+/**
+ * H6: the owner's token for LibreChat. The tab host writes the state file and then the ready marker, so both must exist
+ * before LibreChat starts. Fails closed with a harness: message. Neither the file nor the token is ever echoed.
+ */
+export function ownerTokenForLibreChat(ready: boolean, hostRunning: boolean, stateText: string | undefined): string {
+  if (!ready) {
+    throw new Error(`harness: ${PENPOT_OWNER_TOKEN_MISSING}: the Penpot tabs are not ready (no ${PENPOT_PLUGIN_READY}). Run npm run up -- penpot with P4_PENPOT_PLUGIN=1 first.`);
+  }
+  if (!hostRunning) {
+    throw new Error(`harness: ${PENPOT_OWNER_TOKEN_MISSING}: the Penpot tab host is not running, so any token on disk is stale. Run npm run up -- penpot with P4_PENPOT_PLUGIN=1 again.`);
+  }
+  if (stateText === undefined) {
+    throw new Error(`harness: ${PENPOT_OWNER_TOKEN_MISSING}: the owner's Penpot tab state is missing. Run npm run up -- penpot with P4_PENPOT_PLUGIN=1 first.`);
+  }
+  try {
+    return parsePluginState(stateText, "owner").mcpToken;
+  } catch {
+    throw new Error(`harness: ${PENPOT_OWNER_TOKEN_MISSING}: the owner's Penpot tab state is unreadable (content not printed). Run npm run up -- penpot again.`);
+  }
+}
+
 /** The MCP endpoint with the tab's user token, as the plugin itself names it in ?userToken=. */
 export function withUserToken(mcpUrl: string, token: string): string {
   const url = new URL(mcpUrl);

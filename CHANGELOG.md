@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.6.12] - 2026-11-22
+
+LibreChat calls Penpot with the owner's MCP token (H6 for LibreChat). Opt-in: `P4_PENPOT_PLUGIN=1` (exact value, with `P4_SECOND_IDENTITY=1`, as before). Unset, the written `librechat.yaml`, the env file and the compose file list are byte-identical to 0.6.11 (unit tested).
+
+- Before this, Penpot in multi-user mode refused LibreChat's calls: its entry had no `?userToken=`, so LibreChat never reached the owner's plugin. The entry now carries `?userToken=${P4_PENPOT_MCP_USER_TOKEN}`. The yaml holds only that placeholder. The token value is in the LibreChat env file (mode 0600), never in the yaml, the logs or the diagnostics.
+- Start order: LibreChat reads the owner's token from the Penpot tab host before it writes any file or starts. A missing token (tabs not ready, state file missing, or unreadable) stops the start with a `harness:` error (`LIBRECHAT_PENPOT_TOKEN_MISSING`). Nothing retries and nothing waits to hide it. Run `npm run up -- penpot` before `npm run up -- librechat`.
+- Per-user binding was not used. LibreChat can bind per-user values (`customUserVars`, `{{LIBRECHAT_USER_*}}`), but this harness has one LibreChat user, the owner (registration off), so the owner's token is the whole binding. **Limit: every LibreChat chat calls Penpot as the owner. The second Penpot profile is not reachable through LibreChat.** The second profile is still checked directly (H6, `scripts/live/penpot-plugin.mjs`).
+- Redaction: the probe passes the URL template into the container and expands the placeholder there, so no token value is in the `docker exec` argument list. The diagnostics redact any `userToken=` query value, and the MCP recorder (H9) keeps the query so the token is forwarded, while its log redacts it.
+- Fix in H9: `recordedServers` dropped the URL query, which would have removed the token when recording was on. The query is now kept.
+- Live check (`scripts/live/penpot-plugin.mjs`, H6 step, second_identity only): after the two direct probes, LibreChat lists Penpot's tools (`GET /api/mcp/tools`), and one read-only `execute_code` call runs through a chat turn that the approval stub drives (`[penpot-proof]`). The tool result must name the owner's file and must not name the second profile's file.
+- LibreChat source, pinned v0.8.9 (read from the image `ghcr.io/librechat-ai/librechat:v0.8.9@sha256:4a39…`): `${VAR}` expansion inside a string (`packages/data-provider/src/utils.ts:39-78`, the embedded regex at line 55); the `url` field is expanded by `processMCPEnv` (`packages/api/src/utils/env.ts:593-604`); `SENSITIVE_ENV_VARS` (`packages/data-provider/src/utils.ts:11-22`) does not include the new name; per-user values are stored by `POST /api/user/plugins` (`api/server/routes/user.js:44`) and substituted by `processSingleValue` (`packages/api/src/utils/env.ts:407-410`), which this release does not use.
+- Tests: the yaml output with and without the token URL, the env wiring and the shape refusal, the fail-closed reader, the redaction in the diagnostics and the recorder, the probe argument list, the expansion, and the recorder routes.
+
 ## [0.6.11] - 2026-11-21
 
 DeepSeek as a provider for the `p4-nightly` alias. Opt-in: `P4_NIGHTLY_PROVIDER=deepseek` (exact value). Blank or `gemma` keeps the Gemma provider, and the written `litellm-config.yaml` is unchanged from 0.6.10 (unit tested). Anything else in `P4_NIGHTLY_PROVIDER` throws without echoing the value.

@@ -5,7 +5,8 @@ import type { LibreChatConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
 import { ensureP4Network } from "../internal/p4-network.js";
 import { runCapture } from "../internal/run.js";
-import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
+import { HARNESS_DOCKER_DIR, HARNESS_ROOT, p4ProductRoot } from "../paths.js";
+import { ownerTokenForLibreChat, PENPOT_PLUGIN_READY, pluginStateFileName } from "./penpot-plugin.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
@@ -42,6 +43,16 @@ import { mcpWaitNames, withRegisteredClients } from "./librechat-oauth.js";
 import { registerOauthClients } from "./librechat-oauth-register.js";
 
 const POLL_MS = 2000;
+
+/** True while a process with this pid exists. Signal 0 checks without sending anything. */
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * LibreChat chat host (ADR 0007). It boots against LiteLLM by alias and attaches the Part A MCP servers by alias.
@@ -120,14 +131,38 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     };
   }
 
+  /** H6: LibreChat calls Penpot with the owner's token only when the Penpot plugin is on and Penpot is one of its servers. */
+  private penpotPluginWired(): boolean {
+    return this.cfg.penpotPlugin && this.cfg.mcpProducts.includes("penpot");
+  }
+
+  /**
+   * H6: the owner's Penpot token, read from the Penpot tab host's state. Penpot writes it only after the owner's tab has
+   * connected, so this runs before LibreChat is written or started. A missing token stops the start (fail closed); nothing
+   * is retried and nothing waits here.
+   */
+  private penpotOwnerToken(): string {
+    const dir = p4ProductRoot("penpot");
+    const ready = fs.existsSync(path.join(dir, PENPOT_PLUGIN_READY));
+    // The tab host's pid (written by the Penpot adapter). A host killed without its shutdown leaves files behind, so the pid
+    // must also still exist. Signal 0 only checks that a process exists.
+    const pidFile = path.join(dir, "plugin-tabs.pid");
+    const pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, "utf8")) : Number.NaN;
+    const hostRunning = Number.isInteger(pid) && pid > 0 && processExists(pid);
+    const stateFile = path.join(dir, pluginStateFileName("owner"));
+    return ownerTokenForLibreChat(ready, hostRunning, fs.existsSync(stateFile) ? fs.readFileSync(stateFile, "utf8") : undefined);
+  }
+
   async up(): Promise<void> {
     // The compose file declares qa-harness-p4 as external, so it must exist before any compose call.
     await ensureP4Network();
     const liteLlm = readLlmRunState("litellm", llmRunStateFile("litellm")); // throws P4_RUN_STATE_MISSING if LiteLLM is down
+    // H6: read first, so a missing Penpot token stops the start before any LibreChat file or container is written.
+    const penpotOwner = this.penpotPluginWired() ? { ownerToken: this.penpotOwnerToken() } : null;
     const secrets = this.secrets(true);
     // H4: register the public OAuth clients first (the product must be up), then write their ids into the config.
     const oauth = this.cfg.mcpOauth === null ? null : withRegisteredClients(this.cfg.mcpOauth, await registerOauthClients(this.cfg.mcpOauth));
-    const mcp = librechatMcpEnv(this.cfg.mcpProducts, undefined, undefined, oauth);
+    const mcp = librechatMcpEnv(this.cfg.mcpProducts, undefined, undefined, oauth, penpotOwner);
 
     const recording = this.cfg.mcpRecording;
     fs.writeFileSync(this.configFile(), librechatYaml({ models: this.cfg.models, servers: recording ? recordedServers(mcp.servers) : mcp.servers, toolApproval: this.cfg.toolApproval }), {
@@ -157,6 +192,9 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
     console.log(
       `LibreChat is up: ${this.cfg.baseUrl}. MCP servers: ${mcp.servers.map((s) => s.name).join(", ")}. The owner password and the MCP values are in ${this.secretsFile()} and ${this.envFile()} (mode 0600) and are not printed.`,
     );
+    if (penpotOwner !== null) {
+      console.log("Penpot is called with the owner's MCP token (H6). Every LibreChat chat acts as the owner; the second Penpot profile is not reachable through LibreChat. The token is in the env file and is not printed.");
+    }
     if (recording) {
       console.log(`MCP recording is on (LIBRECHAT_MCP_RECORDING=1). Each MCP call is logged, redacted, to the container log: docker logs qa-harness-librechat-mcp-recorder-1 (service ${MCP_RECORDER_ALIAS}).`);
     }
@@ -236,7 +274,7 @@ export class LibreChatAdapter extends BaseAdapter<LibreChatConfig> {
         readStatus: () => get("/api/mcp/connection/status"),
         onFirstNotConnected: async (states) => {
           console.log(`LibreChat MCP: not all servers are connected yet (${Object.entries(states).map(([n, s]) => `${n}=${s}`).join(", ")}). Running the in-container probe now.`);
-          await streamMcpProbe(names, this.redactionValues());
+          await streamMcpProbe(names, this.redactionValues(), console.log, { penpotPlugin: this.penpotPluginWired() });
         },
         onTimeout: (states) => this.diagnoseMcp(names, states),
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

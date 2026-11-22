@@ -5,7 +5,7 @@ import { z } from "zod";
 import { documensoListen, parseDocumensoPublicUrl } from "./adapters/documenso-env.js";
 import { assertMedusaSecondBaseUrl } from "./adapters/medusa-env.js";
 import { TWENTY_DEFAULT_ADMIN_EMAIL, TWENTY_DEV_SEED_PASSWORD } from "./adapters/twenty-env.js";
-import { HARNESS_ROOT } from "./paths.js";
+import { HARNESS_ROOT, p4ProductRoot } from "./paths.js";
 import { parseP4LlmMode, parseP4NightlyProvider, parseStubApiBase, type P4NightlyProvider } from "./adapters/litellm-env.js";
 import {
   parseOpenClawChannelMockFlag,
@@ -295,6 +295,8 @@ export interface LibreChatConfig extends ProductConfig {
   mcpOauth: LibreChatMcpOauth | null;
   /** H9: true routes each MCP server through the recording proxy (LIBRECHAT_MCP_RECORDING=1). Off by default. */
   mcpRecording: boolean;
+  /** H6: true only when P4_PENPOT_PLUGIN is exactly "1". Penpot is then called with the owner's token in its URL. */
+  penpotPlugin: boolean;
 }
 
 export interface OpenClawConfig extends ProductConfig {
@@ -416,11 +418,6 @@ function buildTwentyConfig(parsed: ParsedEnv, productsRoot: string): TwentyConfi
   };
 }
 
-/** D1: every P4 product keeps its state under the harness folder. Nothing here requires that folder to exist. */
-function p4ProductRoot(id: P4ProductId): string {
-  return path.join(HARNESS_ROOT, ".harness", id);
-}
-
 function buildNextcloudConfig(parsed: ParsedEnv): NextcloudConfig {
   return {
     id: "nextcloud",
@@ -498,6 +495,8 @@ function buildLibreChatConfig(parsed: ParsedEnv): LibreChatConfig {
       twentyBrowserBaseUrl: parsed.TWENTY_BASE_URL,
     }),
     mcpRecording: parseMcpRecordingFlag(parsed.LIBRECHAT_MCP_RECORDING),
+    // Exactly "1" only. Any other value is left to the Penpot config, which refuses it (penpotPluginOption).
+    penpotPlugin: parsed.P4_PENPOT_PLUGIN === "1",
   };
 }
 
