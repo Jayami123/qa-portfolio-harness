@@ -474,6 +474,8 @@ node scripts/ready.mjs nextcloud outline penpot mattermost   # app health and a 
 bash scripts/p4-ram-probe.sh nextcloud outline penpot mattermost twenty   # writes evidence/ram-probe.json
 ```
 
+Nextcloud's `NEXTCLOUD_TRUSTED_DOMAINS` (in `docker/nextcloud.compose.yml`) includes `10.0.2.2`, the Android emulator's alias for the host, so an emulator reaches the host-published app at `http://10.0.2.2:8080`. The existing `127.0.0.1`, `localhost` and `app` entries are unchanged. An existing Nextcloud volume keeps the list it was installed with, so `npm run up -- nextcloud` adds any missing entry with `occ` after the app is ready (no volume reset).
+
 | Product | App (127.0.0.1) | MCP (127.0.0.1) | MCP auth | Notes |
 |---|---|---|---|---|
 | Nextcloud | 8080 | 8765 `/mcp` | app password, pass-through (`multi_user_basic`) | The MCP holds no Nextcloud credential. Calendar, Contacts and Mail app installs are unverified (the appstore was unreachable). |
