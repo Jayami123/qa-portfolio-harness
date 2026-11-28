@@ -1,10 +1,11 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { NextcloudConfig } from "../config.js";
 import { composeDown, composeUp, type ComposeOptions } from "../internal/compose.js";
 import { ensureP4Network } from "../internal/p4-network.js";
 import { run } from "../internal/run.js";
-import { HARNESS_DOCKER_DIR } from "../paths.js";
+import { HARNESS_DOCKER_DIR, HARNESS_ROOT } from "../paths.js";
 import type { AuthSession, HealthStatus, SeedResult } from "../types.js";
 import { pollHealth } from "../wait/health.js";
 import { BaseAdapter } from "./base.js";
@@ -31,7 +32,9 @@ import {
   nextcloudComposeFiles,
   generateNextcloudSecret,
   nextcloudSecretsFromText,
+  NEXTCLOUD_TRUSTED_DOMAINS,
   parseNextcloudStatus,
+  trustedDomainWrites,
 } from "./nextcloud-env.js";
 import { mcpReadinessFor } from "./mcp-ready.js";
 import {
@@ -51,6 +54,7 @@ import {
   installMailApp,
   mcpCallFor,
   type MailFlowResult,
+  occ,
   runMailFlow,
   startGreenmail,
   stopGreenmail,
@@ -60,6 +64,31 @@ import {
 /** The Nextcloud app container (compose project qa-harness-nextcloud, service app). */
 const NEXTCLOUD_APP_CONTAINER = "qa-harness-nextcloud-app-1";
 import type { McpReadiness } from "./types.js";
+
+/** occ as www-data, stdout returned (not printed). The list it reads is domain names only, never a secret. */
+function occReadList(args: string[]): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const argv = ["exec", "-u", "www-data", NEXTCLOUD_APP_CONTAINER, "php", "occ", ...args];
+    execFile("docker", argv, { cwd: HARNESS_ROOT, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) {
+        reject(new Error(`occ ${args[0]} failed (output not printed)`));
+        return;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        reject(new Error("occ config:system:get trusted_domains did not print JSON"));
+        return;
+      }
+      if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) {
+        reject(new Error("occ config:system:get trusted_domains did not return a list of strings"));
+        return;
+      }
+      resolve(parsed);
+    });
+  });
+}
 
 /** H1 live check result: counts and flags per identity. No password, token or message body. */
 export interface MailProbe {
@@ -131,6 +160,7 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
     }
     await composeUp(this.composeOpts(false), { wait: true });
     await this.waitHealthy();
+    await this.ensureTrustedDomains();
     await this.seed();
     if (this.cfg.mail) {
       await this.seedMail();
@@ -162,6 +192,24 @@ export class NextcloudAdapter extends BaseAdapter<NextcloudConfig> {
 
   async health(): Promise<HealthStatus> {
     return pollHealth(`${this.cfg.baseUrl}/status.php`, { timeoutMs: 0, isOk: (status) => status === 200 });
+  }
+
+  /**
+   * The image writes NEXTCLOUD_TRUSTED_DOMAINS only when it installs the instance (the install branch of /entrypoint.sh); the
+   * upgrade branch ignores it. So a volume installed before a value was added keeps the old list. This adds each missing
+   * required value with occ, at the next free index, then reads the list back. A fresh install already has every value, so
+   * nothing is written there. The live checks are recorded in the CHANGELOG entry for this change.
+   */
+  private async ensureTrustedDomains(): Promise<void> {
+    const current = await occReadList(["config:system:get", "trusted_domains", "--output=json"]);
+    for (const write of trustedDomainWrites(current)) {
+      await occ(NEXTCLOUD_APP_CONTAINER, ["config:system:set", "trusted_domains", String(write.index), `--value=${write.value}`]);
+    }
+    const after = await occReadList(["config:system:get", "trusted_domains", "--output=json"]);
+    const missing = trustedDomainWrites(after).map((w) => w.value);
+    if (missing.length > 0) {
+      throw new Error(`Nextcloud trusted_domains is still missing ${missing.join(", ")} after occ config:system:set`);
+    }
   }
 
   /** Polls status.php until it reports installed, out of maintenance, with no upgrade pending. */
