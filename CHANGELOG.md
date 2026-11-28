@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.6.14] - 2026-11-28
+
 Nextcloud trusts `10.0.2.2`, so an Android emulator can reach the host-published app at `http://10.0.2.2:8080`. Additive and backwards compatible: `NEXTCLOUD_TRUSTED_DOMAINS` is `127.0.0.1 localhost app 10.0.2.2`, and the first three entries are unchanged, so `127.0.0.1`, `localhost` and in-network `app` access work as before. No new environment variable and no consumer repin.
 
 - `docker/nextcloud.compose.yml`: `10.0.2.2` appended to `NEXTCLOUD_TRUSTED_DOMAINS`, with a comment on the emulator alias.
