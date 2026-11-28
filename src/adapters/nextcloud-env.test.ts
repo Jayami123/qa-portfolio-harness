@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   generateNextcloudSecret,
@@ -6,11 +8,39 @@ import {
   nextcloudComposeFiles,
   nextcloudSecretsFromText,
   parseNextcloudStatus,
+  trustedDomainWrites,
   NEXTCLOUD_IMAGE,
   NEXTCLOUD_MCP_IMAGE,
+  NEXTCLOUD_TRUSTED_DOMAINS,
 } from "./nextcloud-env.js";
+import { HARNESS_ROOT } from "../paths.js";
+
+const nextcloudCompose = fs.readFileSync(path.join(HARNESS_ROOT, "docker", "nextcloud.compose.yml"), "utf8");
 
 describe("nextcloud-env", () => {
+  it("trusts 127.0.0.1, localhost and app as before, plus 10.0.2.2 (the Android emulator's alias for the host)", () => {
+    const line = nextcloudCompose.split("\n").find((l) => /^\s*NEXTCLOUD_TRUSTED_DOMAINS:/.test(l));
+    assert.ok(line, "docker/nextcloud.compose.yml sets NEXTCLOUD_TRUSTED_DOMAINS");
+    const value = /^\s*NEXTCLOUD_TRUSTED_DOMAINS:\s*"([^"]*)"\s*$/.exec(line)?.[1];
+    assert.equal(value, "127.0.0.1 localhost app 10.0.2.2");
+    assert.deepEqual([...NEXTCLOUD_TRUSTED_DOMAINS], ["127.0.0.1", "localhost", "app", "10.0.2.2"]);
+    assert.equal(value, NEXTCLOUD_TRUSTED_DOMAINS.join(" "), "the compose value and the adapter's list match");
+  });
+
+  it("adds only the missing trusted domains, at the next free index (existing volumes), and nothing on a fresh install", () => {
+    // A fresh install: the image already wrote every value, so there is nothing to add.
+    assert.deepEqual(trustedDomainWrites(["localhost", "127.0.0.1", "localhost", "app", "10.0.2.2"]), []);
+    // A volume installed before 10.0.2.2 was added: the image's list is 0..3, so 10.0.2.2 goes to index 4.
+    assert.deepEqual(trustedDomainWrites(["localhost", "127.0.0.1", "localhost", "app"]), [{ index: 4, value: "10.0.2.2" }]);
+    // An empty list gets every required value, indexed from 0.
+    assert.deepEqual(trustedDomainWrites([]), NEXTCLOUD_TRUSTED_DOMAINS.map((value, index) => ({ index, value })));
+    // A custom list still gets the missing required values, and no untrusted value is ever written.
+    assert.deepEqual(trustedDomainWrites(["untrusted.example"], ["127.0.0.1", "10.0.2.2"]), [
+      { index: 1, value: "127.0.0.1" },
+      { index: 2, value: "10.0.2.2" },
+    ]);
+  });
+
   it("pins both images by digest", () => {
     assert.match(NEXTCLOUD_IMAGE, /@sha256:[0-9a-f]{64}$/);
     assert.match(NEXTCLOUD_MCP_IMAGE, /@sha256:[0-9a-f]{64}$/);
