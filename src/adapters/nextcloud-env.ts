@@ -7,6 +7,31 @@ export const NEXTCLOUD_IMAGE =
 export const NEXTCLOUD_MCP_IMAGE =
   "ghcr.io/cbcoutinho/nextcloud-mcp-server:0.213.2@sha256:655c2864b48fd3f0696480ebe19a165ff114a582b30b9cec1d6ab4923586d325";
 
+/**
+ * The Host values Nextcloud accepts. docker/nextcloud.compose.yml sets them as NEXTCLOUD_TRUSTED_DOMAINS (a unit test checks
+ * that the two match). 10.0.2.2 is the Android emulator's alias for the host.
+ */
+export const NEXTCLOUD_TRUSTED_DOMAINS = ["127.0.0.1", "localhost", "app", "10.0.2.2"] as const;
+
+/**
+ * The occ writes that add the required Host values missing from `current` (the list `occ config:system:get trusted_domains`
+ * prints), each at the next free index. Pure: the caller runs them. Empty when every value is already there.
+ */
+export function trustedDomainWrites(
+  current: readonly string[],
+  required: readonly string[] = NEXTCLOUD_TRUSTED_DOMAINS,
+): { index: number; value: string }[] {
+  const writes: { index: number; value: string }[] = [];
+  let next = current.length;
+  for (const value of required) {
+    if (!current.includes(value)) {
+      writes.push({ index: next, value });
+      next += 1;
+    }
+  }
+  return writes;
+}
+
 export const NEXTCLOUD_COMPOSE_PROJECT = "qa-harness-nextcloud";
 export const NEXTCLOUD_OWNER_USERNAME = "qa-owner";
 export const NEXTCLOUD_OWNER_EMAIL = "qa-owner@p4.test";

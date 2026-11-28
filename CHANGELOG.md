@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Nextcloud trusts `10.0.2.2`, so an Android emulator can reach the host-published app at `http://10.0.2.2:8080`. Additive and backwards compatible: `NEXTCLOUD_TRUSTED_DOMAINS` is `127.0.0.1 localhost app 10.0.2.2`, and the first three entries are unchanged, so `127.0.0.1`, `localhost` and in-network `app` access work as before. No new environment variable and no consumer repin.
+
+- `docker/nextcloud.compose.yml`: `10.0.2.2` appended to `NEXTCLOUD_TRUSTED_DOMAINS`, with a comment on the emulator alias.
+- Existing volumes: the image writes `NEXTCLOUD_TRUSTED_DOMAINS` only when it installs the instance (`/entrypoint.sh`, install branch). A volume installed before this change kept its list and rejected `Host: 10.0.2.2:8080` with HTTP 400. `npm run up -- nextcloud` now adds each missing required value with `occ config:system:set trusted_domains` after the app is ready, then reads the list back. Nothing is written on a fresh install. No volume reset is needed.
+- Tests: `src/adapters/nextcloud-env.test.ts` reads the compose file and asserts the exact value (no Docker boot), and covers which `occ` writes are needed.
+- README: the P4 Nextcloud section notes the emulator address and the existing-volume behaviour.
+
 ## [0.6.13] - 2026-11-22
 
 Generated values that start with "-" no longer break CLI calls. The `l3 penpot flow` job on main run 44985116035 failed in the second-profile seed: `manage.py: error: argument -p/--password: expected one argument`. A derived password starts with "-" about 1 time in 64, so the failure depended on the random secret.

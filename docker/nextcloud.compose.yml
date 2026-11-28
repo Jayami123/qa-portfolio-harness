@@ -35,7 +35,8 @@ services:
       POSTGRES_PASSWORD: ${NEXTCLOUD_DB_PASSWORD:?set by the adapter}
       NEXTCLOUD_ADMIN_USER: qa-owner
       NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_OWNER_PASSWORD:?set by the adapter}
-      NEXTCLOUD_TRUSTED_DOMAINS: "127.0.0.1 localhost app"
+      # 10.0.2.2 is the Android emulator's alias for the host, so an emulator reaches the published app at http://10.0.2.2:8080.
+      NEXTCLOUD_TRUSTED_DOMAINS: "127.0.0.1 localhost app 10.0.2.2"
     volumes:
       - nextcloud_harness_data:/var/www/html
 
